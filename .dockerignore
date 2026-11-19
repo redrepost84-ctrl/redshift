@@ -1,0 +1,7 @@
+node_modules
+dist
+publishedbuilds
+server/data
+.git
+.env
+*.local

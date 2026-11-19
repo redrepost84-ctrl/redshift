@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: redshift-server
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8080
+      - key: REDSHIFT_DATA_DIR
+        value: /data
+    disk:
+      name: redshift-data
+      mountPath: /data
+      sizeGB: 5

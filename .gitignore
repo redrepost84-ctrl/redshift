@@ -1,0 +1,10 @@
+node_modules
+dist
+.DS_Store
+*.local
+.env
+.env.*
+!.env.example
+server/data/
+publishedbuilds/
+scripts/cloudflared.exe

@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Redshift Launcher</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    html,
+    body {
+      width: 460px;
+      height: 340px;
+      overflow: hidden;
+      background: #0d0e13;
+      color: #f3f4f6;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif;
+    }
+
+    .launcher-shell {
+      position: relative;
+      width: 460px;
+      height: 340px;
+      background: radial-gradient(circle at 50% 24%, rgba(226, 59, 65, 0.16), transparent 62%),
+        linear-gradient(165deg, #161720 0%, #0d0e13 100%);
+      border: 1px solid rgba(226, 59, 65, 0.36);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 28px 22px;
+      -webkit-app-region: drag;
+      overflow: hidden;
+    }
+
+    .top-bar {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 5;
+    }
+
+    .mode-pill {
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: rgba(226, 59, 65, 0.16);
+      border: 1px solid rgba(226, 59, 65, 0.35);
+      color: #ff9fa3;
+    }
+
+    .close-btn {
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.04);
+      color: #a8aebc;
+      font-size: 13px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      -webkit-app-region: no-drag;
+      transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+    }
+
+    .close-btn:hover {
+      background: rgba(226, 59, 65, 0.9);
+      border-color: transparent;
+      color: #ffffff;
+    }
+
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      z-index: 4;
+    }
+
+    #emblem-canvas {
+      width: 112px;
+      height: 112px;
+      display: block;
+    }
+
+    .brand-wordmark {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #ffffff;
+      text-shadow: 0 0 22px rgba(226, 59, 65, 0.42);
+    }
+
+    .status-block {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 4;
+    }
+
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 12.5px;
+      color: #d2d6e0;
+    }
+
+    .status-text {
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .status-meta {
+      font-size: 11px;
+      font-weight: 600;
+      color: #8d94a6;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .progress-track {
+      position: relative;
+      width: 100%;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #c9262d 0%, #e23b41 55%, #ff6b70 100%);
+      box-shadow: 0 0 12px rgba(226, 59, 65, 0.6);
+      transition: width 160ms ease;
+    }
+
+    .progress-fill--indeterminate {
+      position: absolute;
+      width: 38% !important;
+      animation: rs-slide 1.15s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    }
+
+    @keyframes rs-slide {
+      0% {
+        left: -40%;
+      }
+      100% {
+        left: 105%;
+      }
+    }
+
+    .footer-row {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: #7b8294;
+      margin-top: 2px;
+    }
+
+    .action-row {
+      display: flex;
+      gap: 8px;
+      -webkit-app-region: no-drag;
+    }
+
+    .action-row[hidden] {
+      display: none;
+    }
+
+    .launcher-btn {
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: rgba(255, 255, 255, 0.07);
+      color: #f3f4f6;
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .launcher-btn:hover {
+      background: rgba(255, 255, 255, 0.14);
+    }
+
+    .launcher-btn--primary {
+      background: #e23b41;
+      border-color: transparent;
+      color: #ffffff;
+    }
+
+    .launcher-btn--primary:hover {
+      background: #f14a50;
+    }
+  </style>
+</head>
+<body>
+  <div class="launcher-shell">
+    <div class="top-bar">
+      <span id="mode-pill" class="mode-pill">LAUNCHER</span>
+      <button id="close-btn" class="close-btn" type="button" title="Close Redshift" aria-label="Close">×</button>
+    </div>
+
+    <div class="hero">
+      <canvas id="emblem-canvas" width="224" height="224"></canvas>
+      <div class="brand-wordmark">REDSHIFT</div>
+    </div>
+
+    <div class="status-block">
+      <div class="status-row">
+        <span id="status-text" class="status-text">Checking for updates...</span>
+        <span id="status-meta" class="status-meta"></span>
+      </div>
+      <div class="progress-track">
+        <div id="progress-fill" class="progress-fill progress-fill--indeterminate"></div>
+      </div>
+      <div class="footer-row">
+        <span id="version-label">v0.1.0</span>
+        <div id="action-row" class="action-row" hidden>
+          <button id="retry-btn" class="launcher-btn" type="button">Retry</button>
+          <button id="launch-anyway-btn" class="launcher-btn launcher-btn--primary" type="button">Launch Anyway</button>
+        </div>
+        <span id="hint-label">Desktop Client</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const api = window.redshiftDesktop;
+    const params = new URLSearchParams(window.location.search);
+    const launchMode = params.get('mode') || 'boot';
+
+    const modePill = document.getElementById('mode-pill');
+    const statusText = document.getElementById('status-text');
+    const statusMeta = document.getElementById('status-meta');
+    const progressFill = document.getElementById('progress-fill');
+    const versionLabel = document.getElementById('version-label');
+    const hintLabel = document.getElementById('hint-label');
+    const actionRow = document.getElementById('action-row');
+    const retryBtn = document.getElementById('retry-btn');
+    const launchAnywayBtn = document.getElementById('launch-anyway-btn');
+
+    if (api?.version) {
+      versionLabel.textContent = `v${api.version}`;
+    }
+
+    document.getElementById('close-btn').addEventListener('click', () => {
+      if (api?.closeLauncher) api.closeLauncher();
+      else window.close();
+    });
+
+    function setProgress(percent, text, meta = '') {
+      statusText.textContent = text;
+      statusMeta.textContent = meta;
+      if (percent === null || percent === undefined) {
+        progressFill.classList.add('progress-fill--indeterminate');
+      } else {
+        progressFill.classList.remove('progress-fill--indeterminate');
+        progressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+      }
+    }
+
+    function formatMB(bytes) {
+      if (!bytes || bytes <= 0) return '';
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    function showErrorFallback(message, canLaunchAnyway = true) {
+      setProgress(100, message, '');
+      hintLabel.hidden = true;
+      actionRow.hidden = false;
+      launchAnywayBtn.hidden = !canLaunchAnyway;
+    }
+
+    launchAnywayBtn.addEventListener('click', () => {
+      api?.launcherReady?.();
+    });
+
+    retryBtn.addEventListener('click', () => {
+      actionRow.hidden = true;
+      hintLabel.hidden = false;
+      runFlow();
+    });
+
+    // Crisp HiDPI Redshift animated emblem featuring the official icon
+    const canvas = document.getElementById('emblem-canvas');
+    const ctx = canvas.getContext('2d');
+    const officialIcon = new Image();
+    let officialIconLoaded = false;
+    officialIcon.onload = () => {
+      officialIconLoaded = true;
+    };
+    officialIcon.onerror = () => {
+      if (!officialIcon.src.endsWith('/dist/icon.png')) {
+        officialIcon.src = '../dist/icon.png';
+      }
+    };
+    officialIcon.src = '../public/icon.png';
+    let animT = 0;
+    const sparks = Array.from({ length: 14 }, (_, i) => ({
+      angle: (Math.PI * 2 * i) / 14,
+      dist: 66 + (i % 3) * 14,
+      speed: 0.45 + (i % 4) * 0.16,
+      radius: 1.5 + (i % 3) * 0.8,
+      alpha: 0.35 + (i % 3) * 0.2,
+    }));
+
+    function drawEmblem() {
+      animT += 0.022;
+      ctx.clearRect(0, 0, 224, 224);
+      const cx = 112;
+      const cy = 112;
+
+      // Ambient crimson halo
+      const halo = ctx.createRadialGradient(cx, cy, 12, cx, cy, 98);
+      halo.addColorStop(0, 'rgba(226, 59, 65, 0.32)');
+      halo.addColorStop(0.6, 'rgba(226, 59, 65, 0.08)');
+      halo.addColorStop(1, 'rgba(226, 59, 65, 0)');
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 98, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Orbiting particles
+      for (const s of sparks) {
+        const a = s.angle + animT * s.speed;
+        const px = cx + Math.cos(a) * s.dist;
+        const py = cy + Math.sin(a) * s.dist;
+        ctx.fillStyle = `rgba(255, 110, 116, ${s.alpha})`;
+        ctx.beginPath();
+        ctx.arc(px, py, s.radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Outer dashed orbital ring
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(animT * 0.85);
+      ctx.strokeStyle = 'rgba(226, 59, 65, 0.72)';
+      ctx.lineWidth = 4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(0, 0, 74, -0.4, Math.PI * 1.12);
+      ctx.stroke();
+
+      // Glowing orbital node
+      const nx = Math.cos(Math.PI * 1.12) * 74;
+      const ny = Math.sin(Math.PI * 1.12) * 74;
+      ctx.shadowColor = '#ff5e64';
+      ctx.shadowBlur = 14;
+      ctx.fillStyle = '#ff7d82';
+      ctx.beginPath();
+      ctx.arc(nx, ny, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // Counter-rotating inner ring
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(-animT * 0.55);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(0, 0, 56, 0.4, Math.PI * 1.45);
+      ctx.stroke();
+      ctx.restore();
+
+      // Core official Redshift orb badge
+      ctx.save();
+      const pulse = 1 + Math.sin(animT * 2.2) * 0.024;
+      ctx.translate(cx, cy);
+      ctx.scale(pulse, pulse);
+      ctx.beginPath();
+      ctx.arc(0, 0, 46, 0, Math.PI * 2);
+      ctx.save();
+      ctx.clip();
+      if (officialIconLoaded) {
+        // Crop cleanly into the official crimson Redshift sphere inside the dark frame
+        ctx.drawImage(officialIcon, -53, -53, 106, 106);
+      } else {
+        const coreGrad = ctx.createLinearGradient(0, -46, 0, 46);
+        coreGrad.addColorStop(0, '#ff1212');
+        coreGrad.addColorStop(1, '#920000');
+        ctx.fillStyle = coreGrad;
+        ctx.fillRect(-46, -46, 92, 92);
+      }
+      ctx.restore();
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = 'rgba(255, 92, 98, 0.72)';
+      ctx.stroke();
+      ctx.restore();
+
+      requestAnimationFrame(drawEmblem);
+    }
+    requestAnimationFrame(drawEmblem);
+
+    async function runInstallFlow() {
+      modePill.textContent = 'INSTALLER';
+      hintLabel.textContent = 'First-Time Setup';
+      setProgress(null, 'Preparing Redshift installation...');
+      if (!api?.startFirstTimeInstall) {
+        api?.launcherReady?.();
+        return;
+      }
+
+      const offProg = api.onInstallProgress((data) => {
+        setProgress(data.percent ?? null, data.text || 'Installing Redshift...', data.meta || '');
+      });
+      const offDone = api.onInstallComplete((data) => {
+        offProg();
+        offDone();
+        offErr();
+        setProgress(100, 'Installed! Launching Redshift...', data.version ? `v${data.version}` : '');
+      });
+      const offErr = api.onInstallError((data) => {
+        offProg();
+        offDone();
+        offErr();
+        showErrorFallback(data.message || 'Installation failed', true);
+      });
+
+      api.startFirstTimeInstall();
+    }
+
+    async function runUpdateDownloadFlow(targetVersion) {
+      modePill.textContent = 'UPDATING';
+      hintLabel.textContent = targetVersion ? `Updating to v${targetVersion}` : 'Downloading Update';
+      setProgress(0, 'Connecting to update server...');
+
+      const offProg = api.onUpdateProgress((data) => {
+        const meta =
+          data.totalBytes > 0
+            ? `${formatMB(data.receivedBytes)} / ${formatMB(data.totalBytes)}`
+            : typeof data.percent === 'number'
+              ? `${data.percent}%`
+              : '';
+        setProgress(data.percent ?? null, data.text || 'Downloading update...', meta);
+      });
+      const offDone = api.onUpdateComplete((data) => {
+        offProg();
+        offDone();
+        offErr();
+        setProgress(100, `Updated to v${data.newVersion || ''}! Restarting...`, '100%');
+        setTimeout(() => {
+          if (data.hasFile && api.applyUpdateAndRestart) {
+            api.applyUpdateAndRestart();
+          } else {
+            api.launcherReady();
+          }
+        }, 650);
+      });
+      const offErr = api.onUpdateError((data) => {
+        offProg();
+        offDone();
+        offErr();
+        showErrorFallback(data.message || 'Update failed', true);
+      });
+
+      api.startDownloadUpdate();
+    }
+
+    async function runBootFlow() {
+      modePill.textContent = 'LAUNCHER';
+      hintLabel.textContent = 'Auto-Updater';
+      setProgress(null, 'Checking for updates...');
+
+      if (!api) {
+        setTimeout(() => setProgress(100, 'Starting Redshift...'), 900);
+        return;
+      }
+
+      try {
+        const res = await api.checkForUpdates();
+        if (res && res.updateAvailable && res.asarUrl) {
+          versionLabel.textContent = `v${res.currentVersion} → v${res.latestVersion}`;
+          await runUpdateDownloadFlow(res.latestVersion);
+          return;
+        }
+      } catch (_) {}
+
+      setProgress(100, 'Starting Redshift...', 'Up to date');
+      setTimeout(() => {
+        api.launcherReady();
+      }, 420);
+    }
+
+    function runFlow() {
+      if (launchMode === 'install') {
+        void runInstallFlow();
+      } else if (launchMode === 'update') {
+        void runUpdateDownloadFlow();
+      } else {
+        void runBootFlow();
+      }
+    }
+
+    runFlow();
+  </script>
+</body>
+</html>

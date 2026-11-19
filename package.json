@@ -1,0 +1,76 @@
+{
+  "name": "redshift",
+  "description": "Redshift Desktop Chat, Voice & Screen Share",
+  "author": "Redshift",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "server": "node server.js",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "node --no-warnings tests/runTests.mjs",
+    "electron:dev": "electron .",
+    "host:online": "node scripts/host-online.cjs",
+    "publish:desktop": "node scripts/publish.cjs",
+    "publish:patch": "node scripts/publish.cjs --patch-only",
+    "release:github": "node scripts/release-github.cjs"
+  },
+  "build": {
+    "appId": "com.redshift.desktop",
+    "productName": "Redshift",
+    "asar": true,
+    "disableAsarIntegrity": true,
+    "publish": null,
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "server/**/*",
+      "public/icon.ico",
+      "public/icon.png",
+      "package.json",
+      "!server/data/**/*"
+    ],
+    "win": {
+      "icon": "public/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Redshift",
+      "runAfterFinish": true,
+      "installerIcon": "public/icon.ico",
+      "uninstallerIcon": "public/icon.ico",
+      "artifactName": "RedshiftSetup.exe"
+    }
+  },
+  "devDependencies": {
+    "@electron/asar": "^4.3.2",
+    "@types/nodemailer": "^8.0.2",
+    "@types/ws": "^8.18.2",
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.2.0"
+  },
+  "dependencies": {
+    "@exis9/jdecked-twemoji": "^17.0.3",
+    "@twemoji/api": "^17.0.3",
+    "dotenv": "^18.0.10",
+    "nodemailer": "^10.6.0",
+    "ws": "^8.23.0"
+  }
+}
