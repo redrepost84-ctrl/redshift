@@ -75,17 +75,15 @@ class CdpSession {
         const res = await fetch(`http://127.0.0.1:${this.port}/json/list`);
         const list = await res.json();
         if (!Array.isArray(list)) return false;
-        const matched = list.find((t) => t.type === 'page' && t.url?.includes(expectedUrl));
-        if (matched) return matched;
-        return list.find((t) => t.type === 'page' && t.url && t.url !== 'about:blank') ?? false;
+        return (
+          list.find((t) => t.type === 'page' && t.url?.includes(expectedUrl)) ??
+          list.find((t) => t.type === 'page') ??
+          false
+        );
       } catch {
         return false;
       }
-    }, 10000).catch(async () => {
-      const res = await fetch(`http://127.0.0.1:${this.port}/json/list`);
-      const list = await res.json();
-      return list.find((t) => t.type === 'page');
-    });
+    }, 25000);
     this.errors = [];
     this.ws = new WebSocket(target.webSocketDebuggerUrl);
     await new Promise((r) => this.ws.addEventListener('open', r));
@@ -103,8 +101,11 @@ class CdpSession {
     });
     await this.send('Page.enable');
     await this.send('Runtime.enable');
-    if (expectedUrl && (!target.url || !target.url.includes(expectedUrl))) {
-      await this.send('Page.navigate', { url: expectedUrl });
+    if (expectedUrl) {
+      const curHref = await this.evalJson('location.href').catch(() => '');
+      if (!String(curHref || '').includes(expectedUrl)) {
+        await this.send('Page.navigate', { url: expectedUrl });
+      }
     }
   }
   send(method, params = {}) {

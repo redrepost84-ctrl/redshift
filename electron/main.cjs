@@ -19,7 +19,9 @@ const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 
 // Keep user data & SQLite DB safely in %AppData%\Redshift so updates never wipe user data.
-const USER_DATA_DIR = path.join(app.getPath('appData'), 'Redshift');
+const USER_DATA_DIR =
+  (process.env.REDSHIFT_USER_DATA_DIR && process.env.REDSHIFT_USER_DATA_DIR.trim()) ||
+  path.join(app.getPath('appData'), 'Redshift');
 app.setPath('userData', USER_DATA_DIR);
 app.setAppUserModelId('com.redshift.desktop');
 process.env.REDSHIFT_DATA_DIR = path.join(USER_DATA_DIR, 'data');
@@ -101,7 +103,8 @@ function readDesktopConfig() {
     serverUrl: bundledUpdaterConfig.defaultServerUrl || '',
     githubRepo: bundledUpdaterConfig.githubRepo || 'redrepost84-ctrl/redshift',
     customManifestUrl: bundledUpdaterConfig.customManifestUrl || '',
-    minimizeToTray: true,
+    minimizeToTray: false,
+    minimizeToTrayExplicit: false,
     channel: bundledUpdaterConfig.channel || 'stable',
   };
   try {
@@ -111,6 +114,10 @@ function readDesktopConfig() {
       if (!merged.githubRepo || !String(merged.githubRepo).trim()) {
         merged.githubRepo = defaults.githubRepo;
       }
+      // Older installs saved minimizeToTray: true automatically; require explicit opt-in so clicking X closes cleanly.
+      if (parsed && parsed.minimizeToTrayExplicit !== true) {
+        merged.minimizeToTray = false;
+      }
       return merged;
     }
   } catch (_) {}
@@ -118,7 +125,8 @@ function readDesktopConfig() {
 }
 
 function writeDesktopConfig(patch) {
-  const next = { ...readDesktopConfig(), ...(patch && typeof patch === 'object' ? patch : {}) };
+  const patchObj = patch && typeof patch === 'object' ? patch : {};
+  const next = { ...readDesktopConfig(), ...patchObj };
   if (typeof next.serverUrl === 'string') {
     next.serverUrl = next.serverUrl.trim().replace(/\/+$/, '');
   }
@@ -131,7 +139,12 @@ function writeDesktopConfig(patch) {
   if (typeof next.customManifestUrl === 'string') {
     next.customManifestUrl = next.customManifestUrl.trim();
   }
-  next.minimizeToTray = Boolean(next.minimizeToTray);
+  if (Object.prototype.hasOwnProperty.call(patchObj, 'minimizeToTray')) {
+    next.minimizeToTray = Boolean(patchObj.minimizeToTray);
+    next.minimizeToTrayExplicit = true;
+  } else {
+    next.minimizeToTray = Boolean(next.minimizeToTray);
+  }
   try {
     fs.mkdirSync(USER_DATA_DIR, { recursive: true });
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), 'utf8');
@@ -611,13 +624,14 @@ function buildManifestCandidateUrls() {
   const cfg = readDesktopConfig();
   const candidates = [];
 
+  const cacheBust = `t=${Date.now()}`;
   if (process.env.REDSHIFT_MANIFEST_URL) {
     candidates.push({ source: 'env', url: process.env.REDSHIFT_MANIFEST_URL });
   }
   if (cfg.githubRepo) {
     candidates.push({
       source: 'github',
-      url: `https://github.com/${cfg.githubRepo}/releases/latest/download/version.json`,
+      url: `https://github.com/${cfg.githubRepo}/releases/latest/download/version.json?${cacheBust}`,
     });
   }
   if (cfg.customManifestUrl) {
@@ -626,7 +640,7 @@ function buildManifestCandidateUrls() {
   if (cfg.serverUrl) {
     candidates.push({
       source: 'server',
-      url: `${cfg.serverUrl}/api/desktop/version.json`,
+      url: `${cfg.serverUrl}/api/desktop/version.json?${cacheBust}`,
     });
   }
   return candidates;
@@ -709,7 +723,38 @@ function createLauncherWindow(mode = 'boot') {
   launcherWindow.loadFile(path.join(__dirname, 'launcher.html'), { query: { mode } });
   launcherWindow.on('closed', () => {
     launcherWindow = null;
+    // Never leave a headless background process holding the single-instance lock if the launcher is closed.
+    if (!isTransitioningWindow && (!mainWindow || mainWindow.isDestroyed())) {
+      cleanupAndQuit(true);
+    }
   });
+}
+
+function cleanupAndQuit(forceExitSoon = true) {
+  isQuitting = true;
+  if (bgUpdateTimer) {
+    clearInterval(bgUpdateTimer);
+    bgUpdateTimer = null;
+  }
+  if (tray) {
+    try { tray.destroy(); } catch (_) {}
+    tray = null;
+  }
+  if (backgroundTunnelProc) {
+    try { backgroundTunnelProc.kill(); } catch (_) {}
+    backgroundTunnelProc = null;
+  }
+  if (embeddedServer) {
+    try { embeddedServer.closeAllConnections?.(); } catch (_) {}
+    try { embeddedServer.close(); } catch (_) {}
+    embeddedServer = null;
+  }
+  app.quit();
+  if (forceExitSoon) {
+    setTimeout(() => {
+      app.exit(0);
+    }, 350);
+  }
 }
 
 function ensureSystemTray() {
@@ -756,8 +801,7 @@ function ensureSystemTray() {
       {
         label: 'Quit Redshift',
         click: () => {
-          isQuitting = true;
-          app.quit();
+          cleanupAndQuit(true);
         },
       },
     ]);
@@ -822,9 +866,9 @@ async function resolveStartUrl() {
   }
 
   if (!app.isPackaged) {
-    const viteAlive = await probeHttpUrl('http://localhost:5173/');
+    const viteAlive = await probeHttpUrl('http://127.0.0.1:5173/', 400);
     if (viteAlive) {
-      return 'http://localhost:5173/';
+      return 'http://127.0.0.1:5173/';
     }
   }
 
@@ -906,6 +950,10 @@ async function createMainWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null;
+    const cfg = readDesktopConfig();
+    if (isQuitting || !cfg.minimizeToTray || !tray) {
+      cleanupAndQuit(true);
+    }
   });
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
@@ -1158,13 +1206,11 @@ ipcMain.handle('clipboard-copy-image-url', async (_event, rawUrl) => {
 });
 
 ipcMain.on('launcher-close', () => {
-  isQuitting = true;
-  app.quit();
+  cleanupAndQuit(true);
 });
 
 ipcMain.on('app-quit', () => {
-  isQuitting = true;
-  app.quit();
+  cleanupAndQuit(true);
 });
 
 ipcMain.on('relaunch-app', () => {
@@ -1253,9 +1299,8 @@ ipcMain.handle('check-for-updates', async () => {
 ipcMain.on('start-download-update', async () => {
   if (!launcherWindow || launcherWindow.isDestroyed()) return;
   try {
-    const manifest = lastManifestResult?.updateAvailable
-      ? lastManifestResult
-      : await fetchLatestManifest();
+    // Always fetch a fresh manifest so retries or newly published releases never reuse stale cached URLs.
+    const manifest = await fetchLatestManifest();
     if (!manifest.updateAvailable) {
       if (launcherWindow && !launcherWindow.isDestroyed()) {
         launcherWindow.webContents.send('update-complete', {
@@ -1346,15 +1391,32 @@ ipcMain.on('apply-update-and-restart', () => {
     const exeDir = path.dirname(exePath);
     const pid = process.pid;
 
+    const backupAsar = `${targetAsar}.bak`;
+    const escapedDownload = downloadAsar.replace(/'/g, "''");
+    const escapedTarget = targetAsar.replace(/'/g, "''");
+    const escapedBackup = backupAsar.replace(/'/g, "''");
+    const escapedExe = exePath.replace(/'/g, "''");
+    const escapedDir = exeDir.replace(/'/g, "''");
+
     const psSwap = [
       `$pidToWait = ${pid};`,
       `$t = 50; while ((Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) -and ($t -gt 0)) { Start-Sleep -Milliseconds 150; $t--; }`,
-      `Start-Sleep -Milliseconds 400;`,
-      `$ok = $false; for ($i = 0; $i -lt 25; $i++) {`,
-      `  try { Move-Item -LiteralPath '${downloadAsar.replace(/'/g, "''")}' -Destination '${targetAsar.replace(/'/g, "''")}' -Force -ErrorAction Stop; $ok = $true; break; }`,
-      `  catch { Start-Sleep -Milliseconds 350; }`,
+      `$t2 = 25; while ((Get-Process -Name 'Redshift' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq '${escapedExe}' }) -and ($t2 -gt 0)) { Start-Sleep -Milliseconds 150; $t2--; }`,
+      `Start-Sleep -Milliseconds 350;`,
+      `if ((Test-Path -LiteralPath '${escapedDownload}') -and ((Get-Item -LiteralPath '${escapedDownload}').Length -gt 16384)) {`,
+      `  $ok = $false; for ($i = 0; $i -lt 30; $i++) {`,
+      `    try {`,
+      `      if (Test-Path -LiteralPath '${escapedTarget}') { Copy-Item -LiteralPath '${escapedTarget}' -Destination '${escapedBackup}' -Force -ErrorAction SilentlyContinue }`,
+      `      Move-Item -LiteralPath '${escapedDownload}' -Destination '${escapedTarget}' -Force -ErrorAction Stop;`,
+      `      Remove-Item -LiteralPath '${escapedBackup}' -Force -ErrorAction SilentlyContinue;`,
+      `      $ok = $true; break;`,
+      `    } catch { Start-Sleep -Milliseconds 350; }`,
+      `  }`,
+      `  if ((-not $ok) -and (-not (Test-Path -LiteralPath '${escapedTarget}')) -and (Test-Path -LiteralPath '${escapedBackup}')) {`,
+      `    Move-Item -LiteralPath '${escapedBackup}' -Destination '${escapedTarget}' -Force -ErrorAction SilentlyContinue;`,
+      `  }`,
       `}`,
-      `Start-Process -FilePath '${exePath.replace(/'/g, "''")}' -WorkingDirectory '${exeDir.replace(/'/g, "''")}';`,
+      `Start-Process -FilePath '${escapedExe}' -WorkingDirectory '${escapedDir}';`,
     ].join(' ');
 
     spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psSwap], {
@@ -1444,15 +1506,19 @@ ipcMain.on('open-external', (_event, rawUrl) => {
 });
 
 app.on('second-instance', () => {
+  const bringFront = (win) => {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.setAlwaysOnTop(true);
+    win.focus();
+    win.setAlwaysOnTop(false);
+  };
   if (mainWindow && !mainWindow.isDestroyed()) {
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+    bringFront(mainWindow);
   } else if (launcherWindow && !launcherWindow.isDestroyed()) {
-    if (launcherWindow.isMinimized()) launcherWindow.restore();
-    launcherWindow.show();
-    launcherWindow.focus();
+    bringFront(launcherWindow);
   } else {
+    isTransitioningWindow = false;
     void createMainWindow();
   }
 });
@@ -1474,11 +1540,16 @@ app.on('before-quit', () => {
     clearInterval(bgUpdateTimer);
     bgUpdateTimer = null;
   }
+  if (tray) {
+    try { tray.destroy(); } catch (_) {}
+    tray = null;
+  }
   if (backgroundTunnelProc) {
     try { backgroundTunnelProc.kill(); } catch (_) {}
     backgroundTunnelProc = null;
   }
   if (embeddedServer) {
+    try { embeddedServer.closeAllConnections?.(); } catch (_) {}
     try { embeddedServer.close(); } catch (_) {}
     embeddedServer = null;
   }
@@ -1488,9 +1559,10 @@ app.on('window-all-closed', () => {
   if (isTransitioningWindow) {
     return;
   }
-  if (isQuitting || process.platform !== 'darwin') {
-    if (isQuitting || !tray) {
-      app.quit();
+  const cfg = readDesktopConfig();
+  if (isQuitting || !cfg.minimizeToTray || !tray || process.platform !== 'darwin') {
+    if (isQuitting || !cfg.minimizeToTray || !tray) {
+      cleanupAndQuit(true);
     }
   }
 });

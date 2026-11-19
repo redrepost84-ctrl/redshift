@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.6';
+export const CURRENT_REDSHIFT_VERSION = '0.1.7';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,24 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.7',
+    date: 'November 19, 2026',
+    kicker: 'LAUNCHER & UPDATER RELIABILITY',
+    headline: 'Clean App Shutdown (No Stuck Background Processes) & Fresh Manifest Auto-Updates',
+    lead:
+      'Fixed Redshift lingering invisibly in the background after closing (which prevented reopening from shortcuts), made clicking X cleanly close the app by default, and ensured every update check or retry always fetches a fresh release manifest without stale caching.',
+    sections: [
+      {
+        heading: 'Fixes',
+        items: [
+          'Fixed App Not Reopening After Closing — Closing the main window or Launcher now cleanly destroys the tray, closes local server sockets, and exits Redshift completely so reopening from your Desktop shortcut works every time (Minimize to Tray is now opt-in in Settings).',
+          'Fresh Cache-Busted Update Checks — Clicking Update or Retry now always fetches the latest release manifest with cache-busting instead of reusing a stale cached version.',
+          'Atomic Backup-Protected Patch Swap — The updater now waits for all Redshift child processes to exit and preserves an automatic .bak fallback during app.asar replacement.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.6',
     date: 'November 19, 2026',
