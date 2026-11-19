@@ -8,7 +8,6 @@ import picture4Url from '../Textures/Profiles/Picture4.png';
 import {
   apiAcceptFriendRequest,
   apiCancelFriendRequest,
-  apiCheckServerHealth,
   apiCloseDm,
   autoDiscoverWorldwideServer,
   apiDeclineFriendRequest,
@@ -41,7 +40,6 @@ import {
   clearSessionToken,
   connectSocialSocket,
   formatFileSize,
-  getApiServerBaseUrl,
   hasStoredSessionToken,
   isEmailFormat,
   MAX_UPLOAD_BYTES,
@@ -686,190 +684,6 @@ function renderLoginScreen(shell: HTMLElement): void {
   linkRow.appendChild(forgotBtn);
   linkRow.appendChild(signUpBtn);
   shell.appendChild(linkRow);
-  shell.appendChild(createAuthServerBar());
-}
-
-function createAuthServerBar(): HTMLDivElement {
-  const wrap = document.createElement('div');
-  wrap.className = 'auth-server-bar';
-
-  const statusRow = document.createElement('div');
-  statusRow.className = 'auth-server-status-row';
-
-  const dot = document.createElement('span');
-  dot.className = 'auth-server-dot auth-server-dot--checking';
-
-  const label = document.createElement('span');
-  label.className = 'auth-server-label';
-
-  const toggleBtn = document.createElement('button');
-  toggleBtn.type = 'button';
-  toggleBtn.className = 'auth-server-switch-btn';
-  toggleBtn.textContent = 'Switch Server';
-
-  statusRow.appendChild(dot);
-  statusRow.appendChild(label);
-  statusRow.appendChild(toggleBtn);
-  wrap.appendChild(statusRow);
-
-  const editor = document.createElement('form');
-  editor.className = 'auth-server-editor';
-  editor.hidden = true;
-
-  const editorLabel = document.createElement('div');
-  editorLabel.className = 'auth-server-editor-title';
-  editorLabel.textContent = 'Online Redshift Server URL (leave blank for Local Server)';
-  editor.appendChild(editorLabel);
-
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'auth-server-input';
-  input.placeholder = 'https://your-redshift-server.example.com';
-  input.spellcheck = false;
-  input.value = getApiServerBaseUrl();
-  editor.appendChild(input);
-
-  const feedback = document.createElement('div');
-  feedback.className = 'auth-server-feedback';
-  feedback.hidden = true;
-  editor.appendChild(feedback);
-
-  const actions = document.createElement('div');
-  actions.className = 'auth-server-actions';
-
-  const testBtn = document.createElement('button');
-  testBtn.type = 'button';
-  testBtn.className = 'auth-server-action-btn';
-  testBtn.textContent = 'Test';
-
-  const localBtn = document.createElement('button');
-  localBtn.type = 'button';
-  localBtn.className = 'auth-server-action-btn';
-  localBtn.textContent = 'Use Local';
-
-  const saveBtn = document.createElement('button');
-  saveBtn.type = 'submit';
-  saveBtn.className = 'auth-server-action-btn auth-server-action-btn--primary';
-  saveBtn.textContent = 'Connect';
-
-  actions.appendChild(testBtn);
-  actions.appendChild(localBtn);
-  actions.appendChild(saveBtn);
-  editor.appendChild(actions);
-  wrap.appendChild(editor);
-
-  const describeServer = (url: string): string => {
-    if (!url) {
-      return getDesktopBridge() ? 'Built-in Local Server' : 'Local Server';
-    }
-    try {
-      return new URL(url).host;
-    } catch {
-      return url;
-    }
-  };
-
-  let alive = true;
-  const runHealthProbe = async (targetUrl?: string) => {
-    const activeUrl = targetUrl !== undefined ? targetUrl : getApiServerBaseUrl();
-    dot.className = 'auth-server-dot auth-server-dot--checking';
-    label.textContent = `${describeServer(activeUrl)} · Connecting...`;
-    const health = await apiCheckServerHealth(activeUrl);
-    if (!alive || !wrap.isConnected) return health;
-    if (health.ok) {
-      dot.className = 'auth-server-dot auth-server-dot--online';
-      const ms = health.latencyMs ? ` · ${health.latencyMs}ms` : '';
-      const users =
-        typeof health.onlineUsers === 'number' && health.onlineUsers > 0
-          ? ` · ${health.onlineUsers} online`
-          : '';
-      label.textContent = `${describeServer(activeUrl)}${ms}${users}`;
-    } else {
-      dot.className = 'auth-server-dot auth-server-dot--offline';
-      label.textContent = `${describeServer(activeUrl)} · Offline`;
-    }
-    return health;
-  };
-
-  toggleBtn.addEventListener('click', () => {
-    editor.hidden = !editor.hidden;
-    if (!editor.hidden) {
-      input.value = getApiServerBaseUrl();
-      feedback.hidden = true;
-      input.focus();
-    }
-  });
-
-  const applyServerUrl = async (rawNext: string) => {
-    const clean = rawNext.trim().replace(/\/+$/, '');
-    if (clean && !/^https?:\/\//i.test(clean)) {
-      feedback.hidden = false;
-      feedback.className = 'auth-server-feedback auth-server-feedback--err';
-      feedback.textContent = 'Enter a full http:// or https:// URL (or leave blank for local).';
-      return;
-    }
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Connecting...';
-    feedback.hidden = true;
-    const health = await apiCheckServerHealth(clean);
-    if (!alive || !wrap.isConnected) return;
-    saveBtn.disabled = false;
-    saveBtn.textContent = 'Connect';
-
-    if (!health.ok) {
-      feedback.hidden = false;
-      feedback.className = 'auth-server-feedback auth-server-feedback--err';
-      feedback.textContent = health.error || 'Could not reach that Redshift server.';
-      return;
-    }
-
-    setApiServerBaseUrl(clean, true);
-    clearSessionToken();
-    const bridge = getDesktopBridge();
-    if (bridge) {
-      void bridge.saveDesktopConfig({ serverUrl: clean });
-    }
-    editor.hidden = true;
-    feedback.hidden = true;
-    void runHealthProbe(clean);
-  };
-
-  testBtn.addEventListener('click', async () => {
-    const clean = input.value.trim().replace(/\/+$/, '');
-    if (clean && !/^https?:\/\//i.test(clean)) {
-      feedback.hidden = false;
-      feedback.className = 'auth-server-feedback auth-server-feedback--err';
-      feedback.textContent = 'URL must start with http:// or https://';
-      return;
-    }
-    testBtn.disabled = true;
-    testBtn.textContent = 'Testing...';
-    const health = await apiCheckServerHealth(clean);
-    if (!alive || !wrap.isConnected) return;
-    testBtn.disabled = false;
-    testBtn.textContent = 'Test';
-    feedback.hidden = false;
-    if (health.ok) {
-      feedback.className = 'auth-server-feedback auth-server-feedback--ok';
-      feedback.textContent = `Online! Redshift v${health.version || '0.1.0'} (${health.latencyMs}ms)`;
-    } else {
-      feedback.className = 'auth-server-feedback auth-server-feedback--err';
-      feedback.textContent = health.error || 'Server did not respond.';
-    }
-  });
-
-  localBtn.addEventListener('click', () => {
-    input.value = '';
-    void applyServerUrl('');
-  });
-
-  editor.addEventListener('submit', (e) => {
-    e.preventDefault();
-    void applyServerUrl(input.value);
-  });
-
-  void runHealthProbe();
-  return wrap;
 }
 
 function renderSignUpAccountScreen(root: HTMLElement, shell: HTMLElement): void {
@@ -954,7 +768,6 @@ function renderSignUpAccountScreen(root: HTMLElement, shell: HTMLElement): void 
   });
 
   shell.appendChild(form);
-  shell.appendChild(createAuthServerBar());
 }
 
 function renderSignUpPasswordScreen(root: HTMLElement, shell: HTMLElement): void {
@@ -6509,13 +6322,14 @@ async function bootstrapApp(): Promise<void> {
         setApiServerBaseUrl(cfg.serverUrl);
       }
     } catch {
-      // Fall back to default local server origin.
+      // Fall back to default server discovery.
     }
   }
-  // In Electron Desktop (or when no local test server is running), auto-discover the live worldwide server from GitHub
-  if (desktopBridge) {
+  const currentPort = Number(window.location.port) || 0;
+  const isAutomatedTestPort = currentPort >= 18000 && currentPort < 19000;
+  if (desktopBridge || !isAutomatedTestPort) {
     const discovered = await autoDiscoverWorldwideServer(githubRepo);
-    if (discovered) {
+    if (discovered && desktopBridge) {
       void desktopBridge.saveDesktopConfig({ serverUrl: discovered });
     }
   }

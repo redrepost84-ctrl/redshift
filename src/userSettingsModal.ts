@@ -1,11 +1,9 @@
 import {
   apiChangeEmail,
   apiChangePassword,
-  apiCheckServerHealth,
   apiSignOutOtherSessions,
   apiUnblockUser,
   apiUpdatePrivacy,
-  setApiServerBaseUrl,
 } from './apiClient';
 import { createCloseIconSvg, playNotificationChime } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
@@ -1993,163 +1991,7 @@ export function openUserSettingsOverlay(options: UserSettingsOverlayOptions): ()
     updateCard.appendChild(updateFeedback);
     contentInner.appendChild(updateCard);
 
-    // 2. Server & Update Source Configuration Form
-    const configForm = document.createElement('form');
-    configForm.className = 'settings-card';
-
-    const cfgTitle = document.createElement('h2');
-    cfgTitle.className = 'settings-section-heading';
-    cfgTitle.textContent = 'Server & Update Sources';
-    const cfgSub = document.createElement('p');
-    cfgSub.className = 'settings-section-sub';
-    cfgSub.textContent =
-      'Connect to your own self-hosted Redshift server or leave blank to use the built-in local server. Updates pull from GitHub Releases or your Redshift server directly — no third-party web hosting required.';
-    configForm.appendChild(cfgTitle);
-    configForm.appendChild(cfgSub);
-
-    const makeLabeledInput = (labelText: string, placeholder: string, hintText: string) => {
-      const wrap = document.createElement('div');
-      wrap.className = 'settings-desktop-field';
-      const lbl = document.createElement('label');
-      lbl.className = 'settings-field-micro';
-      lbl.textContent = labelText;
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.className = 'settings-input';
-      input.placeholder = placeholder;
-      input.spellcheck = false;
-      const hint = document.createElement('div');
-      hint.className = 'settings-desktop-hint';
-      hint.textContent = hintText;
-      wrap.appendChild(lbl);
-      wrap.appendChild(input);
-      wrap.appendChild(hint);
-      configForm.appendChild(wrap);
-      return input;
-    };
-
-    const serverUrlInput = makeLabeledInput(
-      'REMOTE REDSHIFT SERVER URL (OPTIONAL)',
-      'Leave blank for Built-in Local Server (e.g. https://chat.yourdomain.com)',
-      'When blank, Redshift runs its own private local server automatically.',
-    );
-    const githubRepoInput = makeLabeledInput(
-      'GITHUB RELEASES REPOSITORY',
-      'owner/redshift',
-      'Checks https://github.com/<owner>/<repo>/releases/latest/download/version.json',
-    );
-    const customManifestInput = makeLabeledInput(
-      'CUSTOM UPDATE MANIFEST URL (OPTIONAL)',
-      'https://your-server.example/api/desktop/version.json',
-      'Overrides the default manifest lookup if set.',
-    );
-
-    const cfgFeedback = document.createElement('div');
-    cfgFeedback.className = 'settings-feedback';
-    cfgFeedback.hidden = true;
-
-    const cfgBtnRow = document.createElement('div');
-    cfgBtnRow.className = 'settings-desktop-actions';
-
-    const saveCfgBtn = document.createElement('button');
-    saveCfgBtn.type = 'submit';
-    saveCfgBtn.className = 'btn-primary settings-sm-btn';
-    saveCfgBtn.textContent = 'Save & Apply';
-
-    const testServerBtn = document.createElement('button');
-    testServerBtn.type = 'button';
-    testServerBtn.className = 'btn-secondary settings-sm-btn';
-    testServerBtn.textContent = 'Test Server';
-    testServerBtn.addEventListener('click', async () => {
-      const targetUrl = serverUrlInput.value.trim().replace(/\/+$/, '');
-      if (targetUrl && !/^https?:\/\//i.test(targetUrl)) {
-        cfgFeedback.hidden = false;
-        cfgFeedback.classList.remove('settings-feedback--ok');
-        cfgFeedback.classList.add('settings-feedback--err');
-        cfgFeedback.textContent = 'Server URL must start with http:// or https:// (or be left blank).';
-        return;
-      }
-      testServerBtn.disabled = true;
-      testServerBtn.textContent = 'Testing...';
-      const health = await apiCheckServerHealth(targetUrl);
-      if (closed) return;
-      testServerBtn.disabled = false;
-      testServerBtn.textContent = 'Test Server';
-      cfgFeedback.hidden = false;
-      if (health.ok) {
-        cfgFeedback.classList.remove('settings-feedback--err');
-        cfgFeedback.classList.add('settings-feedback--ok');
-        const onlineTxt =
-          typeof health.onlineUsers === 'number' ? ` · ${health.onlineUsers} online` : '';
-        cfgFeedback.textContent = `Connected! Redshift v${health.version || '0.1.0'} (${health.latencyMs}ms${onlineTxt})`;
-      } else {
-        cfgFeedback.classList.remove('settings-feedback--ok');
-        cfgFeedback.classList.add('settings-feedback--err');
-        cfgFeedback.textContent = health.error || 'Could not reach server.';
-      }
-    });
-
-    const relaunchBtn = document.createElement('button');
-    relaunchBtn.type = 'button';
-    relaunchBtn.className = 'btn-secondary settings-sm-btn';
-    relaunchBtn.textContent = 'Relaunch Redshift';
-    relaunchBtn.addEventListener('click', () => {
-      bridge.relaunchApp();
-    });
-
-    cfgBtnRow.appendChild(saveCfgBtn);
-    cfgBtnRow.appendChild(testServerBtn);
-    cfgBtnRow.appendChild(relaunchBtn);
-    configForm.appendChild(cfgFeedback);
-    configForm.appendChild(cfgBtnRow);
-
-    let initialServerUrl = '';
-    configForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      saveCfgBtn.disabled = true;
-      saveCfgBtn.textContent = 'Saving...';
-      cfgFeedback.hidden = true;
-      try {
-        const nextServerUrl = serverUrlInput.value.trim().replace(/\/+$/, '');
-        if (nextServerUrl && !/^https?:\/\//i.test(nextServerUrl)) {
-          cfgFeedback.hidden = false;
-          cfgFeedback.classList.remove('settings-feedback--ok');
-          cfgFeedback.classList.add('settings-feedback--err');
-          cfgFeedback.textContent = 'Server URL must start with http:// or https:// (or be left blank).';
-          return;
-        }
-        const saved = await bridge.saveDesktopConfig({
-          serverUrl: nextServerUrl,
-          githubRepo: githubRepoInput.value.trim(),
-          customManifestUrl: customManifestInput.value.trim(),
-        });
-        if (closed) return;
-        setApiServerBaseUrl(saved.serverUrl || '');
-        const serverChanged = (saved.serverUrl || '') !== initialServerUrl;
-        initialServerUrl = saved.serverUrl || '';
-        cfgFeedback.hidden = false;
-        cfgFeedback.classList.remove('settings-feedback--err');
-        cfgFeedback.classList.add('settings-feedback--ok');
-        cfgFeedback.textContent = serverChanged
-          ? 'Saved! Click "Relaunch Redshift" to reconnect cleanly to the new server.'
-          : 'Desktop settings saved.';
-      } catch {
-        if (!closed) {
-          cfgFeedback.hidden = false;
-          cfgFeedback.classList.remove('settings-feedback--ok');
-          cfgFeedback.classList.add('settings-feedback--err');
-          cfgFeedback.textContent = 'Could not save desktop configuration.';
-        }
-      } finally {
-        if (!closed) {
-          saveCfgBtn.disabled = false;
-          saveCfgBtn.textContent = 'Save & Apply';
-        }
-      }
-    });
-    contentInner.appendChild(configForm);
-
-    // 3. System Tray & Window Behavior Card
+    // 2. System Tray & Window Behavior Card
     const trayCard = document.createElement('div');
     trayCard.className = 'settings-card';
     const trayTitle = document.createElement('h2');
@@ -2181,10 +2023,6 @@ export function openUserSettingsOverlay(options: UserSettingsOverlayOptions): ()
       modeVal.textContent = cfg.isPackaged ? 'Packaged Windows App' : 'Development Build';
       installDirVal.textContent = cfg.installDir || '—';
       dataDirVal.textContent = cfg.dataDir || '—';
-      serverUrlInput.value = cfg.serverUrl || '';
-      initialServerUrl = cfg.serverUrl || '';
-      githubRepoInput.value = cfg.githubRepo || '';
-      customManifestInput.value = cfg.customManifestUrl || '';
 
       trayToggleSlot.replaceChildren(
         createToggleSwitch({

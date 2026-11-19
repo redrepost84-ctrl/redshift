@@ -135,46 +135,47 @@ export function setApiServerBaseUrl(rawUrl: string, isManual = false): string {
 
 /**
  * Automatically checks the GitHub online-server.json directory so every Redshift client
- * around the world connects to the live online server without needing manual URL entry.
+ * around the world connects to the live online server unconditionally with zero user input.
  */
 export async function autoDiscoverWorldwideServer(githubRepo?: string): Promise<string | null> {
   const repo = (githubRepo || DEFAULT_GITHUB_DIRECTORY_REPO).trim();
   if (!repo) return null;
 
-  // If currently stored URL is already reachable, keep it if user manually pinned it
-  if (hasManualServerOverride() && apiServerBaseUrl) {
-    const check = await apiCheckServerHealth(apiServerBaseUrl);
-    if (check.ok) {
-      return apiServerBaseUrl;
-    }
-  }
+  const lookupUrls = [
+    `https://api.github.com/repos/${repo}/contents/online-server.json`,
+    `https://raw.githubusercontent.com/${repo}/main/online-server.json?t=${Date.now()}`,
+  ];
 
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 3800);
-  try {
-    const res = await fetch(`https://api.github.com/repos/${repo}/contents/online-server.json`, {
-      method: 'GET',
-      cache: 'no-store',
-      headers: { Accept: 'application/vnd.github.raw+json' },
-      signal: controller.signal,
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { serverUrl?: string };
-    const candidate = (data?.serverUrl || '').trim().replace(/\/+$/, '');
-    if (!candidate || !/^https?:\/\//i.test(candidate)) {
-      return null;
+  for (const lookupUrl of lookupUrls) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 3800);
+    try {
+      const res = await fetch(lookupUrl, {
+        method: 'GET',
+        cache: 'no-store',
+        headers: lookupUrl.includes('api.github.com')
+          ? { Accept: 'application/vnd.github.raw+json' }
+          : {},
+        signal: controller.signal,
+      });
+      if (!res.ok) continue;
+      const data = (await res.json()) as { serverUrl?: string };
+      const candidate = (data?.serverUrl || '').trim().replace(/\/+$/, '');
+      if (!candidate || !/^https?:\/\//i.test(candidate)) {
+        continue;
+      }
+      const health = await apiCheckServerHealth(candidate);
+      if (health.ok) {
+        setApiServerBaseUrl(candidate, false);
+        return candidate;
+      }
+    } catch {
+      // Try next lookup URL
+    } finally {
+      window.clearTimeout(timer);
     }
-    const health = await apiCheckServerHealth(candidate);
-    if (health.ok) {
-      setApiServerBaseUrl(candidate, false);
-      return candidate;
-    }
-    return null;
-  } catch {
-    return null;
-  } finally {
-    window.clearTimeout(timer);
   }
+  return null;
 }
 
 export function resolveApiUrl(pathOrUrl: string): string {

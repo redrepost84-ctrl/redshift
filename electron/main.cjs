@@ -14,7 +14,7 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const { spawn, execFileSync, execSync } = require('child_process');
 const { pathToFileURL } = require('url');
 
 // Keep user data & SQLite DB safely in %AppData%\Redshift so updates never wipe user data.
@@ -167,6 +167,7 @@ let isQuitting = false;
 let isTransitioningWindow = false;
 let embeddedServer = null;
 let embeddedServerPort = null;
+let backgroundTunnelProc = null;
 let pendingDisplaySource = null;
 let lastManifestResult = null;
 let bgUpdateTimer = null;
@@ -254,7 +255,169 @@ async function ensureEmbeddedServer() {
   const addr = srv.address();
   embeddedServer = srv;
   embeddedServerPort = typeof addr === 'object' && addr ? addr.port : 8080;
+  void ensureWorldwideHostTunnelIfNeeded(embeddedServerPort);
   return `http://127.0.0.1:${embeddedServerPort}`;
+}
+
+function readHostGitHubToken() {
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
+  if (process.platform !== 'win32') return '';
+  const ps = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class CredHelper {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct CREDENTIAL {
+    public uint Flags;
+    public uint Type;
+    public string TargetName;
+    public string Comment;
+    public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
+    public uint CredentialBlobSize;
+    public IntPtr CredentialBlob;
+    public uint Persist;
+    public uint AttributeCount;
+    public IntPtr Attributes;
+    public string TargetAlias;
+    public string UserName;
+  }
+  [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+  public static extern bool CredRead(string target, uint type, int reservedFlag, out IntPtr credentialPtr);
+  [DllImport("advapi32.dll", SetLastError = true)]
+  public static extern void CredFree([In] IntPtr cred);
+  public static string GetPass(string target) {
+    IntPtr ptr;
+    if (!CredRead(target, 1, 0, out ptr)) return "";
+    try {
+      CREDENTIAL c = (CREDENTIAL)Marshal.PtrToStructure(ptr, typeof(CREDENTIAL));
+      byte[] b = new byte[c.CredentialBlobSize];
+      Marshal.Copy(c.CredentialBlob, b, 0, (int)c.CredentialBlobSize);
+      string u = Encoding.Unicode.GetString(b).TrimEnd('\\0');
+      string a = Encoding.UTF8.GetString(b).TrimEnd('\\0');
+      return u.StartsWith("gh") || u.StartsWith("github_") ? u : a;
+    } finally { CredFree(ptr); }
+  }
+}
+"@
+$t = [CredHelper]::GetPass("GitHub - https://api.github.com/redrepost84-ctrl")
+if (-not $t) { $t = [CredHelper]::GetPass("LegacyGeneric:target=GitHub - https://api.github.com/redrepost84-ctrl") }
+Write-Output $t
+`;
+  try {
+    return execFileSync('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', ps], {
+      encoding: 'utf8',
+      windowsHide: true,
+    }).trim();
+  } catch (_) {
+    return '';
+  }
+}
+
+async function ensureWorldwideHostTunnelIfNeeded(localPort) {
+  if (backgroundTunnelProc) return;
+  const cfg = readDesktopConfig();
+  const repo = (cfg.githubRepo || 'redrepost84-ctrl/redshift').trim();
+  if (!repo) return;
+
+  // 1. Check if the worldwide server published in online-server.json on GitHub is already alive
+  try {
+    const { data } = await fetchJsonWithRedirects(
+      `https://raw.githubusercontent.com/${repo}/main/online-server.json?t=${Date.now()}`,
+      3500,
+    );
+    const liveUrl = typeof data?.serverUrl === 'string' ? data.serverUrl.trim().replace(/\/+$/, '') : '';
+    if (liveUrl) {
+      const alive = await probeHttpUrl(`${liveUrl}/api/health`, 3500);
+      if (alive) {
+        writeDesktopConfig({ serverUrl: liveUrl });
+        return;
+      }
+    }
+  } catch (_) {}
+
+  // 2. If offline and this machine is the host (has GitHub credential), auto-start Cloudflare Tunnel in background
+  const token = readHostGitHubToken();
+  if (!token) return;
+
+  const cfCandidates = [
+    path.join(USER_DATA_DIR, 'cloudflared.exe'),
+    path.join(__dirname, '../scripts/cloudflared.exe'),
+    'cloudflared',
+    'C:\\Program Files (x86)\\cloudflared\\cloudflared.exe',
+    'C:\\Program Files\\cloudflared\\cloudflared.exe',
+  ];
+  let cfBin = null;
+  for (const cand of cfCandidates) {
+    try {
+      execSync(`"${cand}" --version`, { stdio: 'ignore', windowsHide: true });
+      cfBin = cand;
+      break;
+    } catch (_) {}
+  }
+
+  if (!cfBin && process.platform === 'win32') {
+    const destCf = path.join(USER_DATA_DIR, 'cloudflared.exe');
+    const tmpCf = `${destCf}.download`;
+    try {
+      fs.mkdirSync(USER_DATA_DIR, { recursive: true });
+      await downloadFileWithProgress(
+        'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe',
+        tmpCf,
+      );
+      fs.renameSync(tmpCf, destCf);
+      cfBin = destCf;
+    } catch (_) {
+      try { fs.unlinkSync(tmpCf); } catch (_) {}
+    }
+  }
+  if (!cfBin) return;
+
+  backgroundTunnelProc = spawn(cfBin, ['tunnel', '--url', `http://127.0.0.1:${localPort}`], {
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  let published = false;
+  const onOut = async (chunk) => {
+    const match = chunk.toString().match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
+    if (match && !published) {
+      published = true;
+      const publicUrl = match[0];
+      writeDesktopConfig({ serverUrl: publicUrl });
+      try {
+        const apiUrl = `https://api.github.com/repos/${repo}/contents/online-server.json`;
+        const headers = {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'Redshift-Desktop-Host',
+        };
+        let existingSha = undefined;
+        const getRes = await fetch(apiUrl, { headers });
+        if (getRes.ok) {
+          const getJson = await getRes.json();
+          existingSha = getJson?.sha;
+        }
+        const payloadObj = { serverUrl: publicUrl, updatedAt: new Date().toISOString() };
+        const contentB64 = Buffer.from(JSON.stringify(payloadObj, null, 2) + '\n', 'utf8').toString('base64');
+        await fetch(apiUrl, {
+          method: 'PUT',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: `Auto-update worldwide server endpoint (${publicUrl})`,
+            content: contentB64,
+            ...(existingSha ? { sha: existingSha } : {}),
+          }),
+        });
+      } catch (_) {}
+    }
+  };
+  backgroundTunnelProc.stdout.on('data', onOut);
+  backgroundTunnelProc.stderr.on('data', onOut);
+  backgroundTunnelProc.on('exit', () => {
+    backgroundTunnelProc = null;
+  });
 }
 
 function fetchJsonWithRedirects(url, timeoutMs = 4000, maxRedirects = 6) {
@@ -1048,6 +1211,10 @@ app.on('before-quit', () => {
   if (bgUpdateTimer) {
     clearInterval(bgUpdateTimer);
     bgUpdateTimer = null;
+  }
+  if (backgroundTunnelProc) {
+    try { backgroundTunnelProc.kill(); } catch (_) {}
+    backgroundTunnelProc = null;
   }
   if (embeddedServer) {
     try { embeddedServer.close(); } catch (_) {}

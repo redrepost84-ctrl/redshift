@@ -423,15 +423,6 @@ async function run() {
           throw err;
         });
 
-        // Verify Pre-Login Worldwide Server Switcher & live /api/health status dot
-        await waitFor(
-          async () =>
-            await cdp.evalJson(
-              `Boolean(document.querySelector('.auth-server-bar .auth-server-dot--online')) && Boolean(document.querySelector('.auth-server-switch-btn'))`,
-            ),
-          6000,
-        );
-
         // Log in as bob_t with Keep me signed in checked
         await cdp.evalJson(`(() => {
           const inputs = document.querySelectorAll('.auth-form input');
