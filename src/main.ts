@@ -73,6 +73,13 @@ import {
   openConfirmPopup,
   playNotificationChime,
 } from './chatUi';
+import {
+  closeChangelogModal,
+  createHeaderUpdateAvailableButton,
+  maybeShowPostUpdateChangelog,
+  notifyHeaderUpdateAvailable,
+  promptUpdateRestartModal,
+} from './changelogModal';
 import { formatCustomStatusLine } from './customStatusModal';
 import { getDesktopBridge } from './desktopBridge';
 import {
@@ -1598,12 +1605,11 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   let unsubscribeDesktopUpdate: (() => void) | null = null;
   if (desktopBridge) {
     desktopUpdateBanner.addEventListener('click', () => {
-      desktopUpdateBanner.disabled = true;
-      desktopUpdateText.textContent = 'Starting Updater...';
-      desktopBridge.initiateUpdate();
+      void promptUpdateRestartModal();
     });
-    unsubscribeDesktopUpdate = desktopBridge.onBackgroundUpdateAvailable((info) => {
+    const onDetectedUpdate = (info: import('./desktopBridge').DesktopUpdateInfo) => {
       if (info && info.updateAvailable && info.asarUrl) {
+        notifyHeaderUpdateAvailable(info);
         desktopUpdateBanner.disabled = false;
         desktopUpdateText.textContent = `Update Ready (v${info.latestVersion}) · Restart`;
         desktopUpdateBanner.title = info.changelog
@@ -1611,7 +1617,13 @@ function renderWorkspaceScreen(root: HTMLElement): void {
           : `Click to install Redshift v${info.latestVersion} and restart`;
         desktopUpdateBanner.hidden = false;
       }
-    });
+    };
+    unsubscribeDesktopUpdate = desktopBridge.onBackgroundUpdateAvailable(onDetectedUpdate);
+    void desktopBridge.checkForUpdates().then((info) => {
+      if (info && info.updateAvailable && info.asarUrl) {
+        onDetectedUpdate(info);
+      }
+    }).catch(() => {});
   }
   leftColumn.appendChild(desktopUpdateBanner);
 
@@ -3216,6 +3228,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
 
     const headerActions = document.createElement('div');
     headerActions.className = 'dm-header-actions';
+    headerActions.appendChild(createHeaderUpdateAvailableButton());
 
     const vcThreadKey = isGroup
       ? `group:${groupId}`
@@ -6200,8 +6213,10 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   syncCustomStatusExpiryTimer();
   ensureNotificationPermissionOnGesture();
   renderMainArea();
+  maybeShowPostUpdateChangelog();
 
   activeWorkspaceCleanup = () => {
+    closeChangelogModal();
     unsubscribeDesktopUpdate?.();
     unsubscribeDesktopUpdate = null;
     unsubscribePrefs();

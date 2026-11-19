@@ -10,6 +10,7 @@ import {
   createMoreVerticalSvg,
   openFloatingActionMenu,
 } from './chatUi';
+import { createHeaderUpdateAvailableButton } from './changelogModal';
 import { formatCustomStatusLine } from './customStatusModal';
 import {
   createProfilePanelToggleIconSvg,
@@ -167,6 +168,7 @@ export function renderFriendsPanel(
   }
 
   header.appendChild(tabsNav);
+  header.appendChild(createHeaderUpdateAvailableButton());
   container.appendChild(header);
 
   const updatePendingBadge = () => {

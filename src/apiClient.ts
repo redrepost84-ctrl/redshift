@@ -1539,7 +1539,7 @@ export async function apiFetchMutualProfile(username: string): Promise<{
       return { ok: false, mutualFriends: [], mutualGroups: [] };
     }
     const res = await fetch(
-      `/api/friends/mutual?username=${encodeURIComponent(username.trim())}`,
+      resolveApiUrl(`/api/friends/mutual?username=${encodeURIComponent(username.trim())}`),
       {
         method: 'GET',
         headers: { Authorization: `Bearer ${sessionToken}` },

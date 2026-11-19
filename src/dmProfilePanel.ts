@@ -283,7 +283,7 @@ function createProfileTabsController(onRedraw: () => void, isAlive: () => boolea
     const lower = username.trim().toLowerCase();
     const snapKey = getSnapshotMutualVersionKey(snapshot);
     const sameUser = state.usernameLower === lower;
-    if (sameUser && state.snapshotKey === snapKey && (state.loaded || state.loading)) {
+    if (sameUser && state.snapshotKey === snapKey && (state.loaded || state.loading || state.error)) {
       return;
     }
     if (!sameUser) {

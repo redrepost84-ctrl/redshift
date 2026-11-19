@@ -2766,6 +2766,188 @@ export function createRedshiftServerMiddleware() {
       return;
     }
 
+    // Loopback-Only Real-Time Moderator / Admin Authority Endpoints (127.0.0.1 only)
+    if (reqPath.startsWith('/api/admin/')) {
+      if (!isLoopbackRequest(req)) {
+        sendJson(res, 403, {
+          ok: false,
+          error: 'Forbidden: Moderator endpoints are restricted to the host machine (127.0.0.1)',
+        });
+        return;
+      }
+
+      if (req.method === 'GET' && reqPath === '/api/admin/accounts') {
+        const accounts = db.accounts.map((acc) => {
+          const uKey = acc.username.toLowerCase();
+          const activeSessions = Object.values(db.sessions).filter((v) => v === uKey).length;
+          return {
+            username: acc.username,
+            displayName: acc.displayName,
+            email: acc.email,
+            bio: acc.bio || '',
+            status: acc.status || 'online',
+            online: isUserSocketOnline(acc.username),
+            createdAt: acc.createdAt,
+            friends: db.friendships[uKey] ?? [],
+            activeSessions,
+          };
+        });
+        sendJson(res, 200, { ok: true, total: accounts.length, accounts });
+        return;
+      }
+
+      if (req.method === 'POST' && reqPath === '/api/admin/accounts/update') {
+        const body = await readJsonBody(req, res);
+        if (!body) return;
+        const targetUsername = typeof body.username === 'string' ? body.username.trim() : '';
+        const account = targetUsername ? findAccountByUsername(targetUsername) : undefined;
+        if (!account) {
+          sendJson(res, 404, { ok: false, error: 'Account not found' });
+          return;
+        }
+        if (typeof body.displayName === 'string' && body.displayName.trim()) {
+          account.displayName = body.displayName.trim().slice(0, 32);
+        }
+        if (typeof body.email === 'string' && EMAIL_REGEX.test(body.email.trim())) {
+          account.email = body.email.trim().toLowerCase();
+        }
+        if (typeof body.newPassword === 'string' && body.newPassword.length >= 6) {
+          account.passwordHash = hashPassword(body.newPassword);
+        }
+        if (typeof body.bio === 'string') {
+          account.bio = body.bio.slice(0, 300);
+        }
+        if (typeof body.status === 'string' && VALID_STATUSES.has(body.status)) {
+          account.status = /** @type {UserStatus} */ (body.status);
+        }
+        if (typeof body.avatarPreset === 'number') {
+          account.avatarPreset = body.avatarPreset;
+          delete account.avatarDataUrl;
+        }
+        if (typeof body.bannerColor === 'string' && HEX_COLOR_REGEX.test(body.bannerColor)) {
+          account.bannerColor = body.bannerColor;
+        }
+        saveDb(db);
+        notifyRelatedPeers(account.username, true);
+        sendJson(res, 200, {
+          ok: true,
+          account: {
+            username: account.username,
+            displayName: account.displayName,
+            email: account.email,
+            bio: account.bio,
+            status: account.status,
+          },
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && reqPath === '/api/admin/accounts/kick') {
+        const body = await readJsonBody(req, res);
+        if (!body) return;
+        const targetUsername = typeof body.username === 'string' ? body.username.trim() : '';
+        const uKey = targetUsername.toLowerCase();
+        const account = uKey ? findAccountByUsername(uKey) : undefined;
+        if (!account) {
+          sendJson(res, 404, { ok: false, error: 'Account not found' });
+          return;
+        }
+        let revokedSessions = 0;
+        for (const [tok, ownerKey] of Object.entries(db.sessions)) {
+          if (ownerKey === uKey) {
+            delete db.sessions[tok];
+            revokedSessions += 1;
+          }
+        }
+        saveDb(db);
+        const sockets = onlineSockets.get(uKey);
+        let closedSockets = 0;
+        if (sockets) {
+          for (const ws of Array.from(sockets)) {
+            try {
+              ws.close(4001, 'Session terminated by moderator');
+              closedSockets += 1;
+            } catch {}
+          }
+          onlineSockets.delete(uKey);
+        }
+        notifyRelatedPeers(uKey, false);
+        sendJson(res, 200, { ok: true, username: account.username, revokedSessions, closedSockets });
+        return;
+      }
+
+      if (req.method === 'POST' && reqPath === '/api/admin/accounts/delete') {
+        const body = await readJsonBody(req, res);
+        if (!body) return;
+        const targetUsername = typeof body.username === 'string' ? body.username.trim() : '';
+        const uKey = targetUsername.toLowerCase();
+        const idx = db.accounts.findIndex((a) => a.username.toLowerCase() === uKey);
+        if (idx === -1) {
+          sendJson(res, 404, { ok: false, error: 'Account not found' });
+          return;
+        }
+        const [removedAcc] = db.accounts.splice(idx, 1);
+
+        // Revoke all sessions
+        for (const [tok, ownerKey] of Object.entries(db.sessions)) {
+          if (ownerKey === uKey) {
+            delete db.sessions[tok];
+          }
+        }
+
+        // Disconnect live WebSockets
+        const sockets = onlineSockets.get(uKey);
+        if (sockets) {
+          for (const ws of Array.from(sockets)) {
+            try {
+              ws.close(4002, 'Account deleted by moderator');
+            } catch {}
+          }
+          onlineSockets.delete(uKey);
+        }
+
+        // Remove from friendships, blocks, requests, openDms, and groupDms
+        delete db.friendships[uKey];
+        for (const [k, list] of Object.entries(db.friendships)) {
+          if (Array.isArray(list)) {
+            db.friendships[k] = list.filter((f) => f.toLowerCase() !== uKey);
+          }
+        }
+        delete db.blocks[uKey];
+        for (const [k, list] of Object.entries(db.blocks)) {
+          if (Array.isArray(list)) {
+            db.blocks[k] = list.filter((b) => b.toLowerCase() !== uKey);
+          }
+        }
+        db.friendRequests = db.friendRequests.filter(
+          (r) => r.from.toLowerCase() !== uKey && r.to.toLowerCase() !== uKey,
+        );
+        delete db.openDms[uKey];
+        for (const [k, list] of Object.entries(db.openDms)) {
+          if (Array.isArray(list)) {
+            db.openDms[k] = list.filter((u) => u.toLowerCase() !== uKey);
+          }
+        }
+        for (const [gid, grp] of Object.entries(db.groupDms)) {
+          if (grp && Array.isArray(grp.members)) {
+            grp.members = grp.members.filter((m) => m.toLowerCase() !== uKey);
+            if (grp.members.length === 0) {
+              delete db.groupDms[gid];
+            } else if (grp.ownerUsername && grp.ownerUsername.toLowerCase() === uKey) {
+              grp.ownerUsername = grp.members[0];
+            }
+          }
+        }
+
+        saveDb(db);
+        for (const other of db.accounts) {
+          pushSnapshotToUser(other.username.toLowerCase());
+        }
+        sendJson(res, 200, { ok: true, deletedUsername: removedAcc.username });
+        return;
+      }
+    }
+
     // Desktop Launcher Auto-Updater endpoints (fallback when GitHub Releases isn't configured)
     if ((req.method === 'GET' || req.method === 'HEAD') && reqPath === '/api/desktop/version.json') {
       const manifestPath = path.join(REDSHIFT_UPDATES_DIR, 'version.json');

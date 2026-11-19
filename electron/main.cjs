@@ -867,9 +867,9 @@ async function createMainWindow() {
       mainWindow.webContents.send('background-update-available', res);
     }
   };
-  setTimeout(checkBgUpdate, 15_000).unref();
+  setTimeout(checkBgUpdate, 8_000).unref();
   if (bgUpdateTimer) clearInterval(bgUpdateTimer);
-  bgUpdateTimer = setInterval(checkBgUpdate, 30 * 60 * 1000);
+  bgUpdateTimer = setInterval(checkBgUpdate, 45 * 1000);
   bgUpdateTimer.unref();
 }
 

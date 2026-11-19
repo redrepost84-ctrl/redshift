@@ -1543,7 +1543,60 @@ async function run() {
             ),
           5000,
         );
-        console.log('[PASS] Browser E2E: Sidebar Group Chat X leave button & pre-login worldwide server health pill');
+        console.log('[PASS] Browser E2E: Sidebar Group Chat X leave button');
+
+        // 8) Post-Update Scrollable News-Article Changelog Modal & Header "Update Available" Button + Restart Popup
+        await cdp.evalJson(`(() => {
+          localStorage.setItem('redshift.last_seen_changelog_version.v1', '0.0.1');
+          location.reload();
+          return true;
+        })()`);
+        await waitFor(
+          async () =>
+            await cdp.evalJson(
+              `Boolean(document.querySelector('.changelog-article-modal')) && Boolean(document.querySelector('[data-action="close-changelog"]'))`,
+            ),
+          8000,
+        );
+        await cdp.evalJson(`(() => {
+          document.querySelector('[data-action="close-changelog"]').click();
+          return true;
+        })()`);
+        await waitFor(
+          async () => await cdp.evalJson(`!document.querySelector('.changelog-article-modal')`),
+          4000,
+        );
+
+        // Dispatch update-available event -> verify header button appears and clicking it opens "Update Available" restart popup
+        await cdp.evalJson(`(() => {
+          window.dispatchEvent(new CustomEvent('redshift:update-available', {
+            detail: { updateAvailable: true, currentVersion: '0.1.3', latestVersion: '0.9.9', changelog: 'Major update ready!' }
+          }));
+          return true;
+        })()`);
+        await waitFor(
+          async () =>
+            await cdp.evalJson(
+              `Boolean(document.querySelector('[data-action="header-update-available"]:not([hidden])'))`,
+            ),
+          4000,
+        );
+        await cdp.evalJson(`(() => {
+          document.querySelector('[data-action="header-update-available"]:not([hidden])').click();
+          return true;
+        })()`);
+        await waitFor(
+          async () =>
+            await cdp.evalJson(
+              `Boolean(document.querySelector('.modal-card--confirm')) && document.querySelector('.modal-card--confirm').textContent.includes('Update Available (v0.9.9)')`,
+            ),
+          4000,
+        );
+        await cdp.evalJson(`(() => {
+          window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+          return true;
+        })()`);
+        console.log('[PASS] Browser E2E: Post-update News-Article Changelog modal & Header Update Available button/popup');
       } finally {
         cdp.close();
         try {
@@ -1582,6 +1635,34 @@ async function run() {
     const patchBuf = Buffer.from(await patchResp.arrayBuffer());
     assert.equal(patchBuf.toString('utf8'), dummyAsarBytes.toString('utf8'));
     console.log('[PASS] Desktop updater manifest (/api/desktop/version.json), patch download & CORS preflight');
+
+    // 4.6 Real-Time Moderator / Admin Authority Endpoints (loopback-only)
+    const adminList = await api(baseUrl, '/api/admin/accounts');
+    assert.equal(adminList.status, 200);
+    assert.equal(adminList.data.ok, true);
+    assert.ok(adminList.data.accounts.some((a) => a.username === 'carol_t'));
+
+    const adminUpdate = await api(baseUrl, '/api/admin/accounts/update', {
+      method: 'POST',
+      body: { username: 'carol_t', displayName: 'Carol Moderated', bio: 'Moderated bio' },
+    });
+    assert.equal(adminUpdate.status, 200);
+    assert.equal(adminUpdate.data.account.displayName, 'Carol Moderated');
+
+    const adminKick = await api(baseUrl, '/api/admin/accounts/kick', {
+      method: 'POST',
+      body: { username: 'carol_t' },
+    });
+    assert.equal(adminKick.status, 200);
+    assert.equal(adminKick.data.ok, true);
+
+    const adminDel = await api(baseUrl, '/api/admin/accounts/delete', {
+      method: 'POST',
+      body: { username: 'carol_t' },
+    });
+    assert.equal(adminDel.status, 200);
+    assert.equal(adminDel.data.deletedUsername, 'carol_t');
+    console.log('[PASS] Real-time loopback Moderator / Admin account authority (list, update, kick & delete)');
 
     // 5. Auth rate limiting burst check (run after browser login from same IP)
     let got429 = false;
