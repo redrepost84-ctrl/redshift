@@ -75,15 +75,17 @@ class CdpSession {
         const res = await fetch(`http://127.0.0.1:${this.port}/json/list`);
         const list = await res.json();
         if (!Array.isArray(list)) return false;
-        return (
-          list.find((t) => t.type === 'page' && t.url?.includes(expectedUrl)) ??
-          list.find((t) => t.type === 'page') ??
-          false
-        );
+        const matched = list.find((t) => t.type === 'page' && t.url?.includes(expectedUrl));
+        if (matched) return matched;
+        return list.find((t) => t.type === 'page' && t.url && t.url !== 'about:blank') ?? false;
       } catch {
         return false;
       }
-    }, 25000);
+    }, 10000).catch(async () => {
+      const res = await fetch(`http://127.0.0.1:${this.port}/json/list`);
+      const list = await res.json();
+      return list.find((t) => t.type === 'page');
+    });
     this.errors = [];
     this.ws = new WebSocket(target.webSocketDebuggerUrl);
     await new Promise((r) => this.ws.addEventListener('open', r));
@@ -1315,6 +1317,40 @@ async function run() {
           console.error('[SPOILER CTX DIAG]', diag);
           throw err;
         });
+        const revealedCtxChecks = await cdp.evalJson(`({
+          hasHideSpoiler: Array.from(document.querySelectorAll('.ctx-menu-item')).some((el) => el.textContent.includes('Hide Spoiler')),
+          hasCopyImage: Array.from(document.querySelectorAll('.ctx-menu-item')).some((el) => el.textContent.trim() === 'Copy Image'),
+          hasSidebarDupBanner: Boolean(document.querySelector('.desktop-update-banner')),
+        })`);
+        assert.equal(revealedCtxChecks.hasHideSpoiler, true, 'Revealing a spoiler must immediately show Hide Spoiler in context menu');
+        assert.equal(revealedCtxChecks.hasCopyImage, true, 'Image context menu must include Copy Image');
+        assert.equal(revealedCtxChecks.hasSidebarDupBanner, false, 'Duplicate bottom-left sidebar update banner must be removed');
+        // Verify textbox right-click context menu opens with Paste
+        await cdp.evalJson(`(() => {
+          const ta = document.querySelector('.chat-input');
+          ta?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 250, clientY: 250 }));
+          return true;
+        })()`);
+        await waitFor(
+          async () =>
+            await cdp.evalJson(
+              `Array.from(document.querySelectorAll('.ctx-menu-item')).some((el) => el.textContent.includes('Paste'))`,
+            ),
+          3000,
+        );
+        // Re-open spoiler context menu and remove spoiler blur
+        await cdp.evalJson(`(() => {
+          const img = document.querySelector('[data-msg-id="${spoilerMsgId}"] .msg-image');
+          img?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 200 }));
+          return true;
+        })()`);
+        await waitFor(
+          async () =>
+            await cdp.evalJson(
+              `Array.from(document.querySelectorAll('.ctx-menu-item')).some((el) => el.textContent.includes('Remove Spoiler Blur'))`,
+            ),
+          3000,
+        );
         await cdp.evalJson(`(() => {
           const item = Array.from(document.querySelectorAll('.ctx-menu-item')).find((el) => el.textContent.includes('Remove Spoiler Blur'));
           item?.click();

@@ -78,7 +78,6 @@ import {
   createHeaderUpdateAvailableButton,
   maybeShowPostUpdateChangelog,
   notifyHeaderUpdateAvailable,
-  promptUpdateRestartModal,
 } from './changelogModal';
 import { formatCustomStatusLine } from './customStatusModal';
 import { getDesktopBridge } from './desktopBridge';
@@ -122,6 +121,7 @@ import {
 import {
   createProfileDrawerController,
   createStatusGlyph,
+  getLockedOptimisticSelfCustomStatus,
   getLockedOptimisticSelfStatus,
   openSelfProfileModal,
   type SelfProfileModalHandle,
@@ -135,6 +135,7 @@ import {
 } from './voiceAudio';
 import { createVoiceManager } from './voiceManager';
 import {
+  attachGlobalEditableContextMenu,
   buildMuteMenuEntries,
   type ContextMenuItem,
   copyToClipboard,
@@ -186,8 +187,10 @@ import type {
   AttachmentKind,
   AuthScreen,
   ChatMessage,
+  CustomStatusData,
   DmAttachment,
   DmReadReceipt,
+  EffectiveStatus,
   FriendsTab,
   GifItem,
   GroupDmInfo,
@@ -198,6 +201,7 @@ import type {
   ResetSession,
   SignUpDraft,
   SocialSnapshot,
+  UserStatus,
   VcStateEventPayload,
   VoiceNoteMeta,
 } from './types';
@@ -1591,33 +1595,13 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   dockActions.appendChild(dockDeafenBtn);
   dockActions.appendChild(settingsGearBtn);
 
-  const desktopUpdateBanner = document.createElement('button');
-  desktopUpdateBanner.type = 'button';
-  desktopUpdateBanner.className = 'desktop-update-banner';
-  desktopUpdateBanner.hidden = true;
-  const desktopUpdateDot = document.createElement('span');
-  desktopUpdateDot.className = 'desktop-update-dot';
-  const desktopUpdateText = document.createElement('span');
-  desktopUpdateText.className = 'desktop-update-text';
-  desktopUpdateText.textContent = 'Update Ready · Restart';
-  desktopUpdateBanner.appendChild(desktopUpdateDot);
-  desktopUpdateBanner.appendChild(desktopUpdateText);
-
+  // Only the DM / Group Chat / Friends header "Update Available" button is shown (no duplicate sidebar banner).
   const desktopBridge = getDesktopBridge();
   let unsubscribeDesktopUpdate: (() => void) | null = null;
   if (desktopBridge) {
-    desktopUpdateBanner.addEventListener('click', () => {
-      void promptUpdateRestartModal();
-    });
     const onDetectedUpdate = (info: import('./desktopBridge').DesktopUpdateInfo) => {
       if (info && info.updateAvailable && info.asarUrl) {
         notifyHeaderUpdateAvailable(info);
-        desktopUpdateBanner.disabled = false;
-        desktopUpdateText.textContent = `Update Ready (v${info.latestVersion}) · Restart`;
-        desktopUpdateBanner.title = info.changelog
-          ? `Redshift v${info.latestVersion}: ${info.changelog}`
-          : `Click to install Redshift v${info.latestVersion} and restart`;
-        desktopUpdateBanner.hidden = false;
       }
     };
     unsubscribeDesktopUpdate = desktopBridge.onBackgroundUpdateAvailable(onDetectedUpdate);
@@ -1627,7 +1611,6 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       }
     }).catch(() => {});
   }
-  leftColumn.appendChild(desktopUpdateBanner);
 
   const vcSidebarStatusHost = document.createElement('div');
   vcSidebarStatusHost.className = 'vc-sidebar-status-host';
@@ -1822,6 +1805,9 @@ function renderWorkspaceScreen(root: HTMLElement): void {
 
   const dmMessagesByThread = new Map<string, ChatMessage[]>();
   const dmHasMoreByThread = new Map<string, boolean>();
+  const dmHistoryHydratedAt = new Map<string, number>();
+  const inflightThreadPrefetches = new Map<string, Promise<void>>();
+  let workspaceDestroyed = false;
   let pendingGlobalJump: { cacheKey: string; messageId: string } | null = null;
   const dmReceiptsByThread = new Map<string, DmReadReceipt>();
   const typingByThread = new Map<
@@ -2153,6 +2139,95 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     }
     const merged = Array.from(byId.values()).sort((a, b) => a.timestamp - b.timestamp);
     dmMessagesByThread.set(cacheKey, merged);
+  };
+
+  /** Silently captures a DM or Group Chat's recent messages in the background so switching to it is instantaneous. */
+  const prefetchThreadHistory = (target: ThreadTarget, cacheKey: string): Promise<void> => {
+    const existing = inflightThreadPrefetches.get(cacheKey);
+    if (existing) {
+      return existing;
+    }
+    const job = apiFetchDmHistory(target, { limit: 50 })
+      .then((res) => {
+        if (workspaceDestroyed || state.screen !== 'app') {
+          return;
+        }
+        if (res.ok && res.messages) {
+          mergeDmHistory(cacheKey, res.messages);
+          dmHistoryHydratedAt.set(cacheKey, Date.now());
+          if (res.hasMore !== undefined) {
+            dmHasMoreByThread.set(cacheKey, Boolean(res.hasMore));
+          }
+          if (!cacheKey.startsWith('group:') && res.peerReceipt) {
+            dmReceiptsByThread.set(cacheKey, res.peerReceipt);
+          }
+          if (isThreadCurrentlyViewed(cacheKey)) {
+            activeDmSyncer?.();
+          }
+        }
+      })
+      .catch(() => {
+        // Ignore silent background prefetch errors.
+      })
+      .finally(() => {
+        inflightThreadPrefetches.delete(cacheKey);
+      });
+    inflightThreadPrefetches.set(cacheKey, job);
+    return job;
+  };
+
+  /** Pre-warms recent active/unread DM & Group threads on startup so opening any conversation has zero delay. */
+  const prewarmRecentThreads = (snap: SocialSnapshot | null) => {
+    if (!snap || workspaceDestroyed) {
+      return;
+    }
+    const hiddenSet = new Set(snap.hiddenThreads ?? []);
+    const candidates: Array<{ target: ThreadTarget; cacheKey: string; score: number }> = [];
+    const act = snap.threadActivity ?? {};
+
+    for (const grp of snap.groups ?? []) {
+      const ck = groupThreadCacheKey(grp.id);
+      if (hiddenSet.has(ck) || dmHistoryHydratedAt.has(ck)) continue;
+      const unread = snap.groupUnreadCounts?.[grp.id] ?? 0;
+      candidates.push({
+        target: { groupId: grp.id },
+        cacheKey: ck,
+        score: (unread > 0 ? 1e15 : 0) + (act[ck] ?? grp.createdAt ?? 0),
+      });
+    }
+
+    const dmPeerKeys = new Set<string>();
+    for (const f of snap.friends) dmPeerKeys.add(f.username.toLowerCase());
+    for (const p of snap.dmPeers ?? []) dmPeerKeys.add(p.username.toLowerCase());
+    for (const pk of dmPeerKeys) {
+      const ck = dmThreadCacheKey(pk);
+      if (hiddenSet.has(ck) || dmHistoryHydratedAt.has(ck)) continue;
+      const unread = snap.unreadCounts?.[pk] ?? 0;
+      const lastAct = act[ck] ?? 0;
+      if (unread > 0 || lastAct > 0) {
+        candidates.push({
+          target: { peerUsername: pk },
+          cacheKey: ck,
+          score: (unread > 0 ? 1e15 : 0) + lastAct,
+        });
+      }
+    }
+
+    candidates.sort((a, b) => b.score - a.score);
+    const batch = candidates.slice(0, 8);
+    if (batch.length === 0) return;
+
+    let idx = 0;
+    const pump = async () => {
+      while (idx < batch.length && !workspaceDestroyed && state.screen === 'app') {
+        const next = batch[idx++];
+        if (!dmHistoryHydratedAt.has(next.cacheKey)) {
+          await prefetchThreadHistory(next.target, next.cacheKey);
+        }
+      }
+    };
+    void pump();
+    void pump();
   };
 
   const clearThreadTyping = (cacheKey: string, senderUsername?: string) => {
@@ -3494,7 +3569,8 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       ? state.snapshot.groupUnreadCounts?.[groupId] ?? 0
       : state.snapshot.unreadCounts?.[peerKey] ?? 0;
     let unreadMarkerMessageId: string | null = null;
-    let historyLoaded = false;
+    const preHydrated = dmHistoryHydratedAt.has(cacheKey);
+    let historyLoaded = preHydrated;
     let initialScrollApplied = false;
     let scrolledUpNewCount = 0;
     let loadingOlderMessages = false;
@@ -5117,6 +5193,13 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       }
     });
 
+    chatInput.addEventListener('redshift:paste-file', (e) => {
+      const detail = (e as CustomEvent<{ file?: File }>).detail;
+      if (detail?.file) {
+        stageAttachmentFiles([detail.file]);
+      }
+    });
+
     chatInput.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && replyingTo) {
         e.preventDefault();
@@ -5240,33 +5323,40 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       pendingGlobalJump = null;
     }
 
-    void apiFetchDmHistory(
-      apiTarget,
-      jumpForThisThread ? { around: jumpForThisThread } : { limit: 50 },
-    ).then((res) => {
-      if (seq !== dmLoadSeq || state.screen !== 'app' || !isThreadCurrentlyViewed(cacheKey)) {
-        return;
-      }
-      historyLoaded = true;
-      if (res.ok && res.messages) {
-        mergeDmHistory(cacheKey, res.messages);
-        if (res.hasMore !== undefined) {
-          dmHasMoreByThread.set(cacheKey, Boolean(res.hasMore));
+    const hydratedAgeMs = Date.now() - (dmHistoryHydratedAt.get(cacheKey) ?? 0);
+    const shouldReconcileHistory =
+      Boolean(jumpForThisThread) || !preHydrated || !socketConnected || hydratedAgeMs > 45_000;
+
+    if (shouldReconcileHistory) {
+      void apiFetchDmHistory(
+        apiTarget,
+        jumpForThisThread ? { around: jumpForThisThread } : { limit: 50 },
+      ).then((res) => {
+        if (seq !== dmLoadSeq || state.screen !== 'app' || !isThreadCurrentlyViewed(cacheKey)) {
+          return;
         }
-      }
-      if (!isGroup && res.ok) {
-        if (res.peerReceipt) {
-          dmReceiptsByThread.set(cacheKey, res.peerReceipt);
-        } else {
-          dmReceiptsByThread.delete(cacheKey);
+        historyLoaded = true;
+        if (res.ok && res.messages) {
+          mergeDmHistory(cacheKey, res.messages);
+          dmHistoryHydratedAt.set(cacheKey, Date.now());
+          if (res.hasMore !== undefined) {
+            dmHasMoreByThread.set(cacheKey, Boolean(res.hasMore));
+          }
         }
-      }
-      syncDmThread();
-      if (jumpForThisThread) {
-        initialScrollApplied = true;
-        requestAnimationFrame(() => jumpToMessageById(jumpForThisThread));
-      }
-    });
+        if (!isGroup && res.ok) {
+          if (res.peerReceipt) {
+            dmReceiptsByThread.set(cacheKey, res.peerReceipt);
+          } else {
+            dmReceiptsByThread.delete(cacheKey);
+          }
+        }
+        syncDmThread();
+        if (jumpForThisThread) {
+          initialScrollApplied = true;
+          requestAnimationFrame(() => jumpToMessageById(jumpForThisThread));
+        }
+      });
+    }
 
     requestAnimationFrame(() => {
       resizeComposer();
@@ -5470,18 +5560,66 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       }
     }
 
+    const prevThreadActivity = state.snapshot?.threadActivity ?? {};
+    const prevUnreadDms = state.snapshot?.unreadCounts ?? {};
+    const prevUnreadGroups = state.snapshot?.groupUnreadCounts ?? {};
+
     const lockedSelfStatus = getLockedOptimisticSelfStatus();
-    if (lockedSelfStatus && nextSnapshot.user.status !== lockedSelfStatus) {
+    const lockedSelfCustom = getLockedOptimisticSelfCustomStatus();
+    if (lockedSelfStatus || lockedSelfCustom.locked) {
+      const selfKeyLower = nextSnapshot.user.username.toLowerCase();
+      const patchedUser = {
+        ...nextSnapshot.user,
+        ...(lockedSelfStatus ? { status: lockedSelfStatus } : {}),
+        ...(lockedSelfCustom.locked ? { customStatus: lockedSelfCustom.customStatus } : {}),
+      };
+      const visibleSelfStatus: EffectiveStatus =
+        patchedUser.status === 'invisible' ? 'offline' : patchedUser.status;
       nextSnapshot = {
         ...nextSnapshot,
-        user: {
-          ...nextSnapshot.user,
-          status: lockedSelfStatus,
-        },
+        user: patchedUser,
+        groups: (nextSnapshot.groups ?? []).map((grp) => ({
+          ...grp,
+          members: grp.members.map((m) =>
+            m.username.toLowerCase() === selfKeyLower
+              ? {
+                  ...m,
+                  status: visibleSelfStatus,
+                  customStatus: patchedUser.customStatus ?? null,
+                }
+              : m,
+          ),
+        })),
       };
     }
 
     state.snapshot = nextSnapshot;
+
+    // Background message capture: if any inactive DM or Group Chat received newer activity or
+    // unread messages (e.g. while browsing elsewhere or during a brief WS hiccup), prefetch it now.
+    const nextAct = nextSnapshot.threadActivity ?? {};
+    for (const grp of nextSnapshot.groups ?? []) {
+      const ck = groupThreadCacheKey(grp.id);
+      if (isThreadCurrentlyViewed(ck)) continue;
+      const actAdvanced = (nextAct[ck] ?? 0) > (prevThreadActivity[ck] ?? 0);
+      const unreadAdvanced =
+        (nextSnapshot.groupUnreadCounts?.[grp.id] ?? 0) > (prevUnreadGroups[grp.id] ?? 0);
+      if (actAdvanced || unreadAdvanced) {
+        void prefetchThreadHistory({ groupId: grp.id }, ck);
+      }
+    }
+    const nextUnreadDms = nextSnapshot.unreadCounts ?? {};
+    for (const [k, ts] of Object.entries(nextAct)) {
+      if (!k.startsWith('dm:')) continue;
+      if (isThreadCurrentlyViewed(k)) continue;
+      const peerU = k.slice('dm:'.length);
+      if (
+        (ts ?? 0) > (prevThreadActivity[k] ?? 0) ||
+        (nextUnreadDms[peerU] ?? 0) > (prevUnreadDms[peerU] ?? 0)
+      ) {
+        void prefetchThreadHistory({ peerUsername: peerU }, k);
+      }
+    }
 
     const addedIncoming = nextSnapshot.incomingRequests.filter(
       (r) => !prevIncomingUsernames.has(r.user.username.toLowerCase()),
@@ -5647,6 +5785,48 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   let closeActiveQuickSwitcher: (() => void) | null = null;
   let closeActiveGlobalSearch: (() => void) | null = null;
 
+  const applyOptimisticSelfPatch = (patch: {
+    status?: UserStatus;
+    customStatus?: CustomStatusData | null;
+  }) => {
+    const snap = state.snapshot;
+    if (!snap) {
+      return;
+    }
+    const selfKeyLower = snap.user.username.toLowerCase();
+    const nextUser = {
+      ...snap.user,
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(patch.customStatus !== undefined ? { customStatus: patch.customStatus } : {}),
+    };
+    const visibleSelfStatus: EffectiveStatus =
+      nextUser.status === 'invisible' ? 'offline' : nextUser.status;
+    state.snapshot = {
+      ...snap,
+      user: nextUser,
+      groups: (snap.groups ?? []).map((grp) => ({
+        ...grp,
+        members: grp.members.map((m) =>
+          m.username.toLowerCase() === selfKeyLower
+            ? {
+                ...m,
+                status: visibleSelfStatus,
+                customStatus: nextUser.customStatus ?? null,
+              }
+            : m,
+        ),
+      })),
+    };
+    syncDock();
+    syncCustomStatusExpiryTimer();
+    drawerController.refresh();
+    activeSelfProfileModal?.refresh();
+    syncOpenPublicProfileModals(state.snapshot);
+    if (state.mainView === 'group' || state.mainView === 'dm') {
+      activeDmSyncer?.();
+    }
+  };
+
   const drawerController = createProfileDrawerController({
     presetAvatars: PRESET_AVATARS,
     resolveAvatar: resolveProfileAvatar,
@@ -5654,6 +5834,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     onSnapshotUpdated: (nextSnapshot, previousUsername) => {
       applyLiveSnapshot(nextSnapshot, previousUsername);
     },
+    onOptimisticSelfPatch: applyOptimisticSelfPatch,
     onSyncDock: syncDock,
     onSignOut: requestSignOutAction,
     onOpenFullProfile: () => triggerSelfProfileModal?.(false),
@@ -5705,6 +5886,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       onSnapshotUpdated: (nextSnapshot, previousUsername) => {
         applyLiveSnapshot(nextSnapshot, previousUsername);
       },
+      onOptimisticSelfPatch: applyOptimisticSelfPatch,
       onSyncDock: syncDock,
       onOpenSettings: openUserSettingsModal,
       onSignOut: requestSignOutAction,
@@ -6043,6 +6225,20 @@ function renderWorkspaceScreen(root: HTMLElement): void {
 
       upsertDmMessage(cacheKey, message);
 
+      // Background message capture: if this thread hasn't loaded its preceding history yet,
+      // silently hydrate it right now so clicking into it later shows every message immediately.
+      if (!dmHistoryHydratedAt.has(cacheKey) && !isThreadCurrentlyViewed(cacheKey)) {
+        const bgTarget: ThreadTarget | null = groupId
+          ? { groupId }
+          : (() => {
+              const pk = resolvePeerKey(threadUsers);
+              return pk ? { peerUsername: pk } : null;
+            })();
+        if (bgTarget) {
+          void prefetchThreadHistory(bgTarget, cacheKey);
+        }
+      }
+
       if (state.snapshot) {
         const msgTs = message.timestamp || Date.now();
         const prevAct = state.snapshot.threadActivity ?? {};
@@ -6347,8 +6543,10 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   ensureNotificationPermissionOnGesture();
   renderMainArea();
   maybeShowPostUpdateChangelog();
+  window.setTimeout(() => prewarmRecentThreads(state.snapshot), 350);
 
   activeWorkspaceCleanup = () => {
+    workspaceDestroyed = true;
     window.clearInterval(liveSnapshotPollTimer);
     closeChangelogModal();
     unsubscribeDesktopUpdate?.();
@@ -6459,6 +6657,7 @@ function render(): void {
 }
 
 async function bootstrapApp(): Promise<void> {
+  attachGlobalEditableContextMenu();
   const desktopBridge = getDesktopBridge();
   let githubRepo = 'redrepost84-ctrl/redshift';
   if (desktopBridge) {

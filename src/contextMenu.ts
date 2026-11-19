@@ -1,4 +1,10 @@
-import { apiGetGifShareLink, apiMuteThread, getDeterministicGifShareUrl } from './apiClient';
+import {
+  apiGetGifShareLink,
+  apiMuteThread,
+  getDeterministicGifShareUrl,
+  resolveMediaUrl,
+} from './apiClient';
+import { getDesktopBridge } from './desktopBridge';
 import { formatMuteRemaining, getThreadMuteUntil, THREAD_MUTE_OPTIONS } from './muteUtils';
 import type { GifItem, SocialSnapshot } from './types';
 
@@ -10,6 +16,8 @@ export type MenuIconName =
   | 'unpin'
   | 'trash'
   | 'copy'
+  | 'cut'
+  | 'paste'
   | 'link'
   | 'download'
   | 'expand'
@@ -60,6 +68,21 @@ const MENU_ICON_PATHS: Record<MenuIconName, { d: string[]; fillCurrent?: boolean
     d: [
       'M9 9h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V11a2 2 0 0 1 2-2z',
       'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1',
+    ],
+  },
+  cut: {
+    d: [
+      'M6 6a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+      'M6 12a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+      'M20 4L8.12 15.88',
+      'M14.47 14.48L20 20',
+      'M8.12 8.12L12 12',
+    ],
+  },
+  paste: {
+    d: [
+      'M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2',
+      'M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z',
     ],
   },
   link: {
@@ -203,10 +226,21 @@ export function createMenuIconSvg(name: MenuIconName, size = 15): SVGSVGElement 
   return svg;
 }
 
-/** Copies text to the clipboard with a fallback for contexts without Async Clipboard focus. */
+/** Copies text to the clipboard with Electron native + fallback support. */
 export async function copyToClipboard(text: string): Promise<boolean> {
   if (!text) {
     return false;
+  }
+  const bridge = getDesktopBridge();
+  if (bridge?.writeClipboardText) {
+    try {
+      const res = await bridge.writeClipboardText(text);
+      if (res?.ok) {
+        return true;
+      }
+    } catch {
+      // Fall through to web clipboard.
+    }
   }
   try {
     if (navigator.clipboard?.writeText) {
@@ -231,6 +265,255 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Reads plain text from the clipboard (Electron native IPC first, then browser Clipboard API). */
+export async function readTextFromClipboard(): Promise<string> {
+  const bridge = getDesktopBridge();
+  if (bridge?.readClipboardText) {
+    try {
+      const text = await bridge.readClipboardText();
+      if (typeof text === 'string') {
+        return text;
+      }
+    } catch {
+      // Fall through to web clipboard.
+    }
+  }
+  try {
+    if (navigator.clipboard?.readText) {
+      return await navigator.clipboard.readText();
+    }
+  } catch {
+    // Ignore permission errors.
+  }
+  return '';
+}
+
+/** Reads a pasted image from the clipboard as a File if available. */
+export async function readImageFileFromClipboard(): Promise<File | null> {
+  const bridge = getDesktopBridge();
+  if (bridge?.readClipboardImageDataUrl) {
+    try {
+      const dataUrl = await bridge.readClipboardImageDataUrl();
+      if (dataUrl && dataUrl.startsWith('data:image/')) {
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        if (blob.size > 0) {
+          return new File([blob], `pasted-image-${Date.now()}.png`, {
+            type: blob.type || 'image/png',
+          });
+        }
+      }
+    } catch {
+      // Fall through to web clipboard.
+    }
+  }
+  try {
+    if (navigator.clipboard?.read) {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imgType = item.types.find((t) => t.startsWith('image/'));
+        if (imgType) {
+          const blob = await item.getType(imgType);
+          if (blob.size > 0) {
+            const ext = imgType.split('/')[1]?.replace(/[^a-z0-9]/gi, '') || 'png';
+            return new File([blob], `pasted-image-${Date.now()}.${ext}`, { type: imgType });
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore permission errors.
+  }
+  return null;
+}
+
+/** Copies the actual image bitmap to the OS clipboard (works in Electron & modern browsers). */
+export async function copyImageToClipboard(rawUrl: string): Promise<boolean> {
+  const resolved = resolveMediaUrl(rawUrl);
+  if (!resolved) {
+    return false;
+  }
+  const absUrl = resolved.startsWith('data:') || resolved.startsWith('blob:')
+    ? resolved
+    : new URL(resolved, window.location.origin).href;
+
+  const bridge = getDesktopBridge();
+  if (bridge?.copyImageFromUrl && !absUrl.startsWith('blob:')) {
+    try {
+      const res = await bridge.copyImageFromUrl(absUrl);
+      if (res?.ok) {
+        return true;
+      }
+    } catch {
+      // Fall through to canvas clipboard copy.
+    }
+  }
+
+  try {
+    const resp = await fetch(absUrl);
+    if (!resp.ok) {
+      return false;
+    }
+    const rawBlob = await resp.blob();
+    if (rawBlob.type === 'image/png' && typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': rawBlob })]);
+      return true;
+    }
+    const bitmapUrl = URL.createObjectURL(rawBlob);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.crossOrigin = 'anonymous';
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error('Image decode failed'));
+        el.src = bitmapUrl;
+      });
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width || 1;
+      canvas.height = img.naturalHeight || img.height || 1;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return false;
+      ctx.drawImage(img, 0, 0);
+      const pngBlob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), 'image/png'),
+      );
+      if (!pngBlob) return false;
+      if (bridge?.copyImageFromUrl) {
+        const dataUrl = canvas.toDataURL('image/png');
+        const res = await bridge.copyImageFromUrl(dataUrl);
+        if (res?.ok) return true;
+      }
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+        return true;
+      }
+    } finally {
+      URL.revokeObjectURL(bitmapUrl);
+    }
+  } catch {
+    // Ignore failures.
+  }
+  return false;
+}
+
+function isEditableTextControl(el: EventTarget | null): el is HTMLInputElement | HTMLTextAreaElement {
+  if (el instanceof HTMLTextAreaElement) {
+    return !el.disabled;
+  }
+  if (el instanceof HTMLInputElement) {
+    const t = (el.type || 'text').toLowerCase();
+    return (
+      !el.disabled &&
+      (t === 'text' || t === 'search' || t === 'email' || t === 'password' || t === 'url' || t === 'tel')
+    );
+  }
+  return false;
+}
+
+/** Attaches a Redshift right-click context menu (Cut, Copy, Paste, Select All) to all text boxes. */
+export function attachGlobalEditableContextMenu(): () => void {
+  const onContextMenu = (e: MouseEvent) => {
+    if (e.defaultPrevented) {
+      return;
+    }
+    const target = e.target;
+    if (!isEditableTextControl(target)) {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+
+    const start = target.selectionStart ?? 0;
+    const end = target.selectionEnd ?? 0;
+    const selectedText = end > start ? target.value.slice(start, end) : '';
+    const canEdit = !target.readOnly && !target.disabled;
+    const items: ContextMenuItem[] = [];
+
+    if (selectedText && canEdit) {
+      items.push({
+        label: 'Cut',
+        icon: 'cut',
+        hint: 'Ctrl+X',
+        onSelect: () => {
+          void copyToClipboard(selectedText);
+          target.focus();
+          target.setRangeText('', start, end, 'end');
+          target.dispatchEvent(new Event('input', { bubbles: true }));
+        },
+      });
+    }
+
+    if (selectedText) {
+      items.push({
+        label: 'Copy',
+        icon: 'copy',
+        hint: 'Ctrl+C',
+        onSelect: () => {
+          void copyToClipboard(selectedText);
+          target.focus();
+        },
+      });
+    }
+
+    if (canEdit) {
+      items.push({
+        label: 'Paste',
+        icon: 'paste',
+        hint: 'Ctrl+V',
+        onSelect: async () => {
+          target.focus();
+          const text = await readTextFromClipboard();
+          if (text) {
+            const curStart = target.selectionStart ?? start;
+            const curEnd = target.selectionEnd ?? end;
+            target.setRangeText(text, curStart, curEnd, 'end');
+            target.dispatchEvent(new Event('input', { bubbles: true }));
+            return;
+          }
+          const imgFile = await readImageFileFromClipboard();
+          if (imgFile) {
+            target.dispatchEvent(
+              new CustomEvent('redshift:paste-file', {
+                bubbles: true,
+                detail: { file: imgFile },
+              }),
+            );
+          }
+        },
+      });
+    }
+
+    if (target.value.length > 0) {
+      items.push({
+        label: 'Select All',
+        icon: 'check',
+        hint: 'Ctrl+A',
+        dividerBefore: items.length > 0,
+        onSelect: () => {
+          target.focus();
+          target.select();
+        },
+      });
+    }
+
+    if (items.length === 0) {
+      return;
+    }
+
+    openContextMenu({
+      clientX: e.clientX,
+      clientY: e.clientY,
+      minWidth: 186,
+      items,
+    });
+  };
+
+  document.addEventListener('contextmenu', onContextMenu);
+  return () => {
+    document.removeEventListener('contextmenu', onContextMenu);
+  };
 }
 
 /** Triggers a browser download for a file or media attachment URL. */

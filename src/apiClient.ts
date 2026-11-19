@@ -1,3 +1,4 @@
+import { getDesktopBridge } from './desktopBridge';
 import type {
   AttachmentKind,
   ChatMessage,
@@ -327,13 +328,31 @@ export function resolveWsUrl(wsPathWithQuery: string): string {
 
 function readStoredToken(): string | null {
   try {
-    return (
+    const fromWeb =
       sessionStorage.getItem(SESSION_STORAGE_KEY) ||
-      window.localStorage.getItem(PERSISTENT_SESSION_KEY)
-    );
+      window.localStorage.getItem(PERSISTENT_SESSION_KEY);
+    if (fromWeb) {
+      return fromWeb;
+    }
   } catch {
-    return null;
+    // Ignore web storage errors.
   }
+  try {
+    const fromDesktop = getDesktopBridge()?.getPersistentSessionToken?.();
+    if (fromDesktop && fromDesktop.trim()) {
+      const clean = fromDesktop.trim();
+      try {
+        sessionStorage.setItem(SESSION_STORAGE_KEY, clean);
+        window.localStorage.setItem(PERSISTENT_SESSION_KEY, clean);
+      } catch {
+        // Ignore hydration errors.
+      }
+      return clean;
+    }
+  } catch {
+    // Ignore desktop bridge errors.
+  }
+  return null;
 }
 
 let sessionToken: string | null = readStoredToken();
@@ -354,6 +373,11 @@ function setSessionToken(token: string, persist = false): void {
   } catch {
     // Ignore localStorage errors.
   }
+  try {
+    getDesktopBridge()?.setPersistentSessionToken?.(persist ? token : null);
+  } catch {
+    // Ignore desktop bridge errors.
+  }
 }
 
 export function clearSessionToken(): void {
@@ -367,6 +391,11 @@ export function clearSessionToken(): void {
     window.localStorage.removeItem(PERSISTENT_SESSION_KEY);
   } catch {
     // Ignore localStorage errors.
+  }
+  try {
+    getDesktopBridge()?.setPersistentSessionToken?.(null);
+  } catch {
+    // Ignore desktop bridge errors.
   }
 }
 

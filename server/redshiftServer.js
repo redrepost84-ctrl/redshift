@@ -1611,7 +1611,9 @@ function buildSocialSnapshot(username) {
     incomingRequests,
     outgoingRequests,
     blockedUsers,
-    favoriteGifs: (db.favoriteGifs[key] ?? []).map((g) => ensureGifDimensions({ ...g })),
+    favoriteGifs: (db.favoriteGifs[key] ?? [])
+      .filter((g) => isCommunityGifAssetIntact(g))
+      .map((g) => ensureGifDimensions({ ...g })),
     groups,
     unreadCounts: { ...(db.unreadDms[key] ?? {}) },
     groupUnreadCounts: { ...(db.unreadGroups[key] ?? {}) },
@@ -2126,16 +2128,38 @@ function ensureGifDimensions(item) {
 }
 
 /**
- * Filters the Redshift UGC GIF database by search query.
+ * Checks whether a community GIF's underlying upload file exists on disk (if it's an uploaded asset).
+ * @param {StoredCommunityGif} entry
+ */
+function isCommunityGifAssetIntact(entry) {
+  const uploadId =
+    typeof entry.uploadId === 'string' && entry.uploadId
+      ? entry.uploadId
+      : typeof entry.url === 'string' && entry.url.startsWith('/api/uploads/')
+        ? entry.url.slice('/api/uploads/'.length).split(/[/?#]/)[0]
+        : '';
+  if (!uploadId) {
+    return Boolean(entry.url);
+  }
+  const meta = db.uploads[uploadId];
+  if (!meta || !meta.diskName) {
+    return false;
+  }
+  return fs.existsSync(path.join(UPLOADS_DIR, meta.diskName));
+}
+
+/**
+ * Filters the Redshift UGC GIF database by search query, excluding any missing-file entries.
  * @param {string} query
  * @returns {StoredCommunityGif[]}
  */
 function searchCommunityGifs(query) {
+  const intact = db.communityGifs.filter((entry) => isCommunityGifAssetIntact(entry));
   const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const list =
     tokens.length === 0
-      ? db.communityGifs.slice(0, 200)
-      : db.communityGifs
+      ? intact.slice(0, 200)
+      : intact
           .filter((entry) => {
             const haystack = `${entry.title} ${(entry.tags ?? []).join(' ')} ${entry.uploadedBy}`.toLowerCase();
             return tokens.every((tok) => haystack.includes(tok));
@@ -2395,6 +2419,9 @@ function cleanupOrphanedUploads(candidateIds) {
 }
 
 function sweepStaleOrphanedUploads(minAgeMs = 10 * 60 * 1000) {
+  // Never blindly unlink unknown files on disk from a background interval: another local process
+  // (such as a dev server or test runner) could have written uploads to UPLOADS_DIR after this
+  // process booted. Only ever clean explicitly unreferenced DB entries via cleanupOrphanedUploads.
   const now = Date.now();
   const stillReferenced = collectReferencedUploadIds();
   const staleIds = [];
@@ -2411,35 +2438,6 @@ function sweepStaleOrphanedUploads(minAgeMs = 10 * 60 * 1000) {
   if (staleIds.length > 0 && cleanupOrphanedUploads(staleIds)) {
     removed += staleIds.length;
     saveDb(db);
-  }
-  // Also prune stray files on disk in UPLOADS_DIR with no DB record older than minAgeMs.
-  try {
-    if (fs.existsSync(UPLOADS_DIR)) {
-      const knownDiskNames = new Set();
-      for (const meta of Object.values(db.uploads)) {
-        if (meta?.diskName) {
-          knownDiskNames.add(meta.diskName);
-          knownDiskNames.add(`${meta.diskName}.pcm.wav`);
-        }
-      }
-      for (const fname of fs.readdirSync(UPLOADS_DIR)) {
-        if (knownDiskNames.has(fname)) {
-          continue;
-        }
-        const full = path.join(UPLOADS_DIR, fname);
-        try {
-          const stat = fs.statSync(full);
-          if (stat.isFile() && now - stat.mtimeMs >= minAgeMs) {
-            fs.unlinkSync(full);
-            removed += 1;
-          }
-        } catch {
-          // Ignore races on disk.
-        }
-      }
-    }
-  } catch {
-    // Ignore disk sweep failures.
   }
   return removed;
 }
@@ -3689,12 +3687,13 @@ export function createRedshiftServerMiddleware() {
       }
 
       activeUser.status = /** @type {UserStatus} */ (nextStatus);
-      saveDb(db);
+      // Push realtime updates and reply immediately before flushing SQLite so status switches feel instantaneous.
       notifyRelatedPeers(activeUser.username, true);
       sendJson(res, 200, {
         ok: true,
         snapshot: buildSocialSnapshot(activeUser.username),
       });
+      saveDb(db);
       return;
     }
 
@@ -3726,12 +3725,12 @@ export function createRedshiftServerMiddleware() {
         }
       }
 
-      saveDb(db);
       notifyRelatedPeers(activeUser.username, true);
       sendJson(res, 200, {
         ok: true,
         snapshot: buildSocialSnapshot(activeUser.username),
       });
+      saveDb(db);
       return;
     }
 
@@ -5095,9 +5094,12 @@ export function createRedshiftServerMiddleware() {
       const parsedUrl = new URL(req.url ?? '/', 'http://localhost');
       const query = (parsedUrl.searchParams.get('q') ?? '').trim();
       const results = searchCommunityGifs(query);
+      const totalIntact = query
+        ? db.communityGifs.filter((entry) => isCommunityGifAssetIntact(entry)).length
+        : results.length;
       sendJson(res, 200, {
         ok: true,
-        total: db.communityGifs.length,
+        total: totalIntact,
         results,
       });
       return;

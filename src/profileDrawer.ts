@@ -11,13 +11,20 @@ import {
   openAvatarChangeFlow,
   openBannerChangeFlow,
 } from './profileModals';
-import type { EffectiveStatus, SelfProfile, SocialSnapshot, UserStatus } from './types';
+import type {
+  CustomStatusData,
+  EffectiveStatus,
+  SelfProfile,
+  SocialSnapshot,
+  UserStatus,
+} from './types';
 
 interface ProfileDrawerOptions {
   presetAvatars: string[];
   resolveAvatar: (profile: { avatarPreset: number | null; avatarDataUrl?: string }) => string;
   getUser: () => SelfProfile;
   onSnapshotUpdated: (snapshot: SocialSnapshot, previousUsername?: string) => void;
+  onOptimisticSelfPatch?: (patch: { status?: UserStatus; customStatus?: CustomStatusData | null }) => void;
   onSyncDock: () => void;
   onSignOut: () => void;
   onOpenFullProfile?: () => void;
@@ -29,6 +36,7 @@ export interface SelfProfileModalOptions {
   resolveAvatar: (profile: { avatarPreset: number | null; avatarDataUrl?: string }) => string;
   getSnapshot: () => SocialSnapshot;
   onSnapshotUpdated: (snapshot: SocialSnapshot, previousUsername?: string) => void;
+  onOptimisticSelfPatch?: (patch: { status?: UserStatus; customStatus?: CustomStatusData | null }) => void;
   onSyncDock: () => void;
   onOpenSettings: () => void;
   onSignOut: () => void;
@@ -72,6 +80,9 @@ export const STATUS_LABELS: Record<EffectiveStatus, string> = {
 
 let statusChangeSeq = 0;
 let optimisticSelfStatusLock: { status: UserStatus; until: number } | null = null;
+let customStatusChangeSeq = 0;
+let optimisticSelfCustomStatusLock: { customStatus: CustomStatusData | null; until: number } | null =
+  null;
 
 /** Returns the active optimistic self status if a recent status click is still settling. */
 export function getLockedOptimisticSelfStatus(): UserStatus | null {
@@ -83,6 +94,21 @@ export function getLockedOptimisticSelfStatus(): UserStatus | null {
     return null;
   }
   return optimisticSelfStatusLock.status;
+}
+
+/** Returns the active optimistic custom status if a recent edit/clear is still settling. */
+export function getLockedOptimisticSelfCustomStatus(): {
+  locked: boolean;
+  customStatus: CustomStatusData | null;
+} {
+  if (!optimisticSelfCustomStatusLock) {
+    return { locked: false, customStatus: null };
+  }
+  if (Date.now() > optimisticSelfCustomStatusLock.until) {
+    optimisticSelfCustomStatusLock = null;
+    return { locked: false, customStatus: null };
+  }
+  return { locked: true, customStatus: optimisticSelfCustomStatusLock.customStatus };
 }
 
 function beginOptimisticStatusChange(nextStatus: UserStatus): number {
@@ -97,6 +123,26 @@ function settleOptimisticStatusChange(seq: number, confirmedStatus: UserStatus):
   }
   // Keep a short grace window so delayed WebSocket syncs from an earlier click never flicker back.
   optimisticSelfStatusLock = { status: confirmedStatus, until: Date.now() + 1800 };
+  return true;
+}
+
+function beginOptimisticCustomStatusChange(nextCustomStatus: CustomStatusData | null): number {
+  const seq = ++customStatusChangeSeq;
+  optimisticSelfCustomStatusLock = { customStatus: nextCustomStatus, until: Date.now() + 4500 };
+  return seq;
+}
+
+function settleOptimisticCustomStatusChange(
+  seq: number,
+  confirmedCustomStatus: CustomStatusData | null,
+): boolean {
+  if (seq !== customStatusChangeSeq) {
+    return false;
+  }
+  optimisticSelfCustomStatusLock = {
+    customStatus: confirmedCustomStatus,
+    until: Date.now() + 1800,
+  };
   return true;
 }
 
@@ -315,8 +361,12 @@ export function createProfileDrawerController(options: ProfileDrawerOptions) {
         const mySeq = beginOptimisticStatusChange(opt.value);
         const curUser = options.getUser();
         curUser.status = opt.value;
-        options.onSyncDock();
-        renderContents();
+        if (options.onOptimisticSelfPatch) {
+          options.onOptimisticSelfPatch({ status: opt.value });
+        } else {
+          options.onSyncDock();
+          renderContents();
+        }
         const res = await apiUpdateStatus(opt.value);
         if (res.ok && res.snapshot) {
           if (settleOptimisticStatusChange(mySeq, res.snapshot.user.status)) {
@@ -458,23 +508,51 @@ export function createProfileDrawerController(options: ProfileDrawerOptions) {
         placeholderPrompt: sessionPrompt,
         onEdit: () => {
           closeStatusMenu();
+          let pendingSeq = 0;
           openSetCustomStatusModal({
             user: options.getUser(),
             resolveAvatar: options.resolveAvatar,
             initialPrompt: sessionPrompt,
+            onOptimisticCustomStatus: (nextCustom) => {
+              pendingSeq = beginOptimisticCustomStatusChange(nextCustom);
+              const curUser = options.getUser();
+              curUser.customStatus = nextCustom;
+              if (!nextCustom) {
+                sessionPrompt = pickCasualStatusPrompt();
+              }
+              if (options.onOptimisticSelfPatch) {
+                options.onOptimisticSelfPatch({ customStatus: nextCustom });
+              } else {
+                options.onSyncDock();
+                renderContents();
+              }
+            },
             onSnapshotUpdated: (snapshot) => {
-              options.onSnapshotUpdated(snapshot);
-              renderContents();
+              if (!pendingSeq || settleOptimisticCustomStatusChange(pendingSeq, snapshot.user.customStatus ?? null)) {
+                options.onSnapshotUpdated(snapshot);
+                renderContents();
+              }
             },
           });
         },
         onClear: async () => {
           closeStatusMenu();
+          const mySeq = beginOptimisticCustomStatusChange(null);
+          const curUser = options.getUser();
+          curUser.customStatus = null;
+          sessionPrompt = pickCasualStatusPrompt();
+          if (options.onOptimisticSelfPatch) {
+            options.onOptimisticSelfPatch({ customStatus: null });
+          } else {
+            options.onSyncDock();
+            renderContents();
+          }
           const res = await apiUpdateCustomStatus({ clear: true });
           if (res.ok && res.snapshot) {
-            sessionPrompt = pickCasualStatusPrompt();
-            options.onSnapshotUpdated(res.snapshot);
-            renderContents();
+            if (settleOptimisticCustomStatusChange(mySeq, res.snapshot.user.customStatus ?? null)) {
+              options.onSnapshotUpdated(res.snapshot);
+              renderContents();
+            }
           }
         },
       });
@@ -922,8 +1000,12 @@ export function openSelfProfileModal(options: SelfProfileModalOptions): SelfProf
         const mySeq = beginOptimisticStatusChange(opt.value);
         const snapNow = options.getSnapshot();
         snapNow.user.status = opt.value;
-        options.onSyncDock();
-        renderModal();
+        if (options.onOptimisticSelfPatch) {
+          options.onOptimisticSelfPatch({ status: opt.value });
+        } else {
+          options.onSyncDock();
+          renderModal();
+        }
         const res = await apiUpdateStatus(opt.value);
         if (res.ok && res.snapshot) {
           if (settleOptimisticStatusChange(mySeq, res.snapshot.user.status)) {
@@ -1110,23 +1192,51 @@ export function openSelfProfileModal(options: SelfProfileModalOptions): SelfProf
         placeholderPrompt: sessionPrompt,
         onEdit: () => {
           closeStatusMenu();
+          let pendingSeq = 0;
           openSetCustomStatusModal({
             user: options.getSnapshot().user,
             resolveAvatar: options.resolveAvatar,
             initialPrompt: sessionPrompt,
+            onOptimisticCustomStatus: (nextCustom) => {
+              pendingSeq = beginOptimisticCustomStatusChange(nextCustom);
+              const snapNow = options.getSnapshot();
+              snapNow.user.customStatus = nextCustom;
+              if (!nextCustom) {
+                sessionPrompt = pickCasualStatusPrompt();
+              }
+              if (options.onOptimisticSelfPatch) {
+                options.onOptimisticSelfPatch({ customStatus: nextCustom });
+              } else {
+                options.onSyncDock();
+                renderModal();
+              }
+            },
             onSnapshotUpdated: (snapshot) => {
-              options.onSnapshotUpdated(snapshot);
-              renderModal();
+              if (!pendingSeq || settleOptimisticCustomStatusChange(pendingSeq, snapshot.user.customStatus ?? null)) {
+                options.onSnapshotUpdated(snapshot);
+                renderModal();
+              }
             },
           });
         },
         onClear: async () => {
           closeStatusMenu();
+          const mySeq = beginOptimisticCustomStatusChange(null);
+          const snapNow = options.getSnapshot();
+          snapNow.user.customStatus = null;
+          sessionPrompt = pickCasualStatusPrompt();
+          if (options.onOptimisticSelfPatch) {
+            options.onOptimisticSelfPatch({ customStatus: null });
+          } else {
+            options.onSyncDock();
+            renderModal();
+          }
           const res = await apiUpdateCustomStatus({ clear: true });
           if (res.ok && res.snapshot) {
-            sessionPrompt = pickCasualStatusPrompt();
-            options.onSnapshotUpdated(res.snapshot);
-            renderModal();
+            if (settleOptimisticCustomStatusChange(mySeq, res.snapshot.user.customStatus ?? null)) {
+              options.onSnapshotUpdated(res.snapshot);
+              renderModal();
+            }
           }
         },
       });

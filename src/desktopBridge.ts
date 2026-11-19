@@ -34,6 +34,12 @@ export interface RedshiftDesktopBridge {
   isElectron: true;
   platform: string;
   version: string;
+  getPersistentSessionToken?: () => string | null;
+  setPersistentSessionToken?: (token: string | null) => void;
+  readClipboardText?: () => Promise<string>;
+  writeClipboardText?: (text: string) => Promise<{ ok: boolean }>;
+  readClipboardImageDataUrl?: () => Promise<string>;
+  copyImageFromUrl?: (url: string) => Promise<{ ok: boolean }>;
   closeLauncher: () => void;
   launcherReady: () => void;
   checkForUpdates: () => Promise<DesktopUpdateInfo>;

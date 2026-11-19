@@ -243,6 +243,7 @@ export interface SetCustomStatusModalOptions {
   user: SelfProfile;
   resolveAvatar: (profile: { avatarPreset: number | null; avatarDataUrl?: string }) => string;
   initialPrompt?: string;
+  onOptimisticCustomStatus?: (customStatus: CustomStatusData | null) => void;
   onSnapshotUpdated: (snapshot: SocialSnapshot) => void;
 }
 
@@ -639,22 +640,48 @@ export function openSetCustomStatusModal(options: SetCustomStatusModalOptions): 
       return;
     }
     isSaving = true;
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving...';
     errorSlot.replaceChildren();
 
     const opt = CLEAR_OPTIONS.find((o) => o.id === clearChoice) ?? CLEAR_OPTIONS[0];
     const expiresAt = opt.computeExpiresAt(Date.now());
     const trimmed = draftText.trim();
+    const isClear = !trimmed && !draftEmoji;
 
-    const res =
-      !trimmed && !draftEmoji
+    const optimisticCustomStatus: CustomStatusData | null = isClear
+      ? null
+      : {
+          text: trimmed,
+          emoji: draftEmoji,
+          expiresAt,
+        };
+
+    // Apply instantaneously across the dock, profile card, and group chat sidebars before closing.
+    if (options.onOptimisticCustomStatus) {
+      options.onOptimisticCustomStatus(optimisticCustomStatus);
+      cleanup();
+      const res = isClear
         ? await apiUpdateCustomStatus({ clear: true })
         : await apiUpdateCustomStatus({
             text: trimmed,
             emoji: draftEmoji ?? null,
             expiresAt,
           });
+      if (res.ok && res.snapshot) {
+        options.onSnapshotUpdated(res.snapshot);
+      }
+      return;
+    }
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+
+    const res = isClear
+      ? await apiUpdateCustomStatus({ clear: true })
+      : await apiUpdateCustomStatus({
+          text: trimmed,
+          emoji: draftEmoji ?? null,
+          expiresAt,
+        });
 
     isSaving = false;
     if (!res.ok || !res.snapshot) {

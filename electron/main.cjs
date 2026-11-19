@@ -8,6 +8,7 @@ const {
   desktopCapturer,
   session,
   nativeImage,
+  clipboard,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -60,6 +61,40 @@ try {
 } catch (_) {}
 
 const CONFIG_PATH = path.join(USER_DATA_DIR, 'desktop-config.json');
+const SESSION_TOKEN_PATH = path.join(USER_DATA_DIR, 'desktop-session.json');
+const PREFERRED_EMBEDDED_PORT = 41893;
+
+function readPersistentSessionToken() {
+  try {
+    if (fs.existsSync(SESSION_TOKEN_PATH)) {
+      const parsed = JSON.parse(fs.readFileSync(SESSION_TOKEN_PATH, 'utf8'));
+      if (parsed && typeof parsed.token === 'string' && parsed.token.trim()) {
+        return parsed.token.trim();
+      }
+    }
+  } catch (_) {}
+  return '';
+}
+
+function writePersistentSessionToken(token) {
+  try {
+    const clean = typeof token === 'string' ? token.trim() : '';
+    if (!clean) {
+      if (fs.existsSync(SESSION_TOKEN_PATH)) {
+        fs.unlinkSync(SESSION_TOKEN_PATH);
+      }
+      return;
+    }
+    fs.mkdirSync(USER_DATA_DIR, { recursive: true });
+    fs.writeFileSync(
+      SESSION_TOKEN_PATH,
+      JSON.stringify({ token: clean, savedAt: Date.now() }, null, 2),
+      'utf8',
+    );
+  } catch (err) {
+    console.error('[Redshift Desktop] Failed to persist session token:', err);
+  }
+}
 
 function readDesktopConfig() {
   const defaults = {
@@ -255,8 +290,22 @@ async function ensureEmbeddedServer() {
   mod.attachRedshiftWebSocket(srv);
 
   await new Promise((resolve, reject) => {
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => resolve());
+    const listenFallback = () => {
+      srv.once('error', reject);
+      srv.listen(0, '127.0.0.1', () => resolve());
+    };
+    const onPreferredError = (err) => {
+      if (err && (err.code === 'EADDRINUSE' || err.code === 'EACCES')) {
+        listenFallback();
+      } else {
+        reject(err);
+      }
+    };
+    srv.once('error', onPreferredError);
+    srv.listen(PREFERRED_EMBEDDED_PORT, '127.0.0.1', () => {
+      srv.removeListener('error', onPreferredError);
+      resolve();
+    });
   });
 
   const addr = srv.address();
@@ -592,7 +641,15 @@ async function fetchLatestManifest() {
         const remoteVer = data.version.trim();
         let resolvedAsarUrl = typeof data.asarUrl === 'string' ? data.asarUrl.trim() : '';
         if (resolvedAsarUrl && !resolvedAsarUrl.startsWith('http')) {
-          resolvedAsarUrl = new URL(resolvedAsarUrl, finalUrl).href;
+          // Never resolve relative paths against GitHub's signed CDN redirect URL (causes HTTP 618 jwt-not-provided).
+          const cfgNow = readDesktopConfig();
+          const base =
+            cand.source === 'github' && cfgNow.githubRepo
+              ? `https://github.com/${cfgNow.githubRepo}/releases/download/v${remoteVer}/`
+              : /githubusercontent\.com/i.test(finalUrl)
+                ? cand.url
+                : finalUrl;
+          resolvedAsarUrl = new URL(resolvedAsarUrl, base).href;
         }
         const updateAvailable = compareSemver(remoteVer, currentVersion) > 0;
         const result = {
@@ -994,6 +1051,112 @@ async function performFirstTimeInstall() {
 }
 
 // IPC Handlers
+ipcMain.on('get-app-version', (event) => {
+  event.returnValue = currentVersion;
+});
+
+ipcMain.on('get-persistent-session-token', (event) => {
+  event.returnValue = readPersistentSessionToken();
+});
+
+ipcMain.on('set-persistent-session-token', (_event, token) => {
+  writePersistentSessionToken(typeof token === 'string' ? token : '');
+});
+
+ipcMain.handle('clipboard-read-text', () => {
+  try {
+    return clipboard.readText() || '';
+  } catch (_) {
+    return '';
+  }
+});
+
+ipcMain.handle('clipboard-write-text', (_event, text) => {
+  try {
+    clipboard.writeText(String(text ?? ''));
+    return { ok: true };
+  } catch (_) {
+    return { ok: false };
+  }
+});
+
+ipcMain.handle('clipboard-read-image-data-url', () => {
+  try {
+    const img = clipboard.readImage();
+    if (!img || img.isEmpty()) return '';
+    return img.toDataURL();
+  } catch (_) {
+    return '';
+  }
+});
+
+function fetchBufferWithRedirects(url, timeoutMs = 12000, maxRedirects = 6) {
+  return new Promise((resolve, reject) => {
+    function get(currentUrl, hops = 0) {
+      if (hops > maxRedirects) return reject(new Error('Too many redirects'));
+      const client = currentUrl.startsWith('https') ? https : http;
+      const req = client.get(
+        currentUrl,
+        { timeout: timeoutMs, headers: { 'User-Agent': `Redshift-Desktop/${currentVersion}` } },
+        (res) => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            let nextUrl = res.headers.location;
+            if (!nextUrl.startsWith('http')) {
+              const u = new URL(currentUrl);
+              nextUrl = `${u.protocol}//${u.host}${nextUrl.startsWith('/') ? '' : '/'}${nextUrl}`;
+            }
+            res.resume();
+            return get(nextUrl, hops + 1);
+          }
+          if (res.statusCode !== 200) {
+            res.resume();
+            return reject(new Error(`HTTP ${res.statusCode}`));
+          }
+          const chunks = [];
+          let total = 0;
+          res.on('data', (chunk) => {
+            total += chunk.length;
+            if (total > 35 * 1024 * 1024) {
+              req.destroy();
+              reject(new Error('Image too large'));
+              return;
+            }
+            chunks.push(chunk);
+          });
+          res.on('end', () => resolve(Buffer.concat(chunks)));
+        },
+      );
+      req.on('error', reject);
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new Error('Request timeout'));
+      });
+    }
+    get(url);
+  });
+}
+
+ipcMain.handle('clipboard-copy-image-url', async (_event, rawUrl) => {
+  try {
+    const url = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+    if (!url) return { ok: false };
+    let img = null;
+    if (url.startsWith('data:')) {
+      img = nativeImage.createFromDataURL(url);
+    } else if (url.startsWith('http://') || url.startsWith('https://')) {
+      const buf = await fetchBufferWithRedirects(url, 12000);
+      img = nativeImage.createFromBuffer(buf);
+    }
+    if (!img || img.isEmpty()) {
+      return { ok: false };
+    }
+    clipboard.writeImage(img);
+    return { ok: true };
+  } catch (_) {
+    return { ok: false };
+  }
+});
+
 ipcMain.on('launcher-close', () => {
   isQuitting = true;
   app.quit();

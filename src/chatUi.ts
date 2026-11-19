@@ -9,6 +9,7 @@ import {
   closeActiveContextMenu,
   type ContextMenuItem,
   copyGifShareLinkToClipboard,
+  copyImageToClipboard,
   copyToClipboard,
   createMenuIconSvg,
   openContextMenu,
@@ -620,6 +621,46 @@ export function openImageLightbox(
     img.className = 'modal-image-full';
     img.src = resolvedSrc;
     img.alt = altText;
+    img.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const lightboxItems: ContextMenuItem[] = [
+        {
+          label: 'Copy Image',
+          icon: 'copy',
+          onSelect: () => {
+            void copyImageToClipboard(resolvedSrc);
+          },
+        },
+      ];
+      if (!resolvedSrc.startsWith('blob:') && !resolvedSrc.startsWith('data:')) {
+        lightboxItems.push({
+          label: 'Copy Image URL',
+          icon: 'link',
+          onSelect: () => {
+            void copyToClipboard(new URL(resolvedSrc, window.location.origin).href);
+          },
+        });
+      }
+      if (!resolvedSrc.startsWith('blob:')) {
+        lightboxItems.push({
+          label: 'Download Image',
+          icon: 'download',
+          onSelect: () => {
+            const href = resolvedSrc.includes('/api/uploads/')
+              ? `${resolvedSrc}?download=1`
+              : resolvedSrc;
+            triggerDownload(href, altText || 'image.png');
+          },
+        });
+      }
+      openContextMenu({
+        clientX: e.clientX,
+        clientY: e.clientY,
+        minWidth: 186,
+        items: lightboxItems,
+      });
+    });
     card.appendChild(img);
   }
 
@@ -2256,6 +2297,12 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
     container.appendChild(starBtn);
   };
 
+  interface MediaSpoilerController {
+    isRevealed: () => boolean;
+    reveal: () => void;
+    hide: () => void;
+  }
+
   const applyMediaSpoilerUi = (
     container: HTMLElement,
     optsMedia: {
@@ -2264,21 +2311,14 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
       mediaClickEl?: HTMLElement;
       onOpenWhenRevealed?: () => void;
     },
-  ) => {
+  ): MediaSpoilerController => {
     const { isSpoiler, mediaClickEl, onOpenWhenRevealed } = optsMedia;
     let revealed = !isSpoiler;
 
-    const revealSpoiler = () => {
-      if (revealed) {
+    const mountOverlay = () => {
+      if (container.querySelector('.msg-spoiler-overlay')) {
         return;
       }
-      revealed = true;
-      container.classList.add('msg-media-spoiler--revealed');
-      container.querySelector('.msg-spoiler-overlay')?.remove();
-    };
-
-    if (isSpoiler) {
-      container.classList.add('msg-media-spoiler');
       const overlay = document.createElement('button');
       overlay.type = 'button';
       overlay.className = 'msg-spoiler-overlay';
@@ -2293,6 +2333,30 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
         revealSpoiler();
       });
       container.appendChild(overlay);
+    };
+
+    const revealSpoiler = () => {
+      if (revealed) {
+        return;
+      }
+      revealed = true;
+      container.classList.add('msg-media-spoiler--revealed');
+      container.querySelector('.msg-spoiler-overlay')?.remove();
+    };
+
+    const hideSpoiler = () => {
+      if (!isSpoiler || !revealed) {
+        return;
+      }
+      revealed = false;
+      container.classList.add('msg-media-spoiler');
+      container.classList.remove('msg-media-spoiler--revealed');
+      mountOverlay();
+    };
+
+    if (isSpoiler) {
+      container.classList.add('msg-media-spoiler');
+      mountOverlay();
     }
 
     if (mediaClickEl && onOpenWhenRevealed) {
@@ -2304,6 +2368,12 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
         onOpenWhenRevealed();
       });
     }
+
+    return {
+      isRevealed: () => revealed,
+      reveal: revealSpoiler,
+      hide: hideSpoiler,
+    };
   };
 
   const appendMediaElement = (label: string, renderMedia: () => HTMLElement) => {
@@ -2328,6 +2398,7 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
     label: string;
     attachmentId?: string;
     spoiler?: boolean;
+    spoilerCtrl?: MediaSpoilerController;
     gif?: GifItem;
     downloadHref?: string;
     filename?: string;
@@ -2419,12 +2490,16 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
       if (gifMeta) {
         attachGifOverlays(imgWrap, gifMeta, true);
       }
-      applyMediaSpoilerUi(imgWrap, {
+      const spoilerCtrl = applyMediaSpoilerUi(imgWrap, {
         attachmentId: item.attachmentId,
         isSpoiler: Boolean(item.spoiler),
         mediaClickEl: img,
         onOpenWhenRevealed: () => openImageLightbox(item.url, item.label),
       });
+      const targetRef = mediaTargets.get(imgWrap);
+      if (targetRef) {
+        targetRef.spoilerCtrl = spoilerCtrl;
+      }
       return imgWrap;
     });
   } else if (imageItems.length > 1) {
@@ -2441,7 +2516,7 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
         img.src = item.url;
         img.alt = item.label;
         img.loading = 'lazy';
-        mediaTargets.set(tile, {
+        const tileTarget: MediaContextTarget = {
           kind: item.isGif ? 'gif' : 'image',
           url: item.url,
           label: item.label,
@@ -2452,9 +2527,10 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
             : undefined,
           downloadHref: resolveImageDownloadHref(item.url),
           filename: item.label,
-        });
+        };
+        mediaTargets.set(tile, tileTarget);
         tile.appendChild(img);
-        applyMediaSpoilerUi(tile, {
+        tileTarget.spoilerCtrl = applyMediaSpoilerUi(tile, {
           attachmentId: item.attachmentId,
           isSpoiler: Boolean(item.spoiler),
           mediaClickEl: img,
@@ -2599,10 +2675,14 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
         video.src = usingCompatWebm && webmCompatUrl ? webmCompatUrl : att.url;
         videoStage.appendChild(video);
         videoStage.appendChild(statusOverlay);
-        applyMediaSpoilerUi(videoStage, {
+        const videoSpoilerCtrl = applyMediaSpoilerUi(videoStage, {
           attachmentId: att.id,
           isSpoiler: Boolean(att.spoiler),
         });
+        const cardTarget = mediaTargets.get(card);
+        if (cardTarget) {
+          cardTarget.spoilerCtrl = videoSpoilerCtrl;
+        }
         card.appendChild(videoStage);
 
         const metaBar = document.createElement('div');
@@ -2934,6 +3014,15 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
                 playbackSpeed: media.gif?.playbackSpeed,
               }),
           });
+          if (media.gif?.mediaKind !== 'video') {
+            items.push({
+              label: 'Copy Image',
+              icon: 'copy',
+              onSelect: () => {
+                void copyImageToClipboard(media.url);
+              },
+            });
+          }
           if (media.kind === 'gif' && media.gif) {
             const gifObj = media.gif;
             if (onToggleFavoriteGif && !gifObj.url.startsWith('blob:')) {
@@ -2959,6 +3048,21 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
               icon: 'link',
               onSelect: () => {
                 void copyToClipboard(new URL(media.url, window.location.origin).href);
+              },
+            });
+          }
+          if (media.spoiler && media.spoilerCtrl) {
+            const ctrl = media.spoilerCtrl;
+            const revealedNow = ctrl.isRevealed();
+            items.push({
+              label: revealedNow ? 'Hide Spoiler' : 'Reveal Spoiler',
+              icon: revealedNow ? 'eye-off' : 'eye',
+              onSelect: () => {
+                if (revealedNow) {
+                  ctrl.hide();
+                } else {
+                  ctrl.reveal();
+                }
               },
             });
           }
@@ -3011,13 +3115,29 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
             });
           }
         } else {
+          if (media.kind === 'video' && media.spoiler && media.spoilerCtrl) {
+            const ctrl = media.spoilerCtrl;
+            const revealedNow = ctrl.isRevealed();
+            items.push({
+              label: revealedNow ? 'Hide Spoiler' : 'Reveal Spoiler',
+              icon: revealedNow ? 'eye-off' : 'eye',
+              dividerBefore: items.length > 0,
+              onSelect: () => {
+                if (revealedNow) {
+                  ctrl.hide();
+                } else {
+                  ctrl.reveal();
+                }
+              },
+            });
+          }
           if (media.kind === 'video' && isOwn && !isPending && onToggleSpoiler && media.attachmentId) {
             const attId = media.attachmentId;
             const currentlySpoiler = Boolean(media.spoiler);
             items.push({
               label: currentlySpoiler ? 'Remove Spoiler Blur' : 'Mark as Spoiler',
               icon: currentlySpoiler ? 'eye' : 'eye-off',
-              dividerBefore: items.length > 0,
+              dividerBefore: items.length > 0 && !(media.spoiler && media.spoilerCtrl),
               onSelect: () => {
                 void onToggleSpoiler(msg, attId, !currentlySpoiler);
               },

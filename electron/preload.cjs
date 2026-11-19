@@ -1,15 +1,34 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-let cachedVersion = '0.1.0';
+let cachedVersion = '0.1.6';
 try {
-  const pkg = require('../package.json');
-  if (pkg && pkg.version) cachedVersion = pkg.version;
+  const fromMain = ipcRenderer.sendSync('get-app-version');
+  if (typeof fromMain === 'string' && fromMain.trim()) {
+    cachedVersion = fromMain.trim();
+  }
 } catch (_) {}
 
 contextBridge.exposeInMainWorld('redshiftDesktop', {
   isElectron: true,
   platform: process.platform,
   version: cachedVersion,
+
+  // Persistent Session Token & Native Clipboard
+  getPersistentSessionToken: () => {
+    try {
+      const tok = ipcRenderer.sendSync('get-persistent-session-token');
+      return typeof tok === 'string' && tok ? tok : null;
+    } catch (_) {
+      return null;
+    }
+  },
+  setPersistentSessionToken: (token) => {
+    ipcRenderer.send('set-persistent-session-token', typeof token === 'string' ? token : '');
+  },
+  readClipboardText: () => ipcRenderer.invoke('clipboard-read-text'),
+  writeClipboardText: (text) => ipcRenderer.invoke('clipboard-write-text', String(text ?? '')),
+  readClipboardImageDataUrl: () => ipcRenderer.invoke('clipboard-read-image-data-url'),
+  copyImageFromUrl: (url) => ipcRenderer.invoke('clipboard-copy-image-url', String(url || '')),
 
   // Launcher & Auto-Updater
   closeLauncher: () => ipcRenderer.send('launcher-close'),

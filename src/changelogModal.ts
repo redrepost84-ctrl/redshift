@@ -2,8 +2,21 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.5';
+export const CURRENT_REDSHIFT_VERSION = '0.1.6';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
+
+function compareSemverVersion(a: string, b: string): number {
+  const pa = String(a || '0.0.0').replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '0.0.0').replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+  const len = Math.max(pa.length, pb.length, 3);
+  for (let i = 0; i < len; i += 1) {
+    const da = pa[i] || 0;
+    const db = pb[i] || 0;
+    if (da > db) return 1;
+    if (da < db) return -1;
+  }
+  return 0;
+}
 
 export interface ChangelogReleaseSection {
   heading: string;
@@ -20,6 +33,36 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.6',
+    date: 'November 19, 2026',
+    kicker: 'CRITICAL FIXES & INSTANT SYNC',
+    headline: 'Persistent Keep Me Signed In, Protected GIFs, Instant Status Sync, Background Message Capture & Context Menus',
+    lead:
+      'Fixed "Keep me signed in" across full desktop restarts, stopped background cleanup from wiping uploaded GIFs, fixed the changelog version badge, made status & custom status updates instantaneous everywhere (including group chat sidebars), added Copy Image and Textbox right-click menus, fixed spoiler context menu sync, and enabled background message pre-caching.',
+    sections: [
+      {
+        heading: 'Critical Bug Fixes',
+        items: [
+          'Fixed "HTTP 618" Auto-Updater Error — Pinned release manifests to direct GitHub asset URLs (instead of relative paths resolved against GitHub’s signed CDN) so updates download cleanly on every machine without rolling back.',
+          'Removed Duplicate Bottom-Left Update Banner — Kept only the clean "Update Available" button in the top DM, Group Chat, and Friends header.',
+          'Fixed "Keep Me Signed In" Across App Restarts — Pinned the desktop UI to a fixed local port and backed up persistent sessions in %AppData%\\Redshift so restarting or updating Redshift keeps you logged in automatically.',
+          'Protected User-Submitted GIFs & Uploads — Stopped stale background cleanup from deleting uploaded files and filtered out broken ghost tiles so every uploaded GIF and media file stays permanently.',
+          'Fixed Changelog Header Version Badge — Fixed sandboxed Electron preload version detection so the What’s New header always displays the true installed version instead of v0.1.0.',
+          'Instant Status & Custom Status Sync Everywhere — Changing online/idle/DND/invisible or editing/clearing your custom status now updates in 0ms across your dock, profile card, and group chat right sidebars with zero flicker.',
+          'Background Message Capture — Messages sent to other DMs and group chats are now pre-cached in the background before you open them so switching conversations shows the latest messages immediately with zero delay or sudden jump.',
+          'Spoiler Context Menu Sync — Revealing a spoiler and right-clicking now immediately updates the context menu to offer "Hide Spoiler" (and "Reveal Spoiler" when hidden).',
+        ],
+      },
+      {
+        heading: 'New Quality-of-Life Features',
+        items: [
+          'Copy Image Context Menu — Right-click any image in chat or the full-screen lightbox and click "Copy Image" to copy the actual image directly to your clipboard.',
+          'Textbox Right-Click Menu — Right-click the message composer or any text box to Cut, Copy, Paste (including pasted images!), and Select All.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.5',
     date: 'November 19, 2026',
@@ -118,7 +161,11 @@ export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
 let activeChangelogBackdrop: HTMLElement | null = null;
 
 export function getActiveAppVersion(): string {
-  return getDesktopBridge()?.version || CURRENT_REDSHIFT_VERSION;
+  const bridgeVer = getDesktopBridge()?.version?.trim() || '';
+  if (bridgeVer && compareSemverVersion(bridgeVer, CURRENT_REDSHIFT_VERSION) >= 0) {
+    return bridgeVer;
+  }
+  return CURRENT_REDSHIFT_VERSION;
 }
 
 export function closeChangelogModal(): void {

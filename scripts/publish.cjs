@@ -200,14 +200,31 @@ const installerStat = fs.statSync(outInstaller);
 const asarSha256 = sha256File(outPatchAsar);
 const installerSha256 = sha256File(outInstaller);
 
+let manifestRepo = 'redrepost84-ctrl/redshift';
+try {
+  const cfgP = path.join(rootDir, 'electron', 'updater-config.json');
+  if (fs.existsSync(cfgP)) {
+    const cfgJ = JSON.parse(fs.readFileSync(cfgP, 'utf8'));
+    if (cfgJ && typeof cfgJ.githubRepo === 'string' && cfgJ.githubRepo.trim()) {
+      manifestRepo = cfgJ.githubRepo.trim();
+    }
+  }
+} catch (_) {}
+if (process.env.GITHUB_REPO) manifestRepo = process.env.GITHUB_REPO.trim();
+
+// IMPORTANT: Use ABSOLUTE tag-pinned GitHub URLs. A relative "Redshift-patch.asar" gets resolved by
+// older launchers against GitHub's signed CDN redirect URL (release-assets.githubusercontent.com),
+// which fails with "HTTP 618 jwt-not-provided" and blocks auto-updates entirely.
+const releaseBase = `https://github.com/${manifestRepo}/releases/download/v${buildVersion}`;
+
 const manifest = {
   version: buildVersion,
   releasedAt: new Date().toISOString(),
   changelog,
-  asarUrl: 'Redshift-patch.asar',
+  asarUrl: `${releaseBase}/Redshift-patch.asar`,
   sha256: asarSha256,
   size: asarStat.size,
-  installerUrl: 'RedshiftSetup.exe',
+  installerUrl: `${releaseBase}/RedshiftSetup.exe`,
   installerSha256,
   installerSize: installerStat.size,
 };
