@@ -1743,48 +1743,6 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
           hostSource: hs,
         });
       }
-      items.push(
-        {
-          key: 'native:window',
-          kind: 'browser',
-          tab: 'window',
-          surface: 'window',
-          title: 'Browse App Windows',
-          subtitle: 'Open browser window picker • Auto-ends if closed',
-          badge: 'WINDOW PICKER',
-          mockKind: 'window',
-        },
-        {
-          key: 'native:monitor',
-          kind: 'browser',
-          tab: 'screen',
-          surface: 'monitor',
-          title: 'Entire Desktop / Monitor',
-          subtitle: 'Share a full screen with optional system audio',
-          badge: 'DESKTOP PICKER',
-          mockKind: 'monitor',
-        },
-        {
-          key: 'native:browser',
-          kind: 'browser',
-          tab: 'tab',
-          surface: 'browser',
-          title: 'Choose Browser Tab',
-          subtitle: 'Pick an open browser tab • Auto-ends if tab closes',
-          badge: 'TAB PICKER',
-          mockKind: 'browser',
-        },
-        {
-          key: 'native:any',
-          kind: 'browser',
-          tab: 'tab',
-          surface: 'any',
-          title: 'All Tabs, Windows & Screens',
-          subtitle: 'Open the full browser source selector dialog',
-          badge: 'ALL SOURCES',
-          mockKind: 'any',
-        },
-      );
       return items;
     };
 
@@ -1912,7 +1870,6 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       const tabDefs: Array<{ key: ModalTabKey; label: string; count?: number }> = [
         { key: 'window', label: 'Windows', count: winCount },
         { key: 'screen', label: 'Entire Desktop', count: scrCount },
-        { key: 'tab', label: 'Browser Tabs' },
       ];
       for (const td of tabDefs) {
         const tBtn = document.createElement('button');
@@ -1945,6 +1902,16 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
         selectedKey = visible[0]?.key ?? '';
       }
 
+      if (visible.length === 0 && !loadingSources) {
+        const emptyNote = document.createElement('div');
+        emptyNote.className = 'vc-screen-modal-loading';
+        emptyNote.textContent =
+          activeTab === 'screen'
+            ? 'No displays detected. Click Refresh to rescan.'
+            : 'No open application windows detected. Click Refresh to rescan.';
+        previewGrid.appendChild(emptyNote);
+      }
+
       for (const item of visible) {
         const card = document.createElement('button');
         card.type = 'button';
@@ -1954,6 +1921,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
           card.dataset.surface = item.surface;
         } else {
           card.dataset.hostSourceId = item.hostSource.id;
+          card.dataset.surface = item.hostSource.kind === 'screen' ? 'monitor' : 'window';
         }
 
         const thumbWrap = document.createElement('div');
@@ -3823,20 +3791,11 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     const hangupBtn = document.createElement('button');
     hangupBtn.type = 'button';
     hangupBtn.className = 'vc-sidebar-hangup-btn';
-    const isStreamingNow = Boolean(localScreenStream);
-    hangupBtn.title = isStreamingNow
-      ? 'End Stream (stop sharing before leaving call)'
-      : 'Disconnect';
-    hangupBtn.setAttribute('aria-label', isStreamingNow ? 'End Stream' : 'Disconnect from Voice Call');
-    hangupBtn.appendChild(
-      isStreamingNow ? createStopStreamIconSvg(16) : createPhoneHangupIconSvg(16),
-    );
+    hangupBtn.title = 'Disconnect';
+    hangupBtn.setAttribute('aria-label', 'Disconnect from Voice Call');
+    hangupBtn.appendChild(createPhoneHangupIconSvg(16));
     hangupBtn.addEventListener('click', () => {
-      if (localScreenStream) {
-        stopLocalScreenCapture(true);
-      } else {
-        leaveCall();
-      }
+      leaveCall();
     });
 
     card.addEventListener('contextmenu', (e) => {

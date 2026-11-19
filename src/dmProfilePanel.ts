@@ -357,7 +357,15 @@ function renderProfileDetailsTabbedCard(opts: {
   const targetLower = user.username.trim().toLowerCase();
   const localGroups = computeLocalMutualGroups(snap, targetLower);
   const mutualGroups = snap ? localGroups : tabState.mutualGroups;
-  const mutualFriends = tabState.mutualFriends;
+  const mutualFriends = tabState.mutualFriends.map((mf) => {
+    if (!snap) return mf;
+    const k = mf.username.toLowerCase();
+    return (
+      snap.friends.find((f) => f.username.toLowerCase() === k) ??
+      (snap.dmPeers ?? []).find((p) => p.username.toLowerCase() === k) ??
+      mf
+    );
+  });
 
   if (!isBlocked) {
     const tabBar = document.createElement('div');
@@ -824,6 +832,54 @@ function buildRelationshipMenuItems(options: {
   return items;
 }
 
+const activePublicProfileModals = new Set<{
+  getUsernameLower: () => string;
+  sync: (nextUser: PublicProfile) => void;
+}>();
+
+export function syncOpenPublicProfileModals(snapshot: SocialSnapshot): void {
+  if (activePublicProfileModals.size === 0) {
+    return;
+  }
+  const byUsername = new Map<string, PublicProfile>();
+  for (const f of snapshot.friends) {
+    byUsername.set(f.username.toLowerCase(), f);
+  }
+  for (const p of snapshot.dmPeers ?? []) {
+    if (!byUsername.has(p.username.toLowerCase())) {
+      byUsername.set(p.username.toLowerCase(), p);
+    }
+  }
+  for (const r of snapshot.incomingRequests) {
+    if (!byUsername.has(r.user.username.toLowerCase())) {
+      byUsername.set(r.user.username.toLowerCase(), r.user);
+    }
+  }
+  for (const r of snapshot.outgoingRequests) {
+    if (!byUsername.has(r.user.username.toLowerCase())) {
+      byUsername.set(r.user.username.toLowerCase(), r.user);
+    }
+  }
+  for (const b of snapshot.blockedUsers ?? []) {
+    if (!byUsername.has(b.username.toLowerCase())) {
+      byUsername.set(b.username.toLowerCase(), b);
+    }
+  }
+  for (const g of snapshot.groups ?? []) {
+    for (const m of g.members) {
+      if (!byUsername.has(m.username.toLowerCase())) {
+        byUsername.set(m.username.toLowerCase(), m);
+      }
+    }
+  }
+  for (const entry of activePublicProfileModals) {
+    const latest = byUsername.get(entry.getUsernameLower());
+    if (latest) {
+      entry.sync(latest);
+    }
+  }
+}
+
 /**
  * Opens a centered full-profile modal for any user (friend, pending user, or group member),
  * respecting private profile visibility and relationship actions.
@@ -1046,11 +1102,18 @@ export function openPublicProfileModal(options: {
     });
   };
 
+  const modalRegistryEntry = {
+    getUsernameLower: () => currentUser.username.toLowerCase(),
+    sync: syncModal,
+  };
+  activePublicProfileModals.add(modalRegistryEntry);
+
   const closeModal = () => {
     if (isClosed) {
       return;
     }
     isClosed = true;
+    activePublicProfileModals.delete(modalRegistryEntry);
     activeMenuClose?.();
     document.removeEventListener('keydown', onEscape, true);
     backdrop.classList.remove('modal-backdrop--visible');

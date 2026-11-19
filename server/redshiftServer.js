@@ -253,6 +253,10 @@ const db = loadDb();
 /** @type {Map<string, Set<WebSocket>>} */
 const onlineSockets = new Map();
 
+/** Lowercase username -> last authenticated HTTP/WS activity timestamp (ms) */
+/** @type {Map<string, number>} */
+const lastSeenByUser = new Map();
+
 /** "from::to" -> auto-clear typing timer */
 /** @type {Map<string, ReturnType<typeof setTimeout>>} */
 const typingTimers = new Map();
@@ -1378,7 +1382,11 @@ function findAccountByIdentifier(identifier) {
 function isUserSocketOnline(username) {
   const key = username.trim().toLowerCase();
   const sockets = onlineSockets.get(key);
-  return Boolean(sockets && sockets.size > 0);
+  if (sockets && sockets.size > 0) {
+    return true;
+  }
+  const lastSeen = lastSeenByUser.get(key) ?? 0;
+  return Date.now() - lastSeen < 25000;
 }
 
 /**
@@ -1720,7 +1728,16 @@ function authenticateRequest(req) {
   if (!username) {
     return null;
   }
-  return findAccountByUsername(username) ?? null;
+  const acc = findAccountByUsername(username) ?? null;
+  if (acc) {
+    const uKey = acc.username.toLowerCase();
+    const wasOnline = isUserSocketOnline(uKey);
+    lastSeenByUser.set(uKey, Date.now());
+    if (!wasOnline) {
+      queueMicrotask(() => notifyRelatedPeers(uKey, false));
+    }
+  }
+  return acc;
 }
 
 /**
@@ -2008,7 +2025,36 @@ function sanitizeGifItem(raw) {
     raw.height <= 20000
       ? raw.height
       : undefined;
-  return { id, url, previewUrl, title, width, height, tags, uploadedBy, createdAt };
+  const mediaKind =
+    raw.mediaKind === 'video' || raw.mediaKind === 'gif' ? raw.mediaKind : undefined;
+  const playbackSpeed =
+    typeof raw.playbackSpeed === 'number' &&
+    Number.isFinite(raw.playbackSpeed) &&
+    raw.playbackSpeed >= 0.25 &&
+    raw.playbackSpeed <= 4
+      ? Math.round(raw.playbackSpeed * 100) / 100
+      : undefined;
+  const durationSec =
+    typeof raw.durationSec === 'number' &&
+    Number.isFinite(raw.durationSec) &&
+    raw.durationSec >= 0 &&
+    raw.durationSec <= 300
+      ? Math.round(raw.durationSec * 10) / 10
+      : undefined;
+  return {
+    id,
+    url,
+    previewUrl,
+    title,
+    width,
+    height,
+    tags,
+    uploadedBy,
+    createdAt,
+    mediaKind,
+    playbackSpeed,
+    durationSec,
+  };
 }
 
 /**
@@ -2499,6 +2545,9 @@ function handleStreamingUpload(req, res, activeUser) {
       };
       db.uploads[id] = meta;
       saveDb(db);
+      if (meta.kind === 'video' && meta.mime !== 'video/webm') {
+        void ensureWebmVideoFallbackFile(id, filePath);
+      }
       sendJson(res, 200, {
         ok: true,
         attachment: toClientAttachment(meta),
@@ -2509,6 +2558,291 @@ function handleStreamingUpload(req, res, activeUser) {
 
 /** @type {Map<string, Promise<string | null>>} */
 const wavTranscodeJobs = new Map();
+
+/** @type {Map<string, Promise<string | null>>} */
+const webmVideoTranscodeJobs = new Map();
+
+const MAX_GIF_DURATION_SEC = 300; // 5 minutes max for GIF media
+
+/**
+ * Probes media file duration and dimensions via ffprobe.
+ * @param {string} filePath
+ * @returns {Promise<{ durationSec: number | null; width?: number; height?: number; hasVideo: boolean; hasAudio: boolean }>}
+ */
+function probeMediaMeta(filePath) {
+  return new Promise((resolve) => {
+    execFile(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-show_entries',
+        'format=duration:stream=codec_type,width,height',
+        '-of',
+        'json',
+        filePath,
+      ],
+      { timeout: 15000 },
+      (err, stdout) => {
+        if (err || !stdout) {
+          resolve({ durationSec: null, hasVideo: false, hasAudio: false });
+          return;
+        }
+        try {
+          const parsed = JSON.parse(String(stdout));
+          const rawDurVal = parsed?.format?.duration;
+          const rawDur =
+            rawDurVal !== null && rawDurVal !== undefined && String(rawDurVal).trim() !== ''
+              ? Number(rawDurVal)
+              : NaN;
+          const durationSec = Number.isFinite(rawDur) && rawDur > 0 ? rawDur : null;
+          const streams = Array.isArray(parsed?.streams) ? parsed.streams : [];
+          let hasVideo = false;
+          let hasAudio = false;
+          let width;
+          let height;
+          for (const st of streams) {
+            if (st?.codec_type === 'video') {
+              hasVideo = true;
+              if (!width && Number.isInteger(st.width) && st.width > 0) width = st.width;
+              if (!height && Number.isInteger(st.height) && st.height > 0) height = st.height;
+            } else if (st?.codec_type === 'audio') {
+              hasAudio = true;
+            }
+          }
+          resolve({ durationSec, width, height, hasVideo, hasAudio });
+        } catch {
+          resolve({ durationSec: null, hasVideo: false, hasAudio: false });
+        }
+      },
+    );
+  });
+}
+
+/**
+ * Losslessly scales frame delays in a GIF87a/GIF89a binary by `playbackSpeed`.
+ * Walks blocks accurately so image data bytes are never corrupted.
+ * @param {string} srcPath
+ * @param {string} dstPath
+ * @param {number} playbackSpeed
+ * @returns {boolean}
+ */
+function scaleGifFileSpeed(srcPath, dstPath, playbackSpeed) {
+  try {
+    const raw = fs.readFileSync(srcPath);
+    if (raw.length < 14) return false;
+    const sig = raw.toString('ascii', 0, 6);
+    if (sig !== 'GIF87a' && sig !== 'GIF89a') return false;
+    const out = Buffer.from(raw);
+    let pos = 10;
+    const lsdPacked = out[pos];
+    pos += 3;
+    if (lsdPacked & 0x80) {
+      const gctSize = 3 * (1 << ((lsdPacked & 0x07) + 1));
+      pos += gctSize;
+    }
+
+    const skipSubBlocks = () => {
+      while (pos < out.length) {
+        const len = out[pos++];
+        if (len === 0) break;
+        pos += len;
+      }
+    };
+
+    let patchedFrames = 0;
+    while (pos < out.length) {
+      const intro = out[pos++];
+      if (intro === 0x3b) break; // GIF Trailer
+      if (intro === 0x21) {
+        if (pos >= out.length) break;
+        const label = out[pos++];
+        if (label === 0xf9 && pos + 5 < out.length && out[pos] === 0x04) {
+          // Graphic Control Extension: [blockSize=4, packed, delayLo, delayHi, transIdx, 0x00]
+          const delayPos = pos + 2;
+          const origDelay = out.readUInt16LE(delayPos);
+          const effectiveOrig = origDelay > 0 ? origDelay : 10;
+          const scaled = Math.max(2, Math.min(65535, Math.round(effectiveOrig / playbackSpeed)));
+          out.writeUInt16LE(scaled, delayPos);
+          patchedFrames += 1;
+          pos += 6;
+        } else {
+          skipSubBlocks();
+        }
+      } else if (intro === 0x2c) {
+        // Image Descriptor (9 bytes after separator)
+        if (pos + 9 >= out.length) break;
+        const imgPacked = out[pos + 8];
+        pos += 9;
+        if (imgPacked & 0x80) {
+          pos += 3 * (1 << ((imgPacked & 0x07) + 1));
+        }
+        pos += 1; // LZW minimum code size
+        skipSubBlocks();
+      } else {
+        break;
+      }
+    }
+
+    if (patchedFrames === 0) return false;
+    fs.writeFileSync(dstPath, out);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Converts a video or audio file into an Electron-compatible looping VP8 WebM clip
+ * for Redshift's GIF library (capped at 5 minutes, with playbackSpeed baked in).
+ * @param {string} srcPath
+ * @param {string} dstPath
+ * @param {{ playbackSpeed: number; isAudioOnly: boolean }} opts
+ * @returns {Promise<boolean>}
+ */
+function convertMediaToLoopingGifWebm(srcPath, dstPath, opts) {
+  const speed = Math.min(4, Math.max(0.25, Number(opts.playbackSpeed) || 1));
+  const ptsFactor = (1 / speed).toFixed(4);
+  const tmpPath = `${dstPath}.tmp.webm`;
+  const args = opts.isAudioOnly
+    ? [
+        '-y',
+        '-t',
+        String(MAX_GIF_DURATION_SEC),
+        '-i',
+        srcPath,
+        '-filter_complex',
+        `[0:a]showwaves=s=480x180:mode=line:rate=24,setpts=${ptsFactor}*PTS[v]`,
+        '-map',
+        '[v]',
+        '-an',
+        '-c:v',
+        'libvpx',
+        '-deadline',
+        'realtime',
+        '-cpu-used',
+        '6',
+        '-b:v',
+        '900k',
+        '-f',
+        'webm',
+        tmpPath,
+      ]
+    : [
+        '-y',
+        '-t',
+        String(MAX_GIF_DURATION_SEC),
+        '-i',
+        srcPath,
+        '-vf',
+        `setpts=${ptsFactor}*PTS,scale='min(480,iw)':-2`,
+        '-an',
+        '-c:v',
+        'libvpx',
+        '-deadline',
+        'realtime',
+        '-cpu-used',
+        '6',
+        '-b:v',
+        '1200k',
+        '-f',
+        'webm',
+        tmpPath,
+      ];
+
+  return new Promise((resolve) => {
+    execFile('ffmpeg', args, { timeout: 120000 }, (err) => {
+      if (err) {
+        try {
+          if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+        } catch {}
+        resolve(false);
+        return;
+      }
+      try {
+        fs.renameSync(tmpPath, dstPath);
+        resolve(true);
+      } catch {
+        try {
+          if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+        } catch {}
+        resolve(false);
+      }
+    });
+  });
+}
+
+/**
+ * Lazily transcodes uploaded non-WebM videos (.mp4/.mov/.mkv/etc.) into a cached
+ * VP8 + Opus WebM sidecar so Electron clients (which lack proprietary H.264/AAC
+ * decoders) play every video embed smoothly without freezing or stalling.
+ * @param {string} uploadId
+ * @param {string} srcFilePath
+ * @returns {Promise<string | null>}
+ */
+function ensureWebmVideoFallbackFile(uploadId, srcFilePath) {
+  const webmPath = `${srcFilePath}.compat.webm`;
+  if (fs.existsSync(webmPath)) {
+    return Promise.resolve(webmPath);
+  }
+  const existing = webmVideoTranscodeJobs.get(uploadId);
+  if (existing) {
+    return existing;
+  }
+  const job = new Promise((resolve) => {
+    const tmpPath = `${srcFilePath}.compat.tmp.webm`;
+    execFile(
+      'ffmpeg',
+      [
+        '-y',
+        '-i',
+        srcFilePath,
+        '-vf',
+        "scale='min(1280,iw)':-2",
+        '-c:v',
+        'libvpx',
+        '-deadline',
+        'realtime',
+        '-cpu-used',
+        '6',
+        '-b:v',
+        '2000k',
+        '-c:a',
+        'libopus',
+        '-b:a',
+        '128k',
+        '-f',
+        'webm',
+        tmpPath,
+      ],
+      { timeout: 180000 },
+      (err) => {
+        if (err) {
+          try {
+            if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+          } catch {}
+          resolve(null);
+          return;
+        }
+        try {
+          fs.renameSync(tmpPath, webmPath);
+          resolve(webmPath);
+        } catch {
+          try {
+            if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+          } catch {}
+          resolve(null);
+        }
+      },
+    );
+  }).finally(() => {
+    if (webmVideoTranscodeJobs.get(uploadId) === job) {
+      webmVideoTranscodeJobs.delete(uploadId);
+    }
+  });
+  webmVideoTranscodeJobs.set(uploadId, job);
+  return job;
+}
 
 /**
  * Lazily transcodes non-WAV audio/webm uploads into a cached 24kHz mono PCM WAV sidecar
@@ -2592,13 +2926,22 @@ async function handleServeUpload(req, res, reqPath) {
   let serveName = meta.name;
 
   const parsedUrl = new URL(req.url ?? '/', 'http://localhost');
-  const wantsWavFallback = parsedUrl.searchParams.get('format') === 'wav';
+  const requestedFormat = parsedUrl.searchParams.get('format');
+  const wantsWavFallback = requestedFormat === 'wav';
+  const wantsWebmFallback = requestedFormat === 'webm';
   if (wantsWavFallback && (meta.kind === 'audio' || meta.kind === 'video') && meta.mime !== 'audio/wav') {
     const convertedPath = await ensureWavFallbackFile(uploadId, filePath);
     if (convertedPath) {
       filePath = convertedPath;
       serveMime = 'audio/wav';
       serveName = meta.name.replace(/\.[^.]+$/, '') + '.wav';
+    }
+  } else if (wantsWebmFallback && meta.kind === 'video' && meta.mime !== 'video/webm') {
+    const convertedPath = await ensureWebmVideoFallbackFile(uploadId, filePath);
+    if (convertedPath) {
+      filePath = convertedPath;
+      serveMime = 'video/webm';
+      serveName = meta.name.replace(/\.[^.]+$/, '') + '.webm';
     }
   }
 
@@ -2617,6 +2960,8 @@ async function handleServeUpload(req, res, reqPath) {
 
   const baseHeaders = {
     'X-Content-Type-Options': 'nosniff',
+    'Cross-Origin-Resource-Policy': 'cross-origin',
+    'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
     'Accept-Ranges': 'bytes',
     'Cache-Control': 'private, max-age=3600',
     'Content-Type': forceDownload ? 'application/octet-stream' : serveMime,
@@ -2642,6 +2987,12 @@ async function handleServeUpload(req, res, reqPath) {
       const suffixLen = Number(endRaw);
       start = Math.max(0, fileSize - suffixLen);
       end = fileSize - 1;
+    }
+    // Cap open-ended video/audio range requests to 2 MB chunks so reverse proxies (Cloudflare Tunnel)
+    // stream smoothly without buffering/stalling entire large video files on a single request.
+    if (!endRaw && (meta.kind === 'video' || meta.kind === 'audio')) {
+      const STREAM_CHUNK_BYTES = 2 * 1024 * 1024;
+      end = Math.min(fileSize - 1, start + STREAM_CHUNK_BYTES - 1);
     }
     if (
       !Number.isInteger(start) ||
@@ -2871,6 +3222,7 @@ export function createRedshiftServerMiddleware() {
           }
           onlineSockets.delete(uKey);
         }
+        lastSeenByUser.delete(uKey);
         notifyRelatedPeers(uKey, false);
         sendJson(res, 200, { ok: true, username: account.username, revokedSessions, closedSockets });
         return;
@@ -2905,6 +3257,7 @@ export function createRedshiftServerMiddleware() {
           }
           onlineSockets.delete(uKey);
         }
+        lastSeenByUser.delete(uKey);
 
         // Remove from friendships, blocks, requests, openDms, and groupDms
         delete db.friendships[uKey];
@@ -3317,10 +3670,13 @@ export function createRedshiftServerMiddleware() {
 
     if (req.method === 'POST' && reqPath === '/api/auth/signout') {
       const token = extractBearerToken(req);
+      const uKey = activeUser.username.toLowerCase();
       if (token && db.sessions[token]) {
         delete db.sessions[token];
         saveDb(db);
       }
+      lastSeenByUser.delete(uKey);
+      notifyRelatedPeers(uKey, false);
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -4862,11 +5218,21 @@ export function createRedshiftServerMiddleware() {
       return;
     }
 
-    // GIFs: Add one or more uploaded GIFs into Redshift's shared UGC database
+    // GIFs: Add one or more uploaded GIFs / videos / audio clips into Redshift's shared UGC database
     if (req.method === 'POST' && reqPath === '/api/gifs/add') {
       const rawItems = Array.isArray(body.items)
         ? body.items
-        : [{ uploadId: body.uploadId, title: body.title, tags: body.tags }];
+        : [
+            {
+              uploadId: body.uploadId,
+              title: body.title,
+              tags: body.tags,
+              playbackSpeed: body.playbackSpeed,
+              durationSec: body.durationSec,
+              width: body.width,
+              height: body.height,
+            },
+          ];
 
       if (rawItems.length === 0 || rawItems.length > 25) {
         sendJson(res, 400, { ok: false, error: 'Error: Select between 1 and 25 GIFs to import' });
@@ -4886,22 +5252,148 @@ export function createRedshiftServerMiddleware() {
         const uploadId = typeof rawItem.uploadId === 'string' ? rawItem.uploadId.trim() : '';
         const meta = uploadId ? db.uploads[uploadId] : undefined;
         if (!meta || meta.uploadedBy.toLowerCase() !== selfKey) {
-          sendJson(res, 404, { ok: false, error: 'Error: Uploaded GIF not found' });
-          return;
-        }
-        if (meta.kind !== 'image' || meta.mime !== 'image/gif') {
-          sendJson(res, 400, { ok: false, error: 'Error: Only .gif files can be added to GIFs' });
+          sendJson(res, 404, { ok: false, error: 'Error: Uploaded media not found' });
           return;
         }
 
-        const dims = readGifDimensionsFromFile(path.join(UPLOADS_DIR, meta.diskName));
+        const isAllowedMedia =
+          meta.kind === 'image' ||
+          meta.kind === 'video' ||
+          meta.kind === 'audio' ||
+          /\.(gif|mp4|m4v|webm|mov|mkv|avi|ogv|wmv|flv|wav|mp3|ogg|flac|m4a|aac|weba|png|jpe?g|webp)$/i.test(
+            meta.name || '',
+          );
+        if (!isAllowedMedia) {
+          sendJson(res, 400, {
+            ok: false,
+            error: 'Error: Unsupported file type for Redshift GIFs',
+          });
+          return;
+        }
+
+        const rawSpeed = Number(rawItem.playbackSpeed);
+        const playbackSpeed =
+          Number.isFinite(rawSpeed) && rawSpeed >= 0.25 && rawSpeed <= 4
+            ? Math.round(rawSpeed * 100) / 100
+            : 1;
+
+        const srcPath = path.join(UPLOADS_DIR, meta.diskName);
+        const isNativeGif = meta.mime === 'image/gif' || /\.gif$/i.test(meta.name || '');
+        const isStaticImage = meta.kind === 'image' && !isNativeGif;
+        const isAudioOrVideo = !isNativeGif && !isStaticImage;
+
+        let probed = { durationSec: null, width: undefined, height: undefined, hasVideo: false, hasAudio: false };
+        const clientDur =
+          typeof rawItem.durationSec === 'number' && Number.isFinite(rawItem.durationSec)
+            ? rawItem.durationSec
+            : null;
+        if (isAudioOrVideo) {
+          probed = await probeMediaMeta(srcPath);
+          const effectiveDur =
+            probed.durationSec !== null && clientDur !== null
+              ? Math.max(probed.durationSec, clientDur)
+              : (probed.durationSec ?? clientDur);
+          if (effectiveDur !== null && effectiveDur > MAX_GIF_DURATION_SEC + 0.5) {
+            sendJson(res, 400, {
+              ok: false,
+              error: `Error: "${meta.name}" is longer than the 5-minute (5:00) maximum for GIFs`,
+            });
+            return;
+          }
+        }
+
+        let finalUploadId = meta.id;
+        let finalMediaKind = isAudioOrVideo ? 'video' : 'gif';
+        let speedBakedIntoFile = false;
+        let finalWidth =
+          probed.width ??
+          (typeof rawItem.width === 'number' && Number.isInteger(rawItem.width) && rawItem.width > 0
+            ? rawItem.width
+            : undefined);
+        let finalHeight =
+          probed.height ??
+          (typeof rawItem.height === 'number' && Number.isInteger(rawItem.height) && rawItem.height > 0
+            ? rawItem.height
+            : undefined);
+
+        if (isNativeGif) {
+          const dims = readGifDimensionsFromFile(srcPath);
+          if (dims) {
+            finalWidth = dims.width;
+            finalHeight = dims.height;
+          }
+          if (Math.abs(playbackSpeed - 1) >= 0.02) {
+            const newId = crypto.randomUUID();
+            const newDisk = `${newId}.gif`;
+            const dstPath = path.join(UPLOADS_DIR, newDisk);
+            if (scaleGifFileSpeed(srcPath, dstPath, playbackSpeed)) {
+              const st = fs.statSync(dstPath);
+              db.uploads[newId] = {
+                id: newId,
+                diskName: newDisk,
+                name: meta.name,
+                mime: 'image/gif',
+                size: st.size,
+                kind: 'image',
+                uploadedBy: selfKey,
+                createdAt: now,
+              };
+              finalUploadId = newId;
+              speedBakedIntoFile = true;
+            }
+          }
+        } else if (isAudioOrVideo) {
+          const isAudioOnly = meta.kind === 'audio' || (!probed.hasVideo && probed.hasAudio);
+          const newId = crypto.randomUUID();
+          const newDisk = `${newId}.webm`;
+          const dstPath = path.join(UPLOADS_DIR, newDisk);
+          const convertedOk = await convertMediaToLoopingGifWebm(srcPath, dstPath, {
+            playbackSpeed,
+            isAudioOnly,
+          });
+          if (convertedOk && fs.existsSync(dstPath)) {
+            const st = fs.statSync(dstPath);
+            const convProbe = await probeMediaMeta(dstPath);
+            if (convProbe.width && convProbe.height) {
+              finalWidth = convProbe.width;
+              finalHeight = convProbe.height;
+            } else if (isAudioOnly) {
+              finalWidth = 480;
+              finalHeight = 180;
+            }
+            db.uploads[newId] = {
+              id: newId,
+              diskName: newDisk,
+              name: meta.name.replace(/\.[^.]+$/, '') + '.webm',
+              mime: 'video/webm',
+              size: st.size,
+              kind: 'video',
+              uploadedBy: selfKey,
+              createdAt: now,
+            };
+            finalUploadId = newId;
+            speedBakedIntoFile = true;
+          }
+          finalMediaKind = 'video';
+        }
+
+        const effectiveDurationSec =
+          probed.durationSec !== null
+            ? Math.min(MAX_GIF_DURATION_SEC, Math.round((probed.durationSec / playbackSpeed) * 10) / 10)
+            : typeof rawItem.durationSec === 'number' && Number.isFinite(rawItem.durationSec)
+              ? Math.min(MAX_GIF_DURATION_SEC, Math.round(rawItem.durationSec * 10) / 10)
+              : undefined;
+
         const entry = {
           id: crypto.randomUUID(),
-          uploadId: meta.id,
-          url: `/api/uploads/${meta.id}`,
+          uploadId: finalUploadId,
+          url: `/api/uploads/${finalUploadId}`,
           title: normalizeGifTitle(rawItem.title, meta.name),
-          width: dims?.width,
-          height: dims?.height,
+          width: finalWidth,
+          height: finalHeight,
+          mediaKind: finalMediaKind,
+          playbackSpeed: !speedBakedIntoFile && playbackSpeed !== 1 ? playbackSpeed : undefined,
+          durationSec: effectiveDurationSec,
           tags: normalizeGifTags(rawItem.tags),
           uploadedBy: selfKey,
           createdAt: now,
@@ -5437,6 +5929,12 @@ export function createRedshiftServerMiddleware() {
         }
 
         if (targetCtx.kind === 'group') {
+          if (db.unreadGroups[selfKey]?.[targetCtx.groupId]) {
+            delete db.unreadGroups[selfKey][targetCtx.groupId];
+          }
+          if (db.groupUnreadMentions?.[selfKey]?.[targetCtx.groupId]) {
+            delete db.groupUnreadMentions[selfKey][targetCtx.groupId];
+          }
           for (const member of targetCtx.participants) {
             const memberKey = member.toLowerCase();
             touchThreadActivityForUser(memberKey, `group:${targetCtx.groupId}`, storedObj.timestamp, {
@@ -5463,6 +5961,12 @@ export function createRedshiftServerMiddleware() {
             }
           }
         } else {
+          if (db.unreadDms[selfKey]?.[targetCtx.peerKey]) {
+            delete db.unreadDms[selfKey][targetCtx.peerKey];
+          }
+          if (db.unreadMentions?.[selfKey]?.[targetCtx.peerKey]) {
+            delete db.unreadMentions[selfKey][targetCtx.peerKey];
+          }
           if (!db.unreadDms[targetCtx.peerKey] || typeof db.unreadDms[targetCtx.peerKey] !== 'object') {
             db.unreadDms[targetCtx.peerKey] = {};
           }
@@ -5896,6 +6400,16 @@ export function attachRedshiftWebSocket(httpServer) {
         const msg = JSON.parse(String(rawData));
         const meta = socketMeta.get(ws);
         const ownerKey = meta?.username ?? key;
+        if (meta) {
+          meta.alive = true;
+        }
+        lastSeenByUser.set(ownerKey, Date.now());
+        if (msg && msg.type === 'ping') {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'pong' }));
+          }
+          return;
+        }
         if (msg && msg.type === 'dm:typing') {
           if (typeof msg.groupId === 'string' && msg.groupId.trim()) {
             emitGroupTypingState(ownerKey, msg.groupId.trim(), Boolean(msg.isTyping));
@@ -6169,6 +6683,7 @@ export function attachRedshiftWebSocket(httpServer) {
         activeSet.delete(ws);
         if (activeSet.size === 0) {
           onlineSockets.delete(ownerKey);
+          lastSeenByUser.delete(ownerKey);
           for (const timerKey of Array.from(typingTimers.keys())) {
             if (timerKey.startsWith(`${ownerKey}::group:`)) {
               const targetGroupId = timerKey.slice(ownerKey.length + '::group:'.length);

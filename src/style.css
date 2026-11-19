@@ -11875,3 +11875,156 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* Markdown Bullet List Items (* text or - text) */
+.md-bullet-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.45;
+  margin: 1px 0;
+  padding-left: 6px;
+}
+
+.md-bullet-dot {
+  flex-shrink: 0;
+  color: #dcdfe6;
+  font-weight: 700;
+  line-height: 1.42;
+  user-select: none;
+}
+
+.md-bullet-content {
+  min-width: 0;
+  flex: 1;
+  word-break: break-word;
+}
+
+[data-theme='light'] .md-bullet-dot {
+  color: #363c4a;
+}
+
+/* Video Playback Compatibility Overlay */
+.msg-video-status-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 11, 16, 0.72);
+  color: #f3f4f8;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.msg-video-status-overlay[hidden] {
+  display: none;
+}
+
+/* GIF Import Playback Speed & Audio Controls */
+.gif-import-row--error {
+  border-color: rgba(242, 63, 67, 0.75) !important;
+  background: rgba(242, 63, 67, 0.08) !important;
+}
+
+.gif-import-thumb--audio {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px;
+  background: linear-gradient(135deg, #27151b 0%, #191a24 100%);
+}
+
+.gif-import-audio-badge {
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #ff7a7f;
+}
+
+.gif-import-audio-player {
+  width: 100%;
+  height: 24px;
+}
+
+.gif-import-speed-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.gif-import-speed-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.gif-import-speed-label {
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: #c5c9d4;
+}
+
+.gif-import-dur-badge {
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: #9ba1ad;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.gif-import-dur-badge--error {
+  color: #ff9c9f;
+  background: rgba(242, 63, 67, 0.2);
+}
+
+.gif-import-speed-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.gif-import-speed-slider {
+  width: 100%;
+  height: 4px;
+  accent-color: var(--red-brand);
+  cursor: pointer;
+}
+
+.gif-speed-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.gif-speed-pill {
+  padding: 2px 7px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #c5c9d4;
+  font-family: inherit;
+  font-size: 0.68rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background-color 110ms ease, border-color 110ms ease, color 110ms ease;
+}
+
+.gif-speed-pill:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.gif-speed-pill--active {
+  background: var(--red-action);
+  border-color: var(--red-action);
+  color: #ffffff;
+}

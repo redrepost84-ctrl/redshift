@@ -30,6 +30,56 @@ interface PendingGifImport {
   previewUrl: string;
   title: string;
   tagsText: string;
+  playbackSpeed: number;
+  mediaKind: 'gif' | 'video' | 'audio';
+  durationSec?: number;
+  width?: number;
+  height?: number;
+  tooLong?: boolean;
+}
+
+const MAX_GIF_DURATION_SECONDS = 300; // 5 minutes max
+
+function isSupportedGifImportFile(file: File): boolean {
+  const mime = (file.type || '').toLowerCase();
+  const name = (file.name || '').toLowerCase();
+  if (
+    mime.startsWith('image/') ||
+    mime.startsWith('video/') ||
+    mime.startsWith('audio/')
+  ) {
+    return mime !== 'image/svg+xml';
+  }
+  return /\.(gif|mp4|m4v|webm|mov|mkv|avi|ogv|wmv|flv|wav|mp3|ogg|flac|m4a|aac|weba|png|jpe?g|webp)$/i.test(
+    name,
+  );
+}
+
+function detectImportMediaKind(file: File): 'gif' | 'video' | 'audio' {
+  const mime = (file.type || '').toLowerCase();
+  const name = (file.name || '').toLowerCase();
+  if (mime.startsWith('video/') || /\.(mp4|m4v|webm|mov|mkv|avi|ogv|wmv|flv)$/i.test(name)) {
+    return 'video';
+  }
+  if (mime.startsWith('audio/') || /\.(wav|mp3|ogg|flac|m4a|aac|weba)$/i.test(name)) {
+    return 'audio';
+  }
+  return 'gif';
+}
+
+function formatDurationShort(sec: number): string {
+  const whole = Math.max(0, Math.round(sec));
+  const m = Math.floor(whole / 60);
+  const s = whole % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function isVideoGifItem(gif: GifItem): boolean {
+  if (gif.mediaKind === 'video') {
+    return true;
+  }
+  const u = (gif.previewUrl ?? gif.url ?? '').toLowerCase();
+  return /\.(webm|mp4|m4v|mov|ogv)(\?|$)/i.test(u);
 }
 
 let activeGifPickerClose: (() => void) | null = null;
@@ -109,7 +159,11 @@ function createTrashSvg(size = 13): SVGSVGElement {
 }
 
 function defaultTitleFromFilename(fileName: string): string {
-  const base = fileName.replace(/\.gif$/i, '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const base = fileName
+    .replace(/\.[a-z0-9]{2,5}$/i, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   return (base || 'Custom GIF').slice(0, 80);
 }
 
@@ -208,14 +262,15 @@ export function openGifPicker(options: GifPickerOptions): () => void {
 
   const uploadInput = document.createElement('input');
   uploadInput.type = 'file';
-  uploadInput.accept = 'image/gif,.gif';
+  uploadInput.accept =
+    'image/*,video/*,audio/*,.gif,.mp4,.webm,.mov,.mkv,.avi,.m4v,.ogv,.wav,.mp3,.ogg,.flac,.m4a,.aac';
   uploadInput.multiple = true;
   uploadInput.hidden = true;
 
   const uploadBtn = document.createElement('button');
   uploadBtn.type = 'button';
   uploadBtn.className = 'gif-upload-btn';
-  uploadBtn.title = 'Add GIFs from your computer into Redshift';
+  uploadBtn.title = 'Add GIFs, videos (.mp4, .mov, .webm), or audio (.wav, .mp3) up to 5 min';
   uploadBtn.textContent = '+ Add';
   uploadBtn.addEventListener('click', () => {
     if (isImporting) {
@@ -272,29 +327,62 @@ export function openGifPicker(options: GifPickerOptions): () => void {
     }
   };
 
+  const probePendingEntryDuration = (entry: PendingGifImport) => {
+    if (entry.mediaKind === 'gif') {
+      return;
+    }
+    const probeEl = document.createElement(entry.mediaKind === 'video' ? 'video' : 'audio');
+    probeEl.preload = 'metadata';
+    probeEl.muted = true;
+    probeEl.src = entry.previewUrl;
+    const onMeta = () => {
+      if (closed || !pendingImports.includes(entry)) {
+        return;
+      }
+      const dur = Number(probeEl.duration);
+      if (Number.isFinite(dur) && dur > 0) {
+        entry.durationSec = Math.round(dur * 10) / 10;
+        entry.tooLong = dur > MAX_GIF_DURATION_SECONDS + 0.5;
+      }
+      if (probeEl instanceof HTMLVideoElement && probeEl.videoWidth > 0 && probeEl.videoHeight > 0) {
+        entry.width = probeEl.videoWidth;
+        entry.height = probeEl.videoHeight;
+      }
+      renderBody();
+    };
+    probeEl.addEventListener('loadedmetadata', onMeta, { once: true });
+  };
+
   const queueGifFiles = (files: FileList | File[]) => {
     const all = Array.from(files);
     if (all.length === 0) {
       return;
     }
-    const valid = all.filter(
-      (f) => f.type === 'image/gif' || f.name.toLowerCase().endsWith('.gif'),
-    );
+    const valid = all.filter(isSupportedGifImportFile);
     if (valid.length === 0) {
-      setStatusMsg('Only .gif files can be imported into Redshift GIFs.', true);
+      setStatusMsg(
+        'Supported GIF formats: .gif, .mp4, .webm, .mov, .mkv, .avi, .wav, .mp3, images (max 5 min).',
+        true,
+      );
       return;
     }
 
     setStatusMsg(null);
     revokePendingImports();
-    pendingImports = valid.slice(0, 25).map((file) => ({
-      file,
-      previewUrl: URL.createObjectURL(file),
-      title: defaultTitleFromFilename(file.name),
-      tagsText: '',
-    }));
+    pendingImports = valid.slice(0, 25).map((file) => {
+      const entry: PendingGifImport = {
+        file,
+        previewUrl: URL.createObjectURL(file),
+        title: defaultTitleFromFilename(file.name),
+        tagsText: '',
+        playbackSpeed: 1,
+        mediaKind: detectImportMediaKind(file),
+      };
+      probePendingEntryDuration(entry);
+      return entry;
+    });
     if (valid.length > 25) {
-      setStatusMsg('Showing the first 25 selected GIFs.');
+      setStatusMsg('Showing the first 25 selected files.');
     }
     renderBody();
   };
@@ -325,13 +413,29 @@ export function openGifPicker(options: GifPickerOptions): () => void {
     if (isImporting || pendingImports.length === 0) {
       return;
     }
+    const overLimit = pendingImports.find((item) => item.tooLong);
+    if (overLimit) {
+      setStatusMsg(
+        `"${overLimit.file.name}" exceeds the 5-minute (5:00) maximum for Redshift GIFs.`,
+        true,
+      );
+      return;
+    }
     isImporting = true;
     uploadBtn.disabled = true;
     backBtn.disabled = true;
     renderBody();
 
     try {
-      const uploadedItems: Array<{ uploadId: string; title: string; tags: string[] }> = [];
+      const uploadedItems: Array<{
+        uploadId: string;
+        title: string;
+        tags: string[];
+        playbackSpeed?: number;
+        durationSec?: number;
+        width?: number;
+        height?: number;
+      }> = [];
       const total = pendingImports.length;
 
       for (let i = 0; i < total; i += 1) {
@@ -365,10 +469,18 @@ export function openGifPicker(options: GifPickerOptions): () => void {
           uploadId: upRes.attachment.id,
           title: entry.title.trim() || defaultTitleFromFilename(entry.file.name),
           tags: parseTagInput(entry.tagsText),
+          playbackSpeed: entry.playbackSpeed,
+          durationSec: entry.durationSec,
+          width: entry.width,
+          height: entry.height,
         });
       }
 
-      setStatusMsg(total === 1 ? 'Saving GIF to Redshift...' : `Saving ${total} GIFs to Redshift...`);
+      setStatusMsg(
+        total === 1
+          ? 'Processing & saving GIF to Redshift...'
+          : `Processing & saving ${total} GIFs to Redshift...`,
+      );
       const addRes = await apiAddCommunityGifs(uploadedItems);
       if (closed) {
         return;
@@ -402,26 +514,56 @@ export function openGifPicker(options: GifPickerOptions): () => void {
     tile.setAttribute('aria-label', `Send ${gif.title} GIF`);
     tile.style.aspectRatio = String(resolveTileAspect(gif.width, gif.height));
 
-    const img = document.createElement('img');
-    img.className = 'gif-tile-img';
-    img.src = resolveMediaUrl(gif.previewUrl ?? gif.url);
-    img.alt = gif.title;
-    img.loading = 'lazy';
-    img.decoding = 'async';
-    if (!(gif.width && gif.height)) {
-      img.addEventListener(
-        'load',
-        () => {
-          if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-            tile.style.aspectRatio = String(
-              resolveTileAspect(img.naturalWidth, img.naturalHeight),
-            );
-          }
-        },
-        { once: true },
-      );
+    const mediaUrl = resolveMediaUrl(gif.previewUrl ?? gif.url);
+    if (isVideoGifItem(gif)) {
+      const vid = document.createElement('video');
+      vid.className = 'gif-tile-img';
+      vid.src = mediaUrl;
+      vid.autoplay = true;
+      vid.loop = true;
+      vid.muted = true;
+      vid.playsInline = true;
+      vid.preload = 'metadata';
+      if (gif.playbackSpeed && gif.playbackSpeed !== 1) {
+        vid.playbackRate = gif.playbackSpeed;
+        vid.addEventListener('loadedmetadata', () => {
+          vid.playbackRate = gif.playbackSpeed ?? 1;
+        });
+      }
+      if (!(gif.width && gif.height)) {
+        vid.addEventListener(
+          'loadedmetadata',
+          () => {
+            if (vid.videoWidth > 0 && vid.videoHeight > 0) {
+              tile.style.aspectRatio = String(resolveTileAspect(vid.videoWidth, vid.videoHeight));
+            }
+          },
+          { once: true },
+        );
+      }
+      tile.appendChild(vid);
+    } else {
+      const img = document.createElement('img');
+      img.className = 'gif-tile-img';
+      img.src = mediaUrl;
+      img.alt = gif.title;
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      if (!(gif.width && gif.height)) {
+        img.addEventListener(
+          'load',
+          () => {
+            if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+              tile.style.aspectRatio = String(
+                resolveTileAspect(img.naturalWidth, img.naturalHeight),
+              );
+            }
+          },
+          { once: true },
+        );
+      }
+      tile.appendChild(img);
     }
-    tile.appendChild(img);
 
     const favs = options.getFavorites();
     let favorited = favs.some((f) => f.url === gif.url);
@@ -621,7 +763,8 @@ export function openGifPicker(options: GifPickerOptions): () => void {
 
     const sub = document.createElement('div');
     sub.className = 'gif-import-desc';
-    sub.textContent = 'Name and tag your GIF so anyone in Redshift can search and send it.';
+    sub.textContent =
+      'Supports GIF, MP4, WebM, MOV, MKV, WAV, MP3 & more (max 5:00). Adjust playback speed below.';
     form.appendChild(sub);
 
     const list = document.createElement('div');
@@ -631,13 +774,46 @@ export function openGifPicker(options: GifPickerOptions): () => void {
 
     pendingImports.forEach((entry, idx) => {
       const row = document.createElement('div');
-      row.className = 'gif-import-row';
+      row.className = entry.tooLong ? 'gif-import-row gif-import-row--error' : 'gif-import-row';
 
-      const thumb = document.createElement('img');
-      thumb.className = 'gif-import-thumb';
-      thumb.src = entry.previewUrl;
-      thumb.alt = entry.title || entry.file.name;
-      row.appendChild(thumb);
+      let previewVideo: HTMLVideoElement | null = null;
+      let previewAudio: HTMLAudioElement | null = null;
+      if (entry.mediaKind === 'video') {
+        const vid = document.createElement('video');
+        vid.className = 'gif-import-thumb';
+        vid.src = entry.previewUrl;
+        vid.autoplay = true;
+        vid.loop = true;
+        vid.muted = true;
+        vid.playsInline = true;
+        vid.playbackRate = entry.playbackSpeed;
+        vid.addEventListener('loadedmetadata', () => {
+          vid.playbackRate = entry.playbackSpeed;
+        });
+        previewVideo = vid;
+        row.appendChild(vid);
+      } else if (entry.mediaKind === 'audio') {
+        const audioBox = document.createElement('div');
+        audioBox.className = 'gif-import-thumb gif-import-thumb--audio';
+        const waveIcon = document.createElement('span');
+        waveIcon.className = 'gif-import-audio-badge';
+        waveIcon.textContent = 'WAV / AUDIO';
+        audioBox.appendChild(waveIcon);
+        const aud = document.createElement('audio');
+        aud.src = entry.previewUrl;
+        aud.controls = true;
+        aud.className = 'gif-import-audio-player';
+        aud.playbackRate = entry.playbackSpeed;
+        previewAudio = aud;
+        audioBox.appendChild(aud);
+        row.appendChild(audioBox);
+      } else {
+        const thumb = document.createElement('img');
+        thumb.className = 'gif-import-thumb';
+        thumb.src = entry.previewUrl;
+        thumb.alt = entry.title || entry.file.name;
+        row.appendChild(thumb);
+      }
 
       const fields = document.createElement('div');
       fields.className = 'gif-import-fields';
@@ -666,8 +842,81 @@ export function openGifPicker(options: GifPickerOptions): () => void {
         entry.tagsText = tagsInput.value;
       });
 
+      const speedRow = document.createElement('div');
+      speedRow.className = 'gif-import-speed-row';
+
+      const speedHeader = document.createElement('div');
+      speedHeader.className = 'gif-import-speed-header';
+      const speedLabel = document.createElement('span');
+      speedLabel.className = 'gif-import-speed-label';
+      speedLabel.textContent = `Speed: ${entry.playbackSpeed.toFixed(2).replace(/\.?0+$/, '')}×`;
+      speedHeader.appendChild(speedLabel);
+
+      if (typeof entry.durationSec === 'number') {
+        const durBadge = document.createElement('span');
+        durBadge.className = entry.tooLong
+          ? 'gif-import-dur-badge gif-import-dur-badge--error'
+          : 'gif-import-dur-badge';
+        durBadge.textContent = entry.tooLong
+          ? `${formatDurationShort(entry.durationSec)} (Max 5:00!)`
+          : `${formatDurationShort(entry.durationSec)} / 5:00`;
+        speedHeader.appendChild(durBadge);
+      }
+      speedRow.appendChild(speedHeader);
+
+      const speedControls = document.createElement('div');
+      speedControls.className = 'gif-import-speed-controls';
+
+      const speedSlider = document.createElement('input');
+      speedSlider.type = 'range';
+      speedSlider.className = 'gif-import-speed-slider';
+      speedSlider.min = '0.25';
+      speedSlider.max = '4';
+      speedSlider.step = '0.25';
+      speedSlider.value = String(entry.playbackSpeed);
+      speedSlider.disabled = isImporting;
+      speedSlider.setAttribute('aria-label', 'GIF playback speed');
+
+      const presetBtns: HTMLButtonElement[] = [];
+      const presets = [0.5, 1, 1.5, 2, 3];
+      const applySpeed = (val: number) => {
+        const clamped = Math.min(4, Math.max(0.25, Math.round(val * 4) / 4));
+        entry.playbackSpeed = clamped;
+        speedSlider.value = String(clamped);
+        speedLabel.textContent = `Speed: ${clamped.toFixed(2).replace(/\.?0+$/, '')}×`;
+        if (previewVideo) previewVideo.playbackRate = clamped;
+        if (previewAudio) previewAudio.playbackRate = clamped;
+        presetBtns.forEach((b, pIdx) => {
+          b.classList.toggle('gif-speed-pill--active', Math.abs(presets[pIdx] - clamped) < 0.01);
+        });
+      };
+
+      speedSlider.addEventListener('input', () => {
+        applySpeed(Number(speedSlider.value));
+      });
+      speedControls.appendChild(speedSlider);
+
+      const pillsWrap = document.createElement('div');
+      pillsWrap.className = 'gif-speed-pills';
+      for (const sp of presets) {
+        const pill = document.createElement('button');
+        pill.type = 'button';
+        pill.className =
+          Math.abs(entry.playbackSpeed - sp) < 0.01
+            ? 'gif-speed-pill gif-speed-pill--active'
+            : 'gif-speed-pill';
+        pill.textContent = `${sp}×`;
+        pill.disabled = isImporting;
+        pill.addEventListener('click', () => applySpeed(sp));
+        presetBtns.push(pill);
+        pillsWrap.appendChild(pill);
+      }
+      speedControls.appendChild(pillsWrap);
+      speedRow.appendChild(speedControls);
+
       fields.appendChild(titleInput);
       fields.appendChild(tagsInput);
+      fields.appendChild(speedRow);
       row.appendChild(fields);
 
       if (pendingImports.length > 1 && !isImporting) {
@@ -693,15 +942,18 @@ export function openGifPicker(options: GifPickerOptions): () => void {
     const actions = document.createElement('div');
     actions.className = 'gif-setup-actions';
 
+    const hasTooLong = pendingImports.some((item) => item.tooLong);
     const saveBtn = document.createElement('button');
     saveBtn.type = 'submit';
     saveBtn.className = 'gif-setup-save';
-    saveBtn.disabled = isImporting;
+    saveBtn.disabled = isImporting || hasTooLong;
     saveBtn.textContent = isImporting
-      ? 'Uploading...'
-      : pendingImports.length === 1
-        ? 'Add to Redshift'
-        : `Add ${pendingImports.length} GIFs`;
+      ? 'Processing...'
+      : hasTooLong
+        ? 'Max 5:00 Exceeded'
+        : pendingImports.length === 1
+          ? 'Add to Redshift'
+          : `Add ${pendingImports.length} GIFs`;
 
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
@@ -807,7 +1059,7 @@ export function openGifPicker(options: GifPickerOptions): () => void {
       const emptyText = document.createElement('div');
       emptyText.className = 'gif-empty-text';
       emptyText.textContent =
-        'No GIFs have been submitted yet. Add .gif files from your computer to build Redshift’s GIF library.';
+        'No GIFs have been submitted yet. Add .gif, .mp4, .webm, .mov, .wav, or .mp3 files (up to 5 min) from your computer to build Redshift’s GIF library.';
 
       const emptyAddBtn = document.createElement('button');
       emptyAddBtn.type = 'button';

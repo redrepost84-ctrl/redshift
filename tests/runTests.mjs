@@ -533,6 +533,23 @@ async function run() {
         );
         await cdp.evalJson(`(() => {
           window.__rsMockScreen = { calls: [], constraints: [], currentStream: null };
+          window.redshiftDesktop = {
+            isElectron: true,
+            platform: 'win32',
+            version: '0.1.4',
+            getDesktopConfig: async () => ({}),
+            getDesktopSources: async () => [
+              { id: 'window:101:0', kind: 'window', name: 'Redshift Window', thumbnailDataUrl: '', appIconDataUrl: '' },
+              { id: 'screen:1:0', kind: 'screen', name: 'Display 1', thumbnailDataUrl: '', appIconDataUrl: '' },
+            ],
+            selectDesktopSource: async () => ({ ok: true }),
+            checkForUpdates: async () => ({ updateAvailable: false, currentVersion: '0.1.4', latestVersion: '0.1.4' }),
+            initiateUpdate: () => {},
+            applyUpdateAndRestart: () => {},
+            onBackgroundUpdateAvailable: () => () => {},
+            setUnreadCount: () => {},
+            relaunchApp: () => {},
+          };
           const origMediaDevices = navigator.mediaDevices;
           const patchedGetDisplay = async (opts) => {
             window.__rsMockScreen.calls.push(opts);
@@ -592,16 +609,28 @@ async function run() {
           6000,
         );
 
-        // 1. Click Share Screen -> must open full centered visual preview modal BEFORE capturing anything
-        const chooserState = await cdp.evalJson(`(() => {
+        // 1. Click Share Screen -> must open full centered visual preview modal BEFORE capturing anything, showing ONLY real windows & monitors (zero placeholder picker cards)
+        await cdp.evalJson(`(() => {
           document.querySelector('[data-vc-role="screen"]').click();
+          return true;
+        })()`);
+        await waitFor(
+          async () =>
+            await cdp.evalJson(
+              `Boolean(document.querySelector('.vc-screen-modal')) && document.querySelectorAll('.vc-screen-preview-card[data-host-source-id]').length > 0`,
+            ),
+          5000,
+        );
+        const chooserState = await cdp.evalJson(`(() => {
           const modal = document.querySelector('.vc-screen-modal');
+          const cardsText = Array.from(document.querySelectorAll('.vc-screen-preview-card')).map((c) => c.textContent || '');
           return {
             callsBeforePick: window.__rsMockScreen.calls.length,
             hasModal: Boolean(modal),
             hasWinTab: Boolean(document.querySelector('[data-screen-tab="window"]')),
             hasDesktopTab: Boolean(document.querySelector('[data-screen-tab="screen"]')),
             hasBrowserTab: Boolean(document.querySelector('[data-screen-tab="tab"]')),
+            hasPlaceholderCard: cardsText.some((t) => /WINDOW PICKER|Browse App Windows|DESKTOP PICKER/i.test(t)),
             hasGoLive: Boolean(document.querySelector('.vc-screen-modal-go-btn')),
           };
         })()`);
@@ -609,7 +638,8 @@ async function run() {
         assert.equal(chooserState.hasModal, true, 'Full centered Screen Share modal expected');
         assert.equal(chooserState.hasWinTab, true, 'Windows tab expected');
         assert.equal(chooserState.hasDesktopTab, true, 'Entire Desktop tab expected');
-        assert.equal(chooserState.hasBrowserTab, true, 'Browser Tabs tab expected');
+        assert.equal(chooserState.hasBrowserTab, false, 'Placeholder Browser Tabs tab must not appear');
+        assert.equal(chooserState.hasPlaceholderCard, false, 'Placeholder WINDOW PICKER card must not appear');
         assert.equal(chooserState.hasGoLive, true, 'Go Live button expected');
 
         // 1b. If getDisplayMedia is blocked by an embedded browser, modal stays open and displays explicit error banner
@@ -619,8 +649,7 @@ async function run() {
           navigator.mediaDevices.getDisplayMedia = async () => {
             throw new DOMException('Access to the feature "display-capture" is disallowed by permissions policy', 'NotAllowedError');
           };
-          document.querySelector('[data-screen-tab="tab"]').click();
-          document.querySelector('[data-surface="browser"]').click();
+          document.querySelector('[data-surface="window"]').click();
           document.querySelector('.vc-screen-modal-go-btn').click();
           return true;
         })()`);
@@ -636,7 +665,7 @@ async function run() {
           return true;
         })()`);
 
-        // 2. Switch to Entire Desktop tab, pick preview card & click Go Live -> triggers displaySurface: 'monitor', shows top quality control (no duplicate bottom pill), and turns Leave button into End Stream
+        // 2. Switch to Entire Desktop tab, pick preview card & click Go Live -> triggers displaySurface: 'monitor', shows top quality control, and shows ONLY ONE End Stream button
         await cdp.evalJson(`(() => {
           document.querySelector('[data-screen-tab="screen"]').click();
           document.querySelector('[data-surface="monitor"]').click();
@@ -652,8 +681,14 @@ async function run() {
         );
         const monitorCall = await cdp.evalJson(`window.__rsMockScreen.calls[0]?.video?.displaySurface`);
         assert.equal(monitorCall, 'monitor');
-        const hasDupBottomPill = await cdp.evalJson(`Boolean(document.querySelector('[data-vc-role="screen-quality"]'))`);
-        assert.equal(hasDupBottomPill, false, 'Duplicate bottom quality pill must not be rendered');
+        const streamBtnCounts = await cdp.evalJson(`({
+          hasDupBottomPill: Boolean(document.querySelector('[data-vc-role="screen-quality"]')),
+          endStreamAriaCount: document.querySelectorAll('button[aria-label="End Stream"]').length,
+          sidebarHangupLabel: document.querySelector('.vc-sidebar-hangup-btn')?.getAttribute('aria-label'),
+        })`);
+        assert.equal(streamBtnCounts.hasDupBottomPill, false, 'Duplicate bottom quality pill must not be rendered');
+        assert.equal(streamBtnCounts.endStreamAriaCount, 1, 'Exactly one End Stream button must be shown while streaming');
+        assert.equal(streamBtnCounts.sidebarHangupLabel, 'Disconnect from Voice Call', 'Sidebar hangup button must stay Disconnect');
 
         // 3. Edit resolution & FPS from top of screen share WHILE actively screensharing without restarting capture
         await cdp.evalJson(`(() => {
@@ -704,11 +739,17 @@ async function run() {
           5000,
         );
 
-        // 4. Start Browser Tab share via modal -> verify displaySurface: 'browser' -> close tab ends share automatically
+        // 4. Start Window share via modal -> verify displaySurface: 'window' -> close window ends share automatically
         await cdp.evalJson(`(() => {
           document.querySelector('[data-vc-role="screen"]')?.click();
-          document.querySelector('[data-screen-tab="tab"]')?.click();
-          document.querySelector('[data-surface="browser"]')?.click();
+          return true;
+        })()`);
+        await waitFor(
+          async () => await cdp.evalJson(`Boolean(document.querySelector('.vc-screen-modal [data-surface="window"]'))`),
+          4000,
+        );
+        await cdp.evalJson(`(() => {
+          document.querySelector('.vc-screen-modal [data-surface="window"]')?.click();
           document.querySelector('.vc-screen-modal-go-btn')?.click();
           return true;
         })()`);
@@ -718,7 +759,7 @@ async function run() {
         );
         assert.equal(
           await cdp.evalJson(`window.__rsMockScreen.calls[1]?.video?.displaySurface`),
-          'browser',
+          'window',
         );
         await cdp.evalJson(`window.__rsCloseSharedTab()`);
         await waitFor(
@@ -783,12 +824,18 @@ async function run() {
           5000,
         );
 
-        // Turn camera off, start screen share via modal, navigate to Friends -> verify SCREEN PiP mode, then close tab -> verifies fallback to speaker audio square
+        // Turn camera off, start screen share via modal, navigate to Friends -> verify SCREEN PiP mode, then close window -> verifies fallback to speaker audio square
         await cdp.evalJson(`(() => {
           document.querySelector('[data-vc-role="camera"]')?.click();
           document.querySelector('[data-vc-role="screen"]')?.click();
-          document.querySelector('[data-screen-tab="tab"]')?.click();
-          document.querySelector('[data-surface="browser"]')?.click();
+          return true;
+        })()`);
+        await waitFor(
+          async () => await cdp.evalJson(`Boolean(document.querySelector('.vc-screen-modal [data-surface="window"]'))`),
+          4000,
+        );
+        await cdp.evalJson(`(() => {
+          document.querySelector('.vc-screen-modal [data-surface="window"]')?.click();
           document.querySelector('.vc-screen-modal-go-btn')?.click();
           return true;
         })()`);
@@ -1242,9 +1289,35 @@ async function run() {
         assert.equal(revealRes.revealed, true, 'Clicking SPOILER overlay must unblur media');
         assert.equal(revealRes.lightboxOpen, false, 'Revealing spoiler must not immediately open lightbox');
 
-        // Click Eye Toggle on bob_t's own image -> removes spoiler live, then click again -> re-enables spoiler live
+        // Floating eye icon on chat images must NOT be rendered (removed per user request); toggling spoiler works cleanly via right-click context menu
+        const hasFloatingEyeIcon = await cdp.evalJson(
+          `Boolean(document.querySelector('[data-msg-id="${spoilerMsgId}"] [data-action="toggle-media-spoiler"]'))`,
+        );
+        assert.equal(hasFloatingEyeIcon, false, 'Floating eye icon on chat images must be removed');
+
         await cdp.evalJson(`(() => {
-          document.querySelector('[data-msg-id="${spoilerMsgId}"] [data-action="toggle-media-spoiler"]')?.click();
+          const img = document.querySelector('[data-msg-id="${spoilerMsgId}"] .msg-image');
+          img?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 200 }));
+          return true;
+        })()`);
+        await waitFor(
+          async () =>
+            await cdp.evalJson(
+              `Array.from(document.querySelectorAll('.ctx-menu-item')).some((el) => el.textContent.includes('Remove Spoiler Blur'))`,
+            ),
+          4000,
+        ).catch(async (err) => {
+          const diag = await cdp.evalJson(`({
+            hasImg: Boolean(document.querySelector('[data-msg-id="${spoilerMsgId}"] .msg-image')),
+            menuItems: Array.from(document.querySelectorAll('.ctx-menu-item')).map((el) => el.textContent),
+            allMenus: document.querySelectorAll('.floating-action-menu').length,
+          })`);
+          console.error('[SPOILER CTX DIAG]', diag);
+          throw err;
+        });
+        await cdp.evalJson(`(() => {
+          const item = Array.from(document.querySelectorAll('.ctx-menu-item')).find((el) => el.textContent.includes('Remove Spoiler Blur'));
+          item?.click();
           return true;
         })()`);
         await waitFor(
@@ -1255,13 +1328,41 @@ async function run() {
           5000,
         );
         await cdp.evalJson(`(() => {
-          document.querySelector('[data-msg-id="${spoilerMsgId}"] [data-action="toggle-media-spoiler"]')?.click();
+          const img = document.querySelector('[data-msg-id="${spoilerMsgId}"] .msg-image');
+          img?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 200 }));
+          return true;
+        })()`);
+        await waitFor(
+          async () =>
+            await cdp.evalJson(
+              `Array.from(document.querySelectorAll('.ctx-menu-item')).some((el) => el.textContent.includes('Mark as Spoiler'))`,
+            ),
+          4000,
+        );
+        await cdp.evalJson(`(() => {
+          const item = Array.from(document.querySelectorAll('.ctx-menu-item')).find((el) => el.textContent.includes('Mark as Spoiler'));
+          item?.click();
           return true;
         })()`);
         await waitFor(
           async () =>
             await cdp.evalJson(
               `Boolean(document.querySelector('[data-msg-id="${spoilerMsgId}"] .msg-media-spoiler'))`,
+            ),
+          5000,
+        );
+
+        // Verify Markdown bullet list (* item) turns asterisk into bullet point (•)
+        const bulletMsgRes = await api(baseUrl, '/api/dms/send', {
+          method: 'POST',
+          token: tokenB,
+          body: { toUsername: 'alice_t', content: '* First bullet item\n* Second **bold** item' },
+        });
+        assert.equal(bulletMsgRes.status, 200);
+        await waitFor(
+          async () =>
+            await cdp.evalJson(
+              `document.querySelectorAll('[data-msg-id="${bulletMsgRes.data.message.id}"] .md-bullet-item').length === 2 && document.querySelector('[data-msg-id="${bulletMsgRes.data.message.id}"] .md-bullet-dot')?.textContent === '•'`,
             ),
           5000,
         );
@@ -1663,6 +1764,48 @@ async function run() {
     assert.equal(adminDel.status, 200);
     assert.equal(adminDel.data.deletedUsername, 'carol_t');
     console.log('[PASS] Real-time loopback Moderator / Admin account authority (list, update, kick & delete)');
+
+    // 4.7 Universal GIF Creator (playbackSpeed + 5-min limit) & Video Range Streaming Headers
+    const tinyMp4Upload = await fetch(`${baseUrl}/api/uploads`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${tokenA}`,
+        'Content-Type': 'application/octet-stream',
+        'X-File-Name': encodeURIComponent('clip.mp4'),
+        'X-File-Mime': 'video/mp4',
+      },
+      body: Buffer.alloc(64, 0x41),
+    });
+    const mp4Meta = await tinyMp4Upload.json();
+    assert.equal(tinyMp4Upload.status, 200);
+    const rangeVidResp = await fetch(`${baseUrl}/api/uploads/${mp4Meta.attachment.id}`, {
+      headers: { Range: 'bytes=0-' },
+    });
+    assert.equal(rangeVidResp.status, 206);
+    assert.equal(rangeVidResp.headers.get('cross-origin-resource-policy'), 'cross-origin');
+    assert.ok((rangeVidResp.headers.get('access-control-expose-headers') || '').includes('Content-Range'));
+
+    // Reject > 5 minute (300s) GIF submission
+    const tooLongGifRes = await api(baseUrl, '/api/gifs/add', {
+      method: 'POST',
+      token: tokenA,
+      body: {
+        items: [{ uploadId: mp4Meta.attachment.id, title: 'Too Long Video', tags: ['test'], playbackSpeed: 1.5, durationSec: 360 }],
+      },
+    });
+    assert.equal(tooLongGifRes.status, 400, 'GIF media over 5 minutes must be rejected with 400');
+
+    // Accept valid <= 5 minute MP4 with custom playback speed
+    const validVidGifRes = await api(baseUrl, '/api/gifs/add', {
+      method: 'POST',
+      token: tokenA,
+      body: {
+        items: [{ uploadId: mp4Meta.attachment.id, title: 'Speedy Clip', tags: ['fast'], playbackSpeed: 2, durationSec: 12 }],
+      },
+    });
+    assert.equal(validVidGifRes.status, 200);
+    assert.equal(validVidGifRes.data.added[0].mediaKind, 'video');
+    console.log('[PASS] Universal GIF creator (MP4/audio support, 5-min cap, playback speed) & video streaming headers');
 
     // 5. Auth rate limiting burst check (run after browser login from same IP)
     let got429 = false;

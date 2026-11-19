@@ -736,10 +736,50 @@ export function renderFriendsPanel(
   listContainer.className = 'friends-list-scroll';
   body.appendChild(listContainer);
 
+  const hashDataUrl = (str?: string): string => {
+    if (!str) return '';
+    let h = 2166136261;
+    const step = Math.max(1, Math.floor(str.length / 64));
+    for (let i = 0; i < str.length; i += step) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return `${str.length}:${h >>> 0}`;
+  };
+
+  const profileRowSig = (p: PublicProfile): string =>
+    [
+      p.username,
+      p.displayName,
+      p.status,
+      p.bio,
+      p.avatarPreset ?? 'c',
+      hashDataUrl(p.avatarDataUrl),
+      p.bannerColor ?? '',
+      hashDataUrl(p.bannerDataUrl),
+      p.customStatus?.emoji ?? '',
+      p.customStatus?.text ?? '',
+      p.isProfilePrivate ? 'P' : 'O',
+    ].join(':');
+
+  let lastListSig = '';
+
   const renderFilteredList = () => {
-    listContainer.replaceChildren();
     const snapshot = options.getSnapshot();
     const q = searchQuery.trim().toLowerCase();
+    const nextSig = [
+      options.activeTab,
+      q,
+      snapshot.friends.map(profileRowSig).join('|'),
+      snapshot.incomingRequests.map((r) => profileRowSig(r.user)).join('|'),
+      snapshot.outgoingRequests.map((r) => profileRowSig(r.user)).join('|'),
+      (snapshot.blockedUsers ?? []).map(profileRowSig).join('|'),
+    ].join('§');
+    if (nextSig === lastListSig && listContainer.childElementCount > 0) {
+      return;
+    }
+    lastListSig = nextSig;
+    listContainer.replaceChildren();
 
     if (options.activeTab === 'pending') {
       const incoming = q

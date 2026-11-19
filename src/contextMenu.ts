@@ -719,11 +719,20 @@ export function openContextMenu(options: ContextMenuOptions): () => void {
     options.onClose?.();
   };
 
-  activeContextMenuCleanup = cleanup;
+  const scrollBindTimer = window.setTimeout(() => {
+    if (!closed) {
+      window.addEventListener('scroll', onViewportScroll, true);
+    }
+  }, 120);
+
+  const origCleanup = cleanup;
+  activeContextMenuCleanup = () => {
+    window.clearTimeout(scrollBindTimer);
+    origCleanup();
+  };
   window.addEventListener('pointerdown', onPointerDown, true);
   window.addEventListener('keydown', onKeyDown, true);
   window.addEventListener('resize', onViewportResize);
-  window.addEventListener('scroll', onViewportScroll, true);
 
-  return cleanup;
+  return activeContextMenuCleanup;
 }

@@ -273,6 +273,28 @@ export function renderFormattedMessageContent(
         continue;
       }
 
+      const bulletMatch = /^(\s*)[*-]\s+(.+)$/.exec(line);
+      if (bulletMatch) {
+        const indentLevel = Math.min(3, Math.floor(bulletMatch[1].length / 2));
+        const bEl = document.createElement('div');
+        bEl.className = 'md-bullet-item';
+        if (indentLevel > 0) {
+          bEl.style.paddingLeft = `${indentLevel * 18}px`;
+        }
+        const dotEl = document.createElement('span');
+        dotEl.className = 'md-bullet-dot';
+        dotEl.setAttribute('aria-hidden', 'true');
+        dotEl.textContent = indentLevel === 0 ? '•' : indentLevel === 1 ? '◦' : '▪';
+        const bodyEl = document.createElement('span');
+        bodyEl.className = 'md-bullet-content';
+        appendInlineMarkdown(bodyEl, bulletMatch[2], 0, selfUsernameLower);
+        bEl.appendChild(dotEl);
+        bEl.appendChild(bodyEl);
+        container.appendChild(bEl);
+        lastInlineEl = bodyEl;
+        continue;
+      }
+
       const pLine = document.createElement('div');
       pLine.className = 'md-line';
       appendInlineMarkdown(pLine, line, 0, selfUsernameLower);

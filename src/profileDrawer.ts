@@ -70,6 +70,36 @@ export const STATUS_LABELS: Record<EffectiveStatus, string> = {
   offline: 'Offline',
 };
 
+let statusChangeSeq = 0;
+let optimisticSelfStatusLock: { status: UserStatus; until: number } | null = null;
+
+/** Returns the active optimistic self status if a recent status click is still settling. */
+export function getLockedOptimisticSelfStatus(): UserStatus | null {
+  if (!optimisticSelfStatusLock) {
+    return null;
+  }
+  if (Date.now() > optimisticSelfStatusLock.until) {
+    optimisticSelfStatusLock = null;
+    return null;
+  }
+  return optimisticSelfStatusLock.status;
+}
+
+function beginOptimisticStatusChange(nextStatus: UserStatus): number {
+  const seq = ++statusChangeSeq;
+  optimisticSelfStatusLock = { status: nextStatus, until: Date.now() + 4500 };
+  return seq;
+}
+
+function settleOptimisticStatusChange(seq: number, confirmedStatus: UserStatus): boolean {
+  if (seq !== statusChangeSeq) {
+    return false;
+  }
+  // Keep a short grace window so delayed WebSocket syncs from an earlier click never flicker back.
+  optimisticSelfStatusLock = { status: confirmedStatus, until: Date.now() + 1800 };
+  return true;
+}
+
 export function createStatusGlyph(status: EffectiveStatus, size = 12): SVGSVGElement {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
@@ -282,10 +312,17 @@ export function createProfileDrawerController(options: ProfileDrawerOptions) {
 
       item.addEventListener('click', async () => {
         closeStatusMenu();
+        const mySeq = beginOptimisticStatusChange(opt.value);
+        const curUser = options.getUser();
+        curUser.status = opt.value;
+        options.onSyncDock();
+        renderContents();
         const res = await apiUpdateStatus(opt.value);
         if (res.ok && res.snapshot) {
-          options.onSnapshotUpdated(res.snapshot);
-          renderContents();
+          if (settleOptimisticStatusChange(mySeq, res.snapshot.user.status)) {
+            options.onSnapshotUpdated(res.snapshot);
+            renderContents();
+          }
         }
       });
 
@@ -882,10 +919,17 @@ export function openSelfProfileModal(options: SelfProfileModalOptions): SelfProf
       item.appendChild(textWrap);
       item.addEventListener('click', async () => {
         closeStatusMenu();
+        const mySeq = beginOptimisticStatusChange(opt.value);
+        const snapNow = options.getSnapshot();
+        snapNow.user.status = opt.value;
+        options.onSyncDock();
+        renderModal();
         const res = await apiUpdateStatus(opt.value);
         if (res.ok && res.snapshot) {
-          options.onSnapshotUpdated(res.snapshot);
-          renderModal();
+          if (settleOptimisticStatusChange(mySeq, res.snapshot.user.status)) {
+            options.onSnapshotUpdated(res.snapshot);
+            renderModal();
+          }
         }
       });
       menu.appendChild(item);

@@ -577,7 +577,12 @@ export async function prepareChatImageDataUrl(
   }
 }
 
-export function openImageLightbox(imageSrc: string, altText = 'Attached image'): void {
+export function openImageLightbox(
+  imageSrc: string,
+  altText = 'Attached image',
+  opts?: { isVideo?: boolean; playbackSpeed?: number },
+): void {
+  const resolvedSrc = resolveMediaUrl(imageSrc);
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop modal-backdrop--deep';
   backdrop.setAttribute('role', 'dialog');
@@ -594,11 +599,29 @@ export function openImageLightbox(imageSrc: string, altText = 'Attached image'):
   closeBtn.appendChild(createCloseIconSvg(16));
   card.appendChild(closeBtn);
 
-  const img = document.createElement('img');
-  img.className = 'modal-image-full';
-  img.src = imageSrc;
-  img.alt = altText;
-  card.appendChild(img);
+  if (opts?.isVideo || /\.(webm|mp4|m4v|mov|ogv)(\?|$)/i.test(resolvedSrc)) {
+    const vid = document.createElement('video');
+    vid.className = 'modal-image-full';
+    vid.src = resolvedSrc;
+    vid.autoplay = true;
+    vid.loop = true;
+    vid.muted = true;
+    vid.playsInline = true;
+    vid.controls = true;
+    if (opts?.playbackSpeed && opts.playbackSpeed !== 1) {
+      vid.playbackRate = opts.playbackSpeed;
+      vid.addEventListener('loadedmetadata', () => {
+        vid.playbackRate = opts.playbackSpeed ?? 1;
+      });
+    }
+    card.appendChild(vid);
+  } else {
+    const img = document.createElement('img');
+    img.className = 'modal-image-full';
+    img.src = resolvedSrc;
+    img.alt = altText;
+    card.appendChild(img);
+  }
 
   backdrop.appendChild(card);
   document.body.appendChild(backdrop);
@@ -2242,7 +2265,7 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
       onOpenWhenRevealed?: () => void;
     },
   ) => {
-    const { attachmentId, isSpoiler, mediaClickEl, onOpenWhenRevealed } = optsMedia;
+    const { isSpoiler, mediaClickEl, onOpenWhenRevealed } = optsMedia;
     let revealed = !isSpoiler;
 
     const revealSpoiler = () => {
@@ -2281,24 +2304,6 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
         onOpenWhenRevealed();
       });
     }
-
-    if (isOwn && !isPending && onToggleSpoiler && attachmentId) {
-      const eyeBtn = document.createElement('button');
-      eyeBtn.type = 'button';
-      eyeBtn.className = isSpoiler
-        ? 'msg-media-spoiler-eye-btn msg-media-spoiler-eye-btn--active'
-        : 'msg-media-spoiler-eye-btn';
-      eyeBtn.dataset.action = 'toggle-media-spoiler';
-      eyeBtn.dataset.attachmentId = attachmentId;
-      eyeBtn.title = isSpoiler ? 'Remove Spoiler Blur' : 'Mark as Spoiler';
-      eyeBtn.setAttribute('aria-label', eyeBtn.title);
-      eyeBtn.appendChild(createMenuIconSvg(isSpoiler ? 'eye-off' : 'eye', 14));
-      eyeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        void onToggleSpoiler(msg, attachmentId, !isSpoiler);
-      });
-      container.appendChild(eyeBtn);
-    }
   };
 
   const appendMediaElement = (label: string, renderMedia: () => HTMLElement) => {
@@ -2332,29 +2337,56 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
     url.includes('/api/uploads/') ? `${url}?download=1` : undefined;
 
   if (msg.gif) {
-    const resolvedGifUrl = resolveMediaUrl(msg.gif.url);
-    appendMediaElement(msg.gif.title || 'GIF', () => {
+    const gifData = msg.gif;
+    const resolvedGifUrl = resolveMediaUrl(gifData.url);
+    const isVideoGif =
+      gifData.mediaKind === 'video' || /\.(webm|mp4|m4v|mov|ogv)(\?|$)/i.test(resolvedGifUrl);
+    appendMediaElement(gifData.title || 'GIF', () => {
       const gifWrap = document.createElement('div');
       gifWrap.className = 'msg-image-wrap msg-gif-wrap';
       mediaTargets.set(gifWrap, {
         kind: 'gif',
         url: resolvedGifUrl,
-        label: msg.gif!.title || 'GIF',
-        gif: msg.gif!,
+        label: gifData.title || 'GIF',
+        gif: gifData,
         downloadHref: resolveImageDownloadHref(resolvedGifUrl),
-        filename: `${(msg.gif!.title || 'redshift').replace(/[^a-z0-9_-]+/gi, '_')}.gif`,
+        filename: `${(gifData.title || 'redshift').replace(/[^a-z0-9_-]+/gi, '_')}.${isVideoGif ? 'webm' : 'gif'}`,
       });
 
-      const gifImg = document.createElement('img');
-      gifImg.className = 'msg-image msg-gif-img';
-      gifImg.src = resolvedGifUrl;
-      gifImg.alt = msg.gif!.title || 'GIF';
-      gifImg.loading = 'lazy';
-      gifImg.addEventListener('click', () => {
-        openImageLightbox(msg.gif!.url, msg.gif!.title || 'GIF');
-      });
-      gifWrap.appendChild(gifImg);
-      attachGifOverlays(gifWrap, msg.gif!, true);
+      if (isVideoGif) {
+        const gifVideo = document.createElement('video');
+        gifVideo.className = 'msg-image msg-gif-img';
+        gifVideo.src = resolvedGifUrl;
+        gifVideo.autoplay = true;
+        gifVideo.loop = true;
+        gifVideo.muted = true;
+        gifVideo.playsInline = true;
+        gifVideo.preload = 'metadata';
+        if (gifData.playbackSpeed && gifData.playbackSpeed !== 1) {
+          gifVideo.playbackRate = gifData.playbackSpeed;
+          gifVideo.addEventListener('loadedmetadata', () => {
+            gifVideo.playbackRate = gifData.playbackSpeed ?? 1;
+          });
+        }
+        gifVideo.addEventListener('click', () => {
+          openImageLightbox(resolvedGifUrl, gifData.title || 'GIF', {
+            isVideo: true,
+            playbackSpeed: gifData.playbackSpeed,
+          });
+        });
+        gifWrap.appendChild(gifVideo);
+      } else {
+        const gifImg = document.createElement('img');
+        gifImg.className = 'msg-image msg-gif-img';
+        gifImg.src = resolvedGifUrl;
+        gifImg.alt = gifData.title || 'GIF';
+        gifImg.loading = 'lazy';
+        gifImg.addEventListener('click', () => {
+          openImageLightbox(resolvedGifUrl, gifData.title || 'GIF');
+        });
+        gifWrap.appendChild(gifImg);
+      }
+      attachGifOverlays(gifWrap, gifData, true);
       return gifWrap;
     });
   }
@@ -2469,8 +2501,104 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
         video.controls = true;
         video.preload = 'metadata';
         video.playsInline = true;
-        video.src = att.url;
+
+        const isServerUpload = att.url.includes('/api/uploads/');
+        const isAlreadyWebm =
+          att.mime === 'video/webm' || /\.webm(\?|$)/i.test(att.name || att.url);
+        const supportsH264 = Boolean(
+          typeof video.canPlayType === 'function' &&
+            video.canPlayType('video/mp4; codecs="avc1.42E01E, mp4a.40.2"'),
+        );
+        const webmCompatUrl = isServerUpload
+          ? `${att.url}${att.url.includes('?') ? '&' : '?'}format=webm`
+          : null;
+
+        let usingCompatWebm = Boolean(webmCompatUrl && !isAlreadyWebm && !supportsH264);
+        let fallbackTriggered = usingCompatWebm;
+        let stallTimer: number | null = null;
+
+        const statusOverlay = document.createElement('div');
+        statusOverlay.className = 'msg-video-status-overlay';
+        statusOverlay.textContent = 'Preparing video for playback...';
+        statusOverlay.hidden = !usingCompatWebm;
+
+        const clearStallTimer = () => {
+          if (stallTimer !== null) {
+            window.clearTimeout(stallTimer);
+            stallTimer = null;
+          }
+        };
+
+        const switchToCompatWebm = (autoPlay: boolean) => {
+          if (fallbackTriggered || !webmCompatUrl || isAlreadyWebm) {
+            return;
+          }
+          fallbackTriggered = true;
+          usingCompatWebm = true;
+          clearStallTimer();
+          const resumeAt = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+          statusOverlay.hidden = false;
+          video.src = webmCompatUrl;
+          video.load();
+          video.addEventListener(
+            'loadedmetadata',
+            () => {
+              if (resumeAt > 0.2 && Number.isFinite(video.duration) && resumeAt < video.duration) {
+                try {
+                  video.currentTime = resumeAt;
+                } catch {}
+              }
+              if (autoPlay) {
+                void video.play().catch(() => {});
+              }
+            },
+            { once: true },
+          );
+        };
+
+        video.addEventListener('canplay', () => {
+          clearStallTimer();
+          statusOverlay.hidden = true;
+        });
+        video.addEventListener('playing', () => {
+          clearStallTimer();
+          statusOverlay.hidden = true;
+        });
+        video.addEventListener('error', () => {
+          if (!fallbackTriggered && webmCompatUrl && !isAlreadyWebm) {
+            switchToCompatWebm(!video.paused);
+          } else {
+            statusOverlay.hidden = true;
+          }
+        });
+        video.addEventListener('waiting', () => {
+          if (fallbackTriggered || !webmCompatUrl || isAlreadyWebm) {
+            return;
+          }
+          clearStallTimer();
+          stallTimer = window.setTimeout(() => {
+            if (!video.paused && video.readyState < 3) {
+              switchToCompatWebm(true);
+            }
+          }, 2600);
+        });
+        video.addEventListener('stalled', () => {
+          if (fallbackTriggered || !webmCompatUrl || isAlreadyWebm) {
+            return;
+          }
+          clearStallTimer();
+          stallTimer = window.setTimeout(() => {
+            if (!video.paused && video.readyState < 3) {
+              switchToCompatWebm(true);
+            }
+          }, 2600);
+        });
+        video.addEventListener('pause', clearStallTimer);
+        video.addEventListener('ended', clearStallTimer);
+
+        video.src = usingCompatWebm && webmCompatUrl ? webmCompatUrl : att.url;
         videoStage.appendChild(video);
+        videoStage.appendChild(statusOverlay);
         applyMediaSpoilerUi(videoStage, {
           attachmentId: att.id,
           isSpoiler: Boolean(att.spoiler),
@@ -2800,7 +2928,11 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
             label: media.kind === 'gif' ? 'Open GIF' : 'Open Image',
             icon: 'expand',
             dividerBefore: items.length > 0,
-            onSelect: () => openImageLightbox(media.url, media.label),
+            onSelect: () =>
+              openImageLightbox(media.url, media.label, {
+                isVideo: media.gif?.mediaKind === 'video',
+                playbackSpeed: media.gif?.playbackSpeed,
+              }),
           });
           if (media.kind === 'gif' && media.gif) {
             const gifObj = media.gif;

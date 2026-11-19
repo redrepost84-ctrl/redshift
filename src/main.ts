@@ -86,6 +86,7 @@ import {
   createDmProfilePanel,
   createProfilePanelToggleIconSvg,
   openPublicProfileModal,
+  syncOpenPublicProfileModals,
 } from './dmProfilePanel';
 import { attachEmojiAutocomplete } from './emojiAutocomplete';
 import { replaceEmojiShortcodeBeforeCursor } from './emojiCatalog';
@@ -121,6 +122,7 @@ import {
 import {
   createProfileDrawerController,
   createStatusGlyph,
+  getLockedOptimisticSelfStatus,
   openSelfProfileModal,
   type SelfProfileModalHandle,
 } from './profileDrawer';
@@ -1752,6 +1754,18 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   let dmLoadSeq = 0;
 
   const dmDraftByThread = new Map<string, string>();
+  const dmScrollStateByThread = new Map<string, { atBottom: boolean; scrollTop: number }>();
+
+  const fastDataUrlHash = (str?: string): string => {
+    if (!str) return '';
+    let h = 2166136261;
+    const step = Math.max(1, Math.floor(str.length / 64));
+    for (let i = 0; i < str.length; i += step) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return `${str.length}:${h >>> 0}`;
+  };
 
   interface StagedAttachmentItem {
     file: File;
@@ -3485,6 +3499,19 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     let scrolledUpNewCount = 0;
     let loadingOlderMessages = false;
     let skipBottomScrollOnce = false;
+    const savedThreadScroll = dmScrollStateByThread.get(cacheKey);
+    let pinnedToBottom = savedThreadScroll ? savedThreadScroll.atBottom : true;
+    let programmaticScrollUntil = 0;
+
+    const scrollToBottomPinned = () => {
+      pinnedToBottom = true;
+      const gap = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight;
+      if (gap > 1) {
+        programmaticScrollUntil = Date.now() + 80;
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+      dmScrollStateByThread.set(cacheKey, { atBottom: true, scrollTop: chatMessages.scrollTop });
+    };
 
     const syncHistoryBanner = () => {
       if (!historyLoaded) {
@@ -3668,6 +3695,15 @@ function renderWorkspaceScreen(root: HTMLElement): void {
 
     const handleChatScroll = () => {
       syncJumpBar();
+      if (initialScrollApplied && !loadingOlderMessages && Date.now() > programmaticScrollUntil) {
+        const distFromBottom =
+          chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight;
+        pinnedToBottom = distFromBottom <= 40;
+        dmScrollStateByThread.set(cacheKey, {
+          atBottom: pinnedToBottom,
+          scrollTop: chatMessages.scrollTop,
+        });
+      }
       if (chatMessages.scrollTop <= 96 && historyLoaded && dmHasMoreByThread.get(cacheKey)) {
         void loadOlderMessagesPage();
       }
@@ -3676,10 +3712,38 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     chatMessages.addEventListener('scroll', handleChatScroll, { passive: true });
     jumpLatestBtn.addEventListener('click', () => {
       scrolledUpNewCount = 0;
+      pinnedToBottom = true;
+      dmScrollStateByThread.set(cacheKey, { atBottom: true, scrollTop: chatMessages.scrollHeight });
+      programmaticScrollUntil = Date.now() + 350;
       chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'smooth' });
       syncJumpBar();
       chatInput.focus();
     });
+
+    const keepBottomOnMediaOrResize = () => {
+      if (pinnedToBottom && !loadingOlderMessages && !editingMessageId) {
+        const gap = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight;
+        if (gap > 1) {
+          programmaticScrollUntil = Date.now() + 60;
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+      }
+    };
+    const onMessageListMediaLoad = (ev: Event) => {
+      const t = ev.target;
+      if (t instanceof HTMLImageElement || t instanceof HTMLVideoElement) {
+        keepBottomOnMediaOrResize();
+      }
+    };
+    messageList.addEventListener('load', onMessageListMediaLoad, true);
+    messageList.addEventListener('loadedmetadata', onMessageListMediaLoad, true);
+    let messageListObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      messageListObserver = new ResizeObserver(() => {
+        keepBottomOnMediaOrResize();
+      });
+      messageListObserver.observe(messageList);
+    }
 
     activeDmNotifyPeerMessage = (incomingMsg, wasVisible) => {
       const atBottom =
@@ -3798,7 +3862,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         const memberSig = latestGroup.members
           .map(
             (m) =>
-              `${m.username}:${m.status}:${m.displayName}:${m.avatarPreset ?? 'c'}:${m.avatarDataUrl?.slice(-12) ?? ''}:${m.customStatus?.emoji ?? ''}:${m.customStatus?.text ?? ''}:${m.isProfilePrivate ? 'P' : 'O'}`,
+              `${m.username}:${m.status}:${m.displayName}:${m.avatarPreset ?? 'c'}:${fastDataUrlHash(m.avatarDataUrl)}:${m.customStatus?.emoji ?? ''}:${m.customStatus?.text ?? ''}:${m.isProfilePrivate ? 'P' : 'O'}`,
           )
           .join(',');
         const headerSig = `${latestGroup.name}|${latestGroup.ownerUsername}|${avatarUrl}|${memberSig}`;
@@ -3824,7 +3888,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
           headerAvatarUrl,
           latestPeer.bio,
           latestPeer.bannerColor ?? '',
-          latestPeer.bannerDataUrl ? latestPeer.bannerDataUrl.slice(-16) : '',
+          fastDataUrlHash(latestPeer.bannerDataUrl),
           latestPeer.customStatus?.text ?? '',
           latestPeer.customStatus?.emoji ?? '',
           latestPeer.isProfilePrivate ? 'PR1' : 'PR0',
@@ -3859,20 +3923,26 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       syncPinHeaderBadge();
 
       if (historyLoaded && initialUnreadRemaining > 0 && !unreadMarkerMessageId && msgs.length > 0) {
-        let remaining = initialUnreadRemaining;
-        for (let i = msgs.length - 1; i >= 0; i -= 1) {
-          if (msgs[i].authorUsername.toLowerCase() !== selfKey) {
-            remaining -= 1;
-            if (remaining <= 0) {
-              unreadMarkerMessageId = msgs[i].id;
-              break;
+        const lastMsg = msgs[msgs.length - 1];
+        if (lastMsg && lastMsg.authorUsername.toLowerCase() === selfKey) {
+          // If our own message (e.g. a forwarded message) is the latest message, never jump back to an old unread divider.
+          initialUnreadRemaining = 0;
+        } else {
+          let remaining = initialUnreadRemaining;
+          for (let i = msgs.length - 1; i >= 0; i -= 1) {
+            if (msgs[i].authorUsername.toLowerCase() !== selfKey) {
+              remaining -= 1;
+              if (remaining <= 0) {
+                unreadMarkerMessageId = msgs[i].id;
+                break;
+              }
             }
           }
+          if (!unreadMarkerMessageId) {
+            unreadMarkerMessageId = msgs[0].id;
+          }
+          initialUnreadRemaining = 0;
         }
-        if (!unreadMarkerMessageId) {
-          unreadMarkerMessageId = msgs[0].id;
-        }
-        initialUnreadRemaining = 0;
       }
 
       const prefs = getUserPreferences();
@@ -4002,7 +4072,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
           isEditing ? 'E' : 'V',
           msg.authorName,
           msg.authorAvatarPreset ?? 'c',
-          msg.authorAvatarDataUrl ? msg.authorAvatarDataUrl.slice(-20) : '',
+          fastDataUrlHash(msg.authorAvatarDataUrl),
           msg.gif?.url ?? '',
           gifFavFlag,
           (msg.imageDataUrls ?? (msg.imageDataUrl ? [msg.imageDataUrl] : [])).length,
@@ -4251,13 +4321,20 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         initialScrollApplied = true;
         const dividerEl = messageList.querySelector('.dm-unread-divider') as HTMLElement | null;
         if (dividerEl) {
+          pinnedToBottom = false;
+          programmaticScrollUntil = Date.now() + 80;
           const maxTop = Math.max(0, chatMessages.scrollHeight - chatMessages.clientHeight);
           chatMessages.scrollTop = Math.max(0, Math.min(maxTop, dividerEl.offsetTop - 96));
+        } else if (savedThreadScroll && !savedThreadScroll.atBottom) {
+          pinnedToBottom = false;
+          programmaticScrollUntil = Date.now() + 80;
+          const maxTop = Math.max(0, chatMessages.scrollHeight - chatMessages.clientHeight);
+          chatMessages.scrollTop = Math.max(0, Math.min(maxTop, savedThreadScroll.scrollTop));
         } else {
-          chatMessages.scrollTop = chatMessages.scrollHeight;
+          scrollToBottomPinned();
         }
-      } else if (!skipBottomScrollOnce && wasAtBottom && !editingMessageId) {
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+      } else if (!skipBottomScrollOnce && (wasAtBottom || pinnedToBottom) && !editingMessageId) {
+        scrollToBottomPinned();
       }
       skipBottomScrollOnce = false;
       syncHistoryBanner();
@@ -4983,7 +5060,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
               gif: resolved.gif,
               replyTo: replyRef,
             });
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            scrollToBottomPinned();
             syncJumpBar();
             return;
           }
@@ -4995,7 +5072,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
           files: draftFiles.length > 0 ? draftFiles : undefined,
           replyTo: replyRef,
         });
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        scrollToBottomPinned();
         syncJumpBar();
       };
 
@@ -5134,6 +5211,9 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       dmProfilePanel?.destroy();
       stopOutboundTyping();
       observer?.disconnect();
+      messageListObserver?.disconnect();
+      messageList.removeEventListener('load', onMessageListMediaLoad, true);
+      messageList.removeEventListener('loadedmetadata', onMessageListMediaLoad, true);
       activeVcBarSyncer = null;
       activeDmErrorReporter = null;
       activeDmNotifyPeerMessage = null;
@@ -5191,7 +5271,14 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     requestAnimationFrame(() => {
       resizeComposer();
       if (!unreadMarkerMessageId && initialUnreadRemaining === 0) {
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        if (savedThreadScroll && !savedThreadScroll.atBottom) {
+          pinnedToBottom = false;
+          programmaticScrollUntil = Date.now() + 80;
+          const maxTop = Math.max(0, chatMessages.scrollHeight - chatMessages.clientHeight);
+          chatMessages.scrollTop = Math.max(0, Math.min(maxTop, savedThreadScroll.scrollTop));
+        } else {
+          scrollToBottomPinned();
+        }
       }
       syncJumpBar();
       chatInput.focus();
@@ -5383,6 +5470,17 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       }
     }
 
+    const lockedSelfStatus = getLockedOptimisticSelfStatus();
+    if (lockedSelfStatus && nextSnapshot.user.status !== lockedSelfStatus) {
+      nextSnapshot = {
+        ...nextSnapshot,
+        user: {
+          ...nextSnapshot.user,
+          status: lockedSelfStatus,
+        },
+      };
+    }
+
     state.snapshot = nextSnapshot;
 
     const addedIncoming = nextSnapshot.incomingRequests.filter(
@@ -5447,6 +5545,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     syncSidebarNavAndDms();
     drawerController.refresh();
     activeSelfProfileModal?.refresh();
+    syncOpenPublicProfileModals(nextSnapshot);
     if (state.mainView === 'group') {
       const stillInGroup = state.activeGroupId
         ? (nextSnapshot.groups ?? []).some((g) => g.id === state.activeGroupId)
@@ -5808,10 +5907,40 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   dockMain.addEventListener('click', () => drawerController.open());
   leftColumn.appendChild(drawerController.element);
 
+  let liveSyncPollInFlight = false;
+  let lastLiveSyncPollAt = 0;
+  const triggerBackgroundSnapshotSync = (force = false) => {
+    if (liveSyncPollInFlight || state.screen !== 'app' || !state.snapshot) {
+      return;
+    }
+    const now = Date.now();
+    if (!force && now - lastLiveSyncPollAt < 2500) {
+      return;
+    }
+    liveSyncPollInFlight = true;
+    lastLiveSyncPollAt = now;
+    void apiResumeSession()
+      .then((res) => {
+        if (res.ok && res.snapshot && state.screen === 'app') {
+          applyLiveSnapshot(res.snapshot);
+        }
+      })
+      .finally(() => {
+        liveSyncPollInFlight = false;
+      });
+  };
+
+  const liveSnapshotPollTimer = window.setInterval(() => {
+    if (document.visibilityState !== 'hidden') {
+      triggerBackgroundSnapshotSync(false);
+    }
+  }, 5000);
+
   const handleWindowActive = () => {
     if (document.visibilityState === 'hidden') {
       return;
     }
+    triggerBackgroundSnapshotSync(false);
     if (state.mainView === 'group' && state.activeGroupId) {
       if ((state.snapshot?.groupUnreadCounts?.[state.activeGroupId] ?? 0) > 0) {
         markThreadAsRead({ kind: 'group', id: state.activeGroupId });
@@ -5864,6 +5993,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     onOpen: () => {
       socketConnected = true;
       void flushOutboundQueue();
+      triggerBackgroundSnapshotSync(true);
     },
     onClose: () => {
       socketConnected = false;
@@ -5933,6 +6063,9 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       }
 
       const isFromSelf = message.authorUsername.toLowerCase() === selfKey;
+      if (isFromSelf) {
+        dmScrollStateByThread.set(cacheKey, { atBottom: true, scrollTop: 0 });
+      }
       const isActivelyViewing = isThreadCurrentlyViewed(cacheKey);
       const isVisibleHere = isActivelyViewing && document.visibilityState !== 'hidden';
       const isFocusedOnThread = isActivelyViewing && isAppWindowFocused();
@@ -6216,6 +6349,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   maybeShowPostUpdateChangelog();
 
   activeWorkspaceCleanup = () => {
+    window.clearInterval(liveSnapshotPollTimer);
     closeChangelogModal();
     unsubscribeDesktopUpdate?.();
     unsubscribeDesktopUpdate = null;

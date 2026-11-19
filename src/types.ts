@@ -119,6 +119,9 @@ export interface GifItem {
   tags?: string[];
   uploadedBy?: string;
   createdAt?: number;
+  mediaKind?: 'gif' | 'video';
+  playbackSpeed?: number;
+  durationSec?: number;
 }
 
 export interface GroupDmInfo {

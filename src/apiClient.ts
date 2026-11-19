@@ -1107,7 +1107,15 @@ export async function apiToggleFavoriteGif(
 }
 
 export async function apiAddCommunityGifs(
-  items: Array<{ uploadId: string; title: string; tags: string[] }>,
+  items: Array<{
+    uploadId: string;
+    title: string;
+    tags: string[];
+    playbackSpeed?: number;
+    durationSec?: number;
+    width?: number;
+    height?: number;
+  }>,
 ): Promise<{ ok: boolean; added?: GifItem[]; total?: number; error?: string }> {
   const res = await postJson<{
     ok?: boolean;
@@ -1621,6 +1629,15 @@ export function connectSocialSocket(handlers: {
   let closedByCaller = false;
   let socket: WebSocket | null = null;
   let reconnectTimer: number | null = null;
+  let keepaliveTimer: number | null = null;
+  let consecutiveFailures = 0;
+
+  const stopKeepalive = () => {
+    if (keepaliveTimer !== null) {
+      window.clearInterval(keepaliveTimer);
+      keepaliveTimer = null;
+    }
+  };
 
   const sendFrame = (payload: Record<string, unknown>) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -1633,10 +1650,16 @@ export function connectSocialSocket(handlers: {
       return;
     }
 
+    stopKeepalive();
     const wsUrl = resolveWsUrl(`/ws?token=${encodeURIComponent(sessionToken)}`);
     socket = new WebSocket(wsUrl);
 
     socket.addEventListener('open', () => {
+      consecutiveFailures = 0;
+      stopKeepalive();
+      keepaliveTimer = window.setInterval(() => {
+        sendFrame({ type: 'ping' });
+      }, 15000);
       handlers.onOpen?.();
     });
 
@@ -1746,9 +1769,19 @@ export function connectSocialSocket(handlers: {
     });
 
     socket.addEventListener('close', () => {
+      stopKeepalive();
       socket = null;
+      consecutiveFailures += 1;
       handlers.onClose?.();
       if (!closedByCaller && sessionToken) {
+        if (consecutiveFailures >= 2 && apiServerBaseUrl.includes('trycloudflare.com')) {
+          void autoDiscoverWorldwideServer().finally(() => {
+            if (!closedByCaller && sessionToken) {
+              reconnectTimer = window.setTimeout(connect, 1000);
+            }
+          });
+          return;
+        }
         reconnectTimer = window.setTimeout(connect, 1500);
       }
     });
@@ -1806,6 +1839,7 @@ export function connectSocialSocket(handlers: {
     },
     disconnect: () => {
       closedByCaller = true;
+      stopKeepalive();
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);
         reconnectTimer = null;

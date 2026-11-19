@@ -44,7 +44,7 @@ async function callAdmin(pathUrl, method = 'GET', body = undefined) {
       headers: body ? { 'Content-Type': 'application/json' } : {},
       body: body ? JSON.stringify(body) : undefined,
     });
-    if (res.status !== 404) {
+    if (res.status !== 404 && res.status !== 401) {
       const data = await res.json();
       if (!res.ok || !data?.ok) {
         throw new Error(data?.error || `HTTP ${res.status}`);
@@ -52,7 +52,14 @@ async function callAdmin(pathUrl, method = 'GET', body = undefined) {
       return data;
     }
   } catch (err) {
-    if (err && err.message && !err.message.includes('fetch failed') && !err.message.includes('HTTP 404')) {
+    if (
+      err &&
+      err.message &&
+      !err.message.includes('fetch failed') &&
+      !err.message.includes('HTTP 404') &&
+      !err.message.includes('HTTP 401') &&
+      !err.message.includes('Not authenticated')
+    ) {
       throw err;
     }
   }

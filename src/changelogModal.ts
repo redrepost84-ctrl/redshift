@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.3';
+export const CURRENT_REDSHIFT_VERSION = '0.1.4';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 export interface ChangelogReleaseSection {
@@ -20,6 +20,35 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.4',
+    date: 'November 18, 2026',
+    kicker: 'MAJOR QUALITY & MEDIA UPDATE',
+    headline: 'Smooth Video Playback, Universal GIF Creator with Speed Control & Instant Status Sync',
+    lead:
+      'Fixed video embed playback stalls and app freezing, upgraded Redshift GIFs to support every video and audio format up to 5 minutes with live playback speed control, added bullet-point formatting, and made status, bio, and profile syncing instantaneous.',
+    sections: [
+      {
+        heading: 'New Features',
+        items: [
+          'Universal GIF Creator (Up to 5 Minutes) — Upload .mp4, .webm, .mov, .mkv, .avi, .wav, .mp3, .gif, and image files directly into Redshift GIFs with automatic 5-minute duration protection.',
+          'GIF Playback Speed Control — Adjust playback speed from 0.25× up to 4× (with instant quick-speed pills and live preview) right while creating your GIF.',
+          'Markdown Bullet Points — Start any line with * text (or - text) to turn the asterisk into a clean bullet point.',
+        ],
+      },
+      {
+        heading: 'Bug Fixes & Stability',
+        items: [
+          'Fixed Video Embed Freezing & Infinite Loading — Added progressive 2 MB chunked streaming and automatic VP8/Opus WebM compatibility transcoding so every video plays smoothly in the desktop app without freezing.',
+          'Fixed Broken GIF Full-Screen Lightbox — Clicking any GIF now resolves the live server URL properly and plays both animated GIFs and video-GIFs cleanly in full view.',
+          'Instant Zero-Flicker Status & Live Profile Refresh — Switching between Online, Idle, Do Not Disturb, and Invisible now updates instantaneously with zero flicker back to your previous status, and friend bios, avatars, banners, and colored online dots refresh live across the entire app.',
+          'Cleaner Screen Share Modal & Single End Stream Button — Removed placeholder "Window Picker" cards so only your real open windows and displays appear, and removed the duplicate End Stream button when streaming.',
+          'Smart DM Scroll Position — Forwarding messages or opening DMs now lands cleanly at the bottom (even as images load) and remembers your exact scroll position when switching between conversations.',
+          'Removed Floating Eye Icon on Chat Images — Spoiler toggling stays cleanly inside the right-click menu and composer attachment bar instead of floating near profile pictures.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.3',
     date: 'November 18, 2026',
