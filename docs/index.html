@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Redshift — Fast, Free Desktop Chat, Voice &amp; 60fps Screen Share</title>
+  <meta
+    name="description"
+    content="Download Redshift for Windows. Fast, free worldwide desktop chat, group chats, crystal-clear voice calls, 60fps screen share with audio, universal GIFs with speed control, and instant delta auto-updates."
+  />
+  <meta name="theme-color" content="#e23b41" />
+  <meta property="og:title" content="Redshift — Desktop Chat, Voice & 60fps Screen Share" />
+  <meta
+    property="og:description"
+    content="Free worldwide desktop chat, voice calls, 60fps screen share, 5-minute GIF creator with speed control, and instant auto-updates for Windows."
+  />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="https://redrepost84-ctrl.github.io/redshift/icon.png" />
+  <link rel="icon" type="image/x-icon" href="./favicon.ico" />
+  <link rel="icon" type="image/png" href="./icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@600;700&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <canvas id="bg-cosmos" class="bg-cosmos" aria-hidden="true"></canvas>
+  <div class="bg-orb bg-orb--top" aria-hidden="true"></div>
+  <div class="bg-orb bg-orb--mid" aria-hidden="true"></div>
+
+  <!-- Sticky Glassmorphic Navigation -->
+  <header class="site-nav-wrap">
+    <nav class="site-nav container" aria-label="Primary Navigation">
+      <a href="#top" class="brand-link">
+        <span class="brand-icon-ring">
+          <img src="./icon.png" alt="Redshift logo" class="brand-icon" width="32" height="32" />
+        </span>
+        <span class="brand-name">Redshift</span>
+        <span class="brand-ver-pill" id="nav-version-pill">v0.1.8</span>
+      </a>
+
+      <div class="nav-links">
+        <a href="#preview">Live Preview</a>
+        <a href="#features">Features</a>
+        <a href="#install">How to Install</a>
+        <a href="#changelog">Changelog</a>
+      </div>
+
+      <div class="nav-actions">
+        <div class="server-pill" id="server-status-pill" title="Worldwide Redshift server status">
+          <span class="server-dot server-dot--checking" id="server-status-dot"></span>
+          <span class="server-pill-text" id="server-status-text">Checking server…</span>
+        </div>
+        <a
+          href="https://github.com/redrepost84-ctrl/redshift/releases/latest/download/RedshiftSetup.exe"
+          class="btn btn--primary btn--sm js-download-link"
+          download
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          <span>Download</span>
+        </a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="top">
+    <!-- Hero Section -->
+    <section class="hero container">
+      <div class="hero-copy">
+        <div class="hero-eyebrow">
+          <span class="eyebrow-pulse"></span>
+          <span id="hero-release-badge">Redshift v0.1.8 · Official Windows Desktop App · 100% Free</span>
+        </div>
+
+        <h1 class="hero-title">
+          Talk, stream &amp; hang out —
+          <span class="hero-title-accent">without the bloat.</span>
+        </h1>
+
+        <p class="hero-subtitle">
+          Built for fast, unfiltered everyday hangouts with your friends. Instant worldwide online
+          connection, 60fps screen sharing with system audio, a 5-minute universal GIF studio with
+          speed control, heavy-blur spoilers, and 5-second delta auto-updates.
+        </p>
+
+        <div class="hero-cta-row">
+          <a
+            href="https://github.com/redrepost84-ctrl/redshift/releases/latest/download/RedshiftSetup.exe"
+            class="btn btn--primary btn--lg btn--glow js-download-link"
+            id="hero-download-btn"
+            download
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M3 5.557L10.354 4.5v7.105H3V5.557zm0 12.886L10.354 19.5v-7.01H3v5.953zm8.167 1.178L21 21v-8.51h-9.833v7.131zm0-15.242v7.226H21V3l-9.833 1.379z" />
+            </svg>
+            <span class="btn-download-stack">
+              <span class="btn-download-main">Download for Windows</span>
+              <span class="btn-download-meta" id="hero-download-meta">v0.1.8 · Windows 10/11 (64-bit) · 121.5 MB</span>
+            </span>
+          </a>
+
+          <button type="button" class="btn btn--ghost btn--lg" id="copy-site-link-btn">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+            <span id="copy-site-link-label">Copy Site Link</span>
+          </button>
+
+          <a
+            href="https://github.com/redrepost84-ctrl/redshift/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn btn--subtle btn--lg"
+          >
+            <span>All Releases</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M7 17L17 7" />
+              <path d="M7 7h10v10" />
+            </svg>
+          </a>
+        </div>
+
+        <div class="hero-trust-strip">
+          <div class="trust-chip">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="20 6 9 17 4 12" /></svg>
+            <span>One-Click Installer</span>
+          </div>
+          <div class="trust-chip">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="20 6 9 17 4 12" /></svg>
+            <span>Zero Ads · Zero Paywalls</span>
+          </div>
+          <div class="trust-chip">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="20 6 9 17 4 12" /></svg>
+            <span>Auto-Updating Launcher</span>
+          </div>
+          <button type="button" class="trust-chip trust-chip--sha" id="copy-sha-btn" title="Copy RedshiftSetup.exe SHA-256 checksum">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+            <span id="hero-sha-label">SHA-256 Verified</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Interactive Redshift Desktop Window Mockup -->
+      <div class="hero-preview-shell" id="preview">
+        <div class="preview-window" role="region" aria-label="Interactive Redshift desktop app preview">
+          <div class="preview-titlebar">
+            <div class="preview-titlebar-left">
+              <img src="./icon.png" alt="" class="preview-titlebar-icon" width="16" height="16" />
+              <span>Redshift</span>
+              <span class="preview-live-tag">INTERACTIVE PREVIEW</span>
+            </div>
+            <div class="preview-window-dots" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+          </div>
+
+          <div class="preview-workspace">
+            <!-- Left Sidebar -->
+            <aside class="preview-sidebar">
+              <div class="preview-search-bar">Jump to a chat… <kbd>Ctrl+K</kbd></div>
+              <div class="preview-section-label">DIRECT MESSAGES</div>
+
+              <button type="button" class="preview-dm-item preview-dm-item--active" data-preview-thread="squad">
+                <span class="preview-avatar preview-avatar--group">SR</span>
+                <span class="preview-dm-meta">
+                  <span class="preview-dm-name">Squad Room</span>
+                  <span class="preview-dm-sub">3 Members · Live Call</span>
+                </span>
+                <span class="preview-vc-pill">LIVE</span>
+              </button>
+
+              <button type="button" class="preview-dm-item" data-preview-thread="alex">
+                <span class="preview-avatar preview-avatar--cyan">
+                  L
+                  <span class="preview-dot preview-dot--online"></span>
+                </span>
+                <span class="preview-dm-meta">
+                  <span class="preview-dm-name">Leyvora</span>
+                  <span class="preview-dm-sub">watching clips 🎬</span>
+                </span>
+              </button>
+
+              <button type="button" class="preview-dm-item" data-preview-thread="soil">
+                <span class="preview-avatar preview-avatar--amber">
+                  S
+                  <span class="preview-dot preview-dot--dnd"></span>
+                </span>
+                <span class="preview-dm-meta">
+                  <span class="preview-dm-name">LumpOfSoil</span>
+                  <span class="preview-dm-sub">in ranked match</span>
+                </span>
+              </button>
+
+              <div class="preview-vc-bar">
+                <div class="preview-vc-bar-top">
+                  <span class="preview-signal-dot"></span>
+                  <span>Voice Connected · 18ms</span>
+                </div>
+                <div class="preview-vc-bar-sub">Squad Room · 1080p 60fps</div>
+              </div>
+
+              <!-- Interactive Self User Dock -->
+              <div class="preview-user-dock">
+                <div class="preview-dock-user">
+                  <span class="preview-avatar preview-avatar--crimson">
+                    R
+                    <span class="preview-dot preview-dot--online" id="preview-self-dot"></span>
+                  </span>
+                  <div class="preview-dock-meta">
+                    <div class="preview-dock-name">You</div>
+                    <div class="preview-dock-status" id="preview-self-status-label">Online</div>
+                  </div>
+                </div>
+                <div class="preview-status-switcher" role="group" aria-label="Try instant status switching">
+                  <button type="button" class="pstatus-btn pstatus-btn--active" data-set-status="online" title="Online"><span class="pstatus-swatch pstatus-swatch--online"></span></button>
+                  <button type="button" class="pstatus-btn" data-set-status="idle" title="Idle"><span class="pstatus-swatch pstatus-swatch--idle"></span></button>
+                  <button type="button" class="pstatus-btn" data-set-status="dnd" title="Do Not Disturb"><span class="pstatus-swatch pstatus-swatch--dnd"></span></button>
+                  <button type="button" class="pstatus-btn" data-set-status="invisible" title="Invisible"><span class="pstatus-swatch pstatus-swatch--offline"></span></button>
+                </div>
+              </div>
+            </aside>
+
+            <!-- Center Chat Area -->
+            <div class="preview-chat">
+              <div class="preview-chat-header">
+                <div class="preview-chat-header-left">
+                  <span class="preview-header-title" id="preview-thread-title">Squad Room</span>
+                  <span class="preview-header-sub" id="preview-thread-sub">3 Members</span>
+                </div>
+                <div class="preview-header-right">
+                  <span class="preview-update-chip" title="Header update notification in Redshift">
+                    <span class="preview-update-dot"></span>
+                    Up to Date
+                  </span>
+                </div>
+              </div>
+
+              <div class="preview-messages" id="preview-messages">
+                <!-- Populated & interactive via app.js -->
+              </div>
+
+              <div class="preview-composer">
+                <span class="preview-composer-plus">+</span>
+                <span class="preview-composer-placeholder" id="preview-composer-hint">Message Squad Room</span>
+                <span class="preview-composer-badge">GIF</span>
+              </div>
+            </div>
+
+            <!-- Right Group Members Sidebar -->
+            <aside class="preview-members">
+              <div class="preview-section-label">MEMBERS — 3</div>
+              <div class="preview-member-row">
+                <span class="preview-avatar preview-avatar--crimson preview-avatar--sm">
+                  R
+                  <span class="preview-dot preview-dot--online" id="preview-member-self-dot"></span>
+                </span>
+                <div class="preview-member-meta">
+                  <div class="preview-member-name">
+                    You
+                    <svg class="preview-crown" width="13" height="13" viewBox="0 0 24 24" fill="#facc15" aria-label="Group Owner">
+                      <path d="M3 18h18l-2-10-4.5 4L12 5l-2.5 7L5 8l-2 10z" />
+                    </svg>
+                  </div>
+                  <div class="preview-member-sub" id="preview-member-self-sub">Online</div>
+                </div>
+              </div>
+              <div class="preview-member-row">
+                <span class="preview-avatar preview-avatar--cyan preview-avatar--sm">
+                  L
+                  <span class="preview-dot preview-dot--online"></span>
+                </span>
+                <div class="preview-member-meta">
+                  <div class="preview-member-name">Leyvora</div>
+                  <div class="preview-member-sub">watching clips 🎬</div>
+                </div>
+              </div>
+              <div class="preview-member-row">
+                <span class="preview-avatar preview-avatar--amber preview-avatar--sm">
+                  S
+                  <span class="preview-dot preview-dot--dnd"></span>
+                </span>
+                <div class="preview-member-meta">
+                  <div class="preview-member-name">LumpOfSoil</div>
+                  <div class="preview-member-sub">in ranked match</div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+        <p class="preview-caption">
+          Try it above: switch threads, click the <strong>SPOILER</strong> blur to reveal/hide it, or flip your status dots in the bottom-left dock to watch the group sidebar sync in 0ms.
+        </p>
+      </div>
+    </section>
+
+    <!-- Bento Features Section -->
+    <section class="section container" id="features">
+      <div class="section-head">
+        <span class="section-kicker">BUILT DIFFERENT</span>
+        <h2 class="section-title">Everything you actually use. Zero corporate bloat.</h2>
+        <p class="section-desc">
+          Designed from the ground up to launch in seconds, stay buttery smooth during screen shares, and never lock basic features behind subscriptions.
+        </p>
+      </div>
+
+      <div class="bento-grid">
+        <article class="bento-card bento-card--wide">
+          <div class="bento-icon bento-icon--crimson">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          </div>
+          <h3>Seamless Worldwide Online</h3>
+          <p>
+            Open Redshift and you’re immediately connected worldwide — no lobby links, no server IPs, no port forwarding. Built-in automatic reconnection keeps messages flowing even if the server refreshes.
+          </p>
+        </article>
+
+        <article class="bento-card bento-card--wide">
+          <div class="bento-icon bento-icon--violet">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <h3>60fps Screen Share &amp; Crystal Voice</h3>
+          <p>
+            Share any real open desktop window or display at up to 1080p 60fps with native Windows system audio capture, live quality switching mid-stream, and a draggable mini-call square.
+          </p>
+        </article>
+
+        <article class="bento-card">
+          <div class="bento-icon bento-icon--amber">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="3"/><path d="M7 10h2v4H7"/><path d="M12 10v4"/><path d="M15 10h2"/><path d="M15 12h1.5"/></svg>
+          </div>
+          <h3>Universal 5-Minute GIF Studio</h3>
+          <p>
+            Upload <code>.gif</code>, <code>.mp4</code>, <code>.webm</code>, <code>.mov</code>, <code>.mkv</code>, <code>.wav</code>, or <code>.mp3</code> clips up to 5 minutes with a live <strong>0.25× to 4×</strong> playback speed control.
+          </p>
+        </article>
+
+        <article class="bento-card">
+          <div class="bento-icon bento-icon--emerald">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          </div>
+          <h3>Instant 0ms Sync &amp; Pre-Cached Chats</h3>
+          <p>
+            Status changes and custom thought-bubbles update across docks and group sidebars in 0ms, while background message capture loads new DMs before you even click into them.
+          </p>
+        </article>
+
+        <article class="bento-card">
+          <div class="bento-icon bento-icon--sky">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+          </div>
+          <h3>Heavy-Blur Spoilers &amp; Rich Media</h3>
+          <p>
+            Auto-scaling heavy-blur spoiler censors with right-click Reveal/Hide sync, progressive video streaming, one-click Copy Image, bullet-point formatting, and full-bleed lightbox viewing.
+          </p>
+        </article>
+
+        <article class="bento-card">
+          <div class="bento-icon bento-icon--rose">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+          </div>
+          <h3>Delta Auto-Updating Launcher</h3>
+          <p>
+            Install once and stay current forever. The animated Redshift Launcher fetches tiny SHA-256-verified patches in seconds and shows a crisp What’s New article after every update.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <!-- 3-Step Install Guide & SmartScreen Tip -->
+    <section class="section container" id="install">
+      <div class="install-panel">
+        <div class="section-head section-head--left">
+          <span class="section-kicker">GET STARTED IN 15 SECONDS</span>
+          <h2 class="section-title">Install once. Auto-update forever.</h2>
+        </div>
+
+        <div class="steps-grid">
+          <div class="step-card">
+            <span class="step-num">01</span>
+            <h3>Download RedshiftSetup.exe</h3>
+            <p>Grab the lightweight Windows 64-bit installer straight from GitHub Releases — always pinned to the newest official build.</p>
+          </div>
+          <div class="step-card">
+            <span class="step-num">02</span>
+            <h3>Run the 1-Click Installer</h3>
+            <p>Double-click <code>RedshiftSetup.exe</code>. It installs cleanly into your user folder, creates a Desktop shortcut, and launches Redshift automatically.</p>
+          </div>
+          <div class="step-card">
+            <span class="step-num">03</span>
+            <h3>Sign In &amp; Hang Out</h3>
+            <p>Create your account or sign in with <strong>Keep me signed in</strong> enabled. Future updates download and restart automatically in seconds.</p>
+          </div>
+        </div>
+
+        <div class="smartscreen-tip" role="note">
+          <div class="smartscreen-tip-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+          </div>
+          <div class="smartscreen-tip-copy">
+            <strong>Seeing "Windows protected your PC" (SmartScreen)?</strong>
+            <p>
+              Because Redshift is a free indie app without a paid Microsoft EV signing certificate, Windows Defender SmartScreen may show a blue prompt the first time you run <code>RedshiftSetup.exe</code>. Simply click <strong>More info</strong> → <strong>Run anyway</strong>. Every build is open-source and SHA-256 verified directly on GitHub Releases.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Live Release History / Changelog -->
+    <section class="section container" id="changelog">
+      <div class="section-head">
+        <span class="section-kicker">LIVE FROM GITHUB RELEASES</span>
+        <h2 class="section-title">What’s New in Redshift</h2>
+        <p class="section-desc">
+          Every patch and desktop build is published transparently. This list updates automatically the moment a new release goes live.
+        </p>
+      </div>
+
+      <div class="changelog-grid" id="changelog-list">
+        <!-- Hydrated dynamically from GitHub Releases API with instant fallback -->
+      </div>
+    </section>
+
+    <!-- Final CTA Banner -->
+    <section class="section container">
+      <div class="cta-banner">
+        <div class="cta-banner-orb" aria-hidden="true"></div>
+        <img src="./icon.png" alt="Redshift emblem" class="cta-banner-icon" width="60" height="60" />
+        <h2>Ready to switch to Redshift?</h2>
+        <p>Free forever for Windows 10 &amp; 11. Send the link to your friends and jump into a group chat in under a minute.</p>
+        <div class="cta-banner-actions">
+          <a
+            href="https://github.com/redrepost84-ctrl/redshift/releases/latest/download/RedshiftSetup.exe"
+            class="btn btn--primary btn--lg btn--glow js-download-link"
+            download
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            <span id="footer-download-label">Download Redshift v0.1.8 for Windows</span>
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <img src="./icon.png" alt="" width="24" height="24" class="footer-icon" />
+        <span><strong>Redshift</strong> · Free Worldwide Desktop Chat, Voice &amp; Screen Share</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/redrepost84-ctrl/redshift/releases/latest/download/RedshiftSetup.exe" class="js-download-link" download>RedshiftSetup.exe</a>
+        <a href="https://github.com/redrepost84-ctrl/redshift/releases" target="_blank" rel="noopener noreferrer">GitHub Releases</a>
+        <a href="https://github.com/redrepost84-ctrl/redshift/releases/latest/download/version.json" target="_blank" rel="noopener noreferrer">version.json</a>
+        <a href="https://github.com/redrepost84-ctrl/redshift" target="_blank" rel="noopener noreferrer">Source Code</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>

@@ -230,6 +230,12 @@ const manifest = {
 };
 
 fs.writeFileSync(outManifest, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+const docsDir = path.join(rootDir, 'docs');
+if (fs.existsSync(docsDir)) {
+  try {
+    fs.writeFileSync(path.join(docsDir, 'version.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+  } catch (_) {}
+}
 
 const mb = (bytes) => `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 
