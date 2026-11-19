@@ -11,6 +11,7 @@ const {
   clipboard,
 } = require('electron');
 const path = require('path');
+const os = require('os');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
@@ -1234,6 +1235,18 @@ ipcMain.on('start-first-time-install', () => {
   void performFirstTimeInstall();
 });
 
+function spawnDetachedWindowsCmd(prefix, batLines) {
+  const batPath = path.join(os.tmpdir(), `${prefix}-${Date.now()}-${process.pid}.cmd`);
+  fs.writeFileSync(batPath, batLines.join('\r\n') + '\r\n', 'utf8');
+  // `cmd.exe /d /c start "" /B cmd.exe /c <bat>` breaks cleanly out of Electron's Windows Job Object
+  // so the swap/relaunch worker survives app.exit(0) reliably without flashing a console window.
+  spawn('cmd.exe', ['/d', '/c', 'start', '""', '/B', 'cmd.exe', '/c', batPath], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  }).unref();
+}
+
 ipcMain.on('initiate-update', () => {
   if (app.isPackaged) {
     // Relaunch a clean Redshift.exe process straight into update mode so the
@@ -1241,18 +1254,21 @@ ipcMain.on('initiate-update', () => {
     const exePath = process.execPath;
     const exeDir = path.dirname(exePath);
     const pid = process.pid;
-    const psRelaunch = [
-      `$pidToWait = ${pid};`,
-      `$t = 40; while ((Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) -and ($t -gt 0)) { Start-Sleep -Milliseconds 120; $t--; }`,
-      `Start-Sleep -Milliseconds 150;`,
-      `Start-Process -FilePath '${exePath.replace(/'/g, "''")}' -ArgumentList '--update-now' -WorkingDirectory '${exeDir.replace(/'/g, "''")}';`,
-    ].join(' ');
-
-    spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psRelaunch], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    }).unref();
+    spawnDetachedWindowsCmd('redshift-relaunch-update', [
+      '@echo off',
+      'setlocal',
+      `set "EXE=${exePath}"`,
+      `set "DIR=${exeDir}"`,
+      `for /L %%i in (1,1,20) do (`,
+      `  tasklist /FI "PID eq ${pid}" 2>nul | find /I "${pid}" >nul`,
+      `  if errorlevel 1 goto :launch_update`,
+      `  ping 127.0.0.1 -n 2 >nul`,
+      `)`,
+      ':launch_update',
+      'ping 127.0.0.1 -n 2 >nul',
+      'start "" /D "%DIR%" "%EXE%" --update-now',
+      'del /F /Q "%~f0" >nul 2>&1',
+    ]);
 
     isQuitting = true;
     if (bgUpdateTimer) {
@@ -1276,10 +1292,11 @@ ipcMain.on('initiate-update', () => {
       backgroundTunnelProc = null;
     }
     if (embeddedServer) {
+      try { embeddedServer.closeAllConnections?.(); } catch (_) {}
       try { embeddedServer.close(); } catch (_) {}
       embeddedServer = null;
     }
-    app.exit(0);
+    setTimeout(() => app.exit(0), 150);
     return;
   }
 
@@ -1390,42 +1407,44 @@ ipcMain.on('apply-update-and-restart', () => {
     const exePath = process.execPath;
     const exeDir = path.dirname(exePath);
     const pid = process.pid;
-
     const backupAsar = `${targetAsar}.bak`;
-    const escapedDownload = downloadAsar.replace(/'/g, "''");
-    const escapedTarget = targetAsar.replace(/'/g, "''");
-    const escapedBackup = backupAsar.replace(/'/g, "''");
-    const escapedExe = exePath.replace(/'/g, "''");
-    const escapedDir = exeDir.replace(/'/g, "''");
 
-    const psSwap = [
-      `$pidToWait = ${pid};`,
-      `$t = 50; while ((Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) -and ($t -gt 0)) { Start-Sleep -Milliseconds 150; $t--; }`,
-      `$t2 = 25; while ((Get-Process -Name 'Redshift' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq '${escapedExe}' }) -and ($t2 -gt 0)) { Start-Sleep -Milliseconds 150; $t2--; }`,
-      `Start-Sleep -Milliseconds 350;`,
-      `if ((Test-Path -LiteralPath '${escapedDownload}') -and ((Get-Item -LiteralPath '${escapedDownload}').Length -gt 16384)) {`,
-      `  $ok = $false; for ($i = 0; $i -lt 30; $i++) {`,
-      `    try {`,
-      `      if (Test-Path -LiteralPath '${escapedTarget}') { Copy-Item -LiteralPath '${escapedTarget}' -Destination '${escapedBackup}' -Force -ErrorAction SilentlyContinue }`,
-      `      Move-Item -LiteralPath '${escapedDownload}' -Destination '${escapedTarget}' -Force -ErrorAction Stop;`,
-      `      Remove-Item -LiteralPath '${escapedBackup}' -Force -ErrorAction SilentlyContinue;`,
-      `      $ok = $true; break;`,
-      `    } catch { Start-Sleep -Milliseconds 350; }`,
-      `  }`,
-      `  if ((-not $ok) -and (-not (Test-Path -LiteralPath '${escapedTarget}')) -and (Test-Path -LiteralPath '${escapedBackup}')) {`,
-      `    Move-Item -LiteralPath '${escapedBackup}' -Destination '${escapedTarget}' -Force -ErrorAction SilentlyContinue;`,
-      `  }`,
-      `}`,
-      `Start-Process -FilePath '${escapedExe}' -WorkingDirectory '${escapedDir}';`,
-    ].join(' ');
-
-    spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psSwap], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    }).unref();
+    spawnDetachedWindowsCmd('redshift-apply-update', [
+      '@echo off',
+      'setlocal',
+      `set "DL=${downloadAsar}"`,
+      `set "TGT=${targetAsar}"`,
+      `set "BAK=${backupAsar}"`,
+      `set "EXE=${exePath}"`,
+      `set "DIR=${exeDir}"`,
+      `for /L %%i in (1,1,20) do (`,
+      `  tasklist /FI "PID eq ${pid}" 2>nul | find /I "${pid}" >nul`,
+      `  if errorlevel 1 goto :do_swap`,
+      `  ping 127.0.0.1 -n 2 >nul`,
+      `)`,
+      ':do_swap',
+      'ping 127.0.0.1 -n 2 >nul',
+      'if not exist "%DL%" goto :launch_app',
+      'for /L %%r in (1,1,25) do (',
+      '  if exist "%TGT%" copy /Y "%TGT%" "%BAK%" >nul 2>&1',
+      '  move /Y "%DL%" "%TGT%" >nul 2>&1',
+      '  if not errorlevel 1 (',
+      '    if exist "%BAK%" del /F /Q "%BAK%" >nul 2>&1',
+      '    goto :launch_app',
+      '  )',
+      '  ping 127.0.0.1 -n 2 >nul',
+      ')',
+      'if not exist "%TGT%" if exist "%BAK%" move /Y "%BAK%" "%TGT%" >nul 2>&1',
+      ':launch_app',
+      'start "" /D "%DIR%" "%EXE%"',
+      'del /F /Q "%~f0" >nul 2>&1',
+    ]);
 
     isQuitting = true;
+    if (bgUpdateTimer) {
+      clearInterval(bgUpdateTimer);
+      bgUpdateTimer = null;
+    }
     if (launcherWindow && !launcherWindow.isDestroyed()) {
       try { launcherWindow.destroy(); } catch (_) {}
       launcherWindow = null;
@@ -1438,11 +1457,16 @@ ipcMain.on('apply-update-and-restart', () => {
       try { tray.destroy(); } catch (_) {}
       tray = null;
     }
+    if (backgroundTunnelProc) {
+      try { backgroundTunnelProc.kill(); } catch (_) {}
+      backgroundTunnelProc = null;
+    }
     if (embeddedServer) {
+      try { embeddedServer.closeAllConnections?.(); } catch (_) {}
       try { embeddedServer.close(); } catch (_) {}
       embeddedServer = null;
     }
-    app.exit(0);
+    setTimeout(() => app.exit(0), 150);
     return;
   }
 

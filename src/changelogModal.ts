@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.7';
+export const CURRENT_REDSHIFT_VERSION = '0.1.8';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,23 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.8',
+    date: 'November 19, 2026',
+    kicker: 'AUTO-UPDATER ENGINE OVERHAUL',
+    headline: '100% Reliable Detached Patch Swap & Automatic Relaunch After Updating',
+    lead:
+      'Replaced the detached PowerShell update swapper (which Windows killed when Electron exited, leaving the app closed on the old version) with a fully detached native Windows updater worker that reliably swaps app.asar and relaunches Redshift every single time.',
+    sections: [
+      {
+        heading: 'Fixes',
+        items: [
+          'Fixed Launcher Closing Without Applying Update or Reopening — Replaced detached powershell.exe with a verified detached cmd.exe self-cleaning updater worker so every future auto-update cleanly replaces app.asar and automatically restarts Redshift.',
+          'Updated One-Click RedshiftSetup.exe Installer — Rebuilt the official Windows installer with v0.1.8 and the fixed auto-updater engine baked directly in.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.7',
     date: 'November 19, 2026',
