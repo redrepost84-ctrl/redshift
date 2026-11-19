@@ -131,7 +131,19 @@ async function main() {
     execSync('git remote remove origin', { cwd: rootDir, stdio: 'ignore' });
   } catch (_) {}
   execSync(`git remote add origin https://github.com/${repo}.git`, { cwd: rootDir, stdio: 'inherit' });
-  execSync('git push -u origin main --force', { cwd: rootDir, stdio: 'inherit' });
+  const basicAuth = Buffer.from(`x-access-token:${token}`, 'utf8').toString('base64');
+  execSync(
+    `git -c http.extraHeader="Authorization: Basic ${basicAuth}" push -u origin main --force`,
+    {
+      cwd: rootDir,
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: '0',
+        GCM_INTERACTIVE: 'never',
+      },
+    },
+  );
 
   // 1. Check or create release for tag
   let relRes = await ghFetch(`https://api.github.com/repos/${repo}/releases/tags/${tag}`, token);
