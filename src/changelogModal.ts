@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.4';
+export const CURRENT_REDSHIFT_VERSION = '0.1.5';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 export interface ChangelogReleaseSection {
@@ -20,6 +20,24 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.5',
+    date: 'November 19, 2026',
+    kicker: 'UPDATER & CONNECTION RELIABILITY',
+    headline: 'Clean In-App Auto-Updater & Seamless Automatic Server Reconnection',
+    lead:
+      'Fixed the Redshift Launcher garbled text bug during in-app updates by never mutating the active app package on disk and restarting into a clean launcher process, plus added automatic transparent tunnel reconnection so messaging never breaks when the online server updates.',
+    sections: [
+      {
+        heading: 'Bug Fixes & Reliability',
+        items: [
+          'Fixed Launcher Turning Into Garbled CSS Text on Update — Stopped background publish jobs from overwriting an open desktop app’s active ASAR package and hardened the "Update Available" button to relaunch a fresh Redshift Launcher process cleanly before applying updates.',
+          'Seamless Automatic Server Reconnection — All messaging, profile, upload, and realtime WebSocket calls now automatically re-discover and retry against the latest live worldwide server if the tunnel ever rotates, with zero need to restart Redshift.',
+          'Zero-Downtime Backend Hot-Reload — Future server-side improvements can now reload the backend in place without changing the live public server URL.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.4',
     date: 'November 18, 2026',

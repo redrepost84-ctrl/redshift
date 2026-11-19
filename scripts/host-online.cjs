@@ -196,14 +196,58 @@ async function main() {
   console.log('  Updates   : /api/desktop/version.json');
   console.log('====================================================\n');
 
-  const serverProc = spawn(process.execPath, ['--no-warnings', 'server.js'], {
-    cwd: rootDir,
-    env: {
-      ...process.env,
-      PORT: String(PORT),
-    },
-    stdio: 'inherit',
-  });
+  const reloadSignalFile = path.join(rootDir, '.reload-server');
+  try {
+    if (fs.existsSync(reloadSignalFile)) fs.unlinkSync(reloadSignalFile);
+  } catch (_) {}
+
+  let serverProc = null;
+  let isShuttingDown = false;
+  let isReloadingServer = false;
+
+  function startServer() {
+    serverProc = spawn(process.execPath, ['--no-warnings', 'server.js'], {
+      cwd: rootDir,
+      env: {
+        ...process.env,
+        PORT: String(PORT),
+      },
+      stdio: 'inherit',
+    });
+
+    serverProc.on('exit', (code) => {
+      if (isShuttingDown) {
+        return;
+      }
+      if (isReloadingServer) {
+        isReloadingServer = false;
+        console.log('[Host] Backend stopped cleanly; restarting server.js while keeping Cloudflare tunnel alive...');
+        setTimeout(startServer, 250);
+        return;
+      }
+      console.warn(`[Host] Backend exited unexpectedly (code ${code}); auto-restarting in 1s without dropping tunnel...`);
+      setTimeout(startServer, 1000);
+    });
+  }
+
+  startServer();
+
+  // Watch for `.reload-server` trigger file so backend code updates never need to drop the live tunnel URL.
+  const reloadWatchTimer = setInterval(() => {
+    if (isShuttingDown || isReloadingServer) return;
+    if (fs.existsSync(reloadSignalFile)) {
+      try { fs.unlinkSync(reloadSignalFile); } catch (_) {}
+      isReloadingServer = true;
+      console.log('[Host] Hot-reload signal detected (.reload-server) — restarting server.js seamlessly...');
+      if (serverProc) {
+        try { serverProc.kill(); } catch (_) {}
+      } else {
+        isReloadingServer = false;
+        startServer();
+      }
+    }
+  }, 1200);
+  reloadWatchTimer.unref();
 
   let tunnelProc = null;
   const noTunnel = process.argv.includes('--no-tunnel');
@@ -241,21 +285,19 @@ async function main() {
   }
 
   function shutdown() {
+    isShuttingDown = true;
+    clearInterval(reloadWatchTimer);
     if (tunnelProc) {
       try { tunnelProc.kill(); } catch (_) {}
     }
-    try { serverProc.kill(); } catch (_) {}
+    if (serverProc) {
+      try { serverProc.kill(); } catch (_) {}
+    }
     process.exit(0);
   }
 
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
-  serverProc.on('exit', (code) => {
-    if (tunnelProc) {
-      try { tunnelProc.kill(); } catch (_) {}
-    }
-    process.exit(code || 0);
-  });
 }
 
 void main();

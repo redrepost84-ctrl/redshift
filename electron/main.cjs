@@ -28,6 +28,7 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 // Prevent duplicate instances unless performing a fresh install handoff.
 const isInstallerFlag = process.argv.includes('--install');
 const isPortableFlag = process.argv.includes('--portable') || process.argv.includes('--no-install');
+const isUpdateNowFlag = process.argv.includes('--update-now');
 const gotLock = isInstallerFlag ? true : app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -161,7 +162,7 @@ function isRunningFromInstalledLocation() {
 
 function shouldRunFirstTimeInstaller() {
   if (!app.isPackaged) return false;
-  if (isPortableFlag) return false;
+  if (isPortableFlag || isUpdateNowFlag) return false;
   if (isInstallerFlag) return true;
   return !isRunningFromInstalledLocation();
 }
@@ -1025,6 +1026,54 @@ ipcMain.on('start-first-time-install', () => {
 });
 
 ipcMain.on('initiate-update', () => {
+  if (app.isPackaged) {
+    // Relaunch a clean Redshift.exe process straight into update mode so the
+    // Launcher always reads a fresh ASAR header table and releases any file locks.
+    const exePath = process.execPath;
+    const exeDir = path.dirname(exePath);
+    const pid = process.pid;
+    const psRelaunch = [
+      `$pidToWait = ${pid};`,
+      `$t = 40; while ((Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) -and ($t -gt 0)) { Start-Sleep -Milliseconds 120; $t--; }`,
+      `Start-Sleep -Milliseconds 150;`,
+      `Start-Process -FilePath '${exePath.replace(/'/g, "''")}' -ArgumentList '--update-now' -WorkingDirectory '${exeDir.replace(/'/g, "''")}';`,
+    ].join(' ');
+
+    spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', psRelaunch], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    }).unref();
+
+    isQuitting = true;
+    if (bgUpdateTimer) {
+      clearInterval(bgUpdateTimer);
+      bgUpdateTimer = null;
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try { mainWindow.destroy(); } catch (_) {}
+      mainWindow = null;
+    }
+    if (launcherWindow && !launcherWindow.isDestroyed()) {
+      try { launcherWindow.destroy(); } catch (_) {}
+      launcherWindow = null;
+    }
+    if (tray) {
+      try { tray.destroy(); } catch (_) {}
+      tray = null;
+    }
+    if (backgroundTunnelProc) {
+      try { backgroundTunnelProc.kill(); } catch (_) {}
+      backgroundTunnelProc = null;
+    }
+    if (embeddedServer) {
+      try { embeddedServer.close(); } catch (_) {}
+      embeddedServer = null;
+    }
+    app.exit(0);
+    return;
+  }
+
   isTransitioningWindow = true;
   createLauncherWindow('update');
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1044,6 +1093,16 @@ ipcMain.on('start-download-update', async () => {
     const manifest = lastManifestResult?.updateAvailable
       ? lastManifestResult
       : await fetchLatestManifest();
+    if (!manifest.updateAvailable) {
+      if (launcherWindow && !launcherWindow.isDestroyed()) {
+        launcherWindow.webContents.send('update-complete', {
+          newVersion: currentVersion,
+          hasFile: false,
+          alreadyUpToDate: true,
+        });
+      }
+      return;
+    }
     if (!manifest.asarUrl) {
       throw new Error('No update package URL found in manifest');
     }
@@ -1057,6 +1116,8 @@ ipcMain.on('start-download-update', async () => {
     launcherWindow.webContents.send('update-progress', {
       stage: 'connecting',
       percent: 0,
+      currentVersion,
+      latestVersion: manifest.latestVersion,
       text: `Downloading Redshift v${manifest.latestVersion}...`,
     });
 
@@ -1067,6 +1128,8 @@ ipcMain.on('start-download-update', async () => {
           percent: prog.percent,
           receivedBytes: prog.receivedBytes,
           totalBytes: prog.totalBytes,
+          currentVersion,
+          latestVersion: manifest.latestVersion,
           text: `Downloading update v${manifest.latestVersion} (${prog.percent}%)`,
         });
       }
@@ -1138,6 +1201,14 @@ ipcMain.on('apply-update-and-restart', () => {
     }).unref();
 
     isQuitting = true;
+    if (launcherWindow && !launcherWindow.isDestroyed()) {
+      try { launcherWindow.destroy(); } catch (_) {}
+      launcherWindow = null;
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try { mainWindow.destroy(); } catch (_) {}
+      mainWindow = null;
+    }
     if (tray) {
       try { tray.destroy(); } catch (_) {}
       tray = null;
@@ -1225,7 +1296,9 @@ app.on('second-instance', () => {
 
 app.whenReady().then(() => {
   setupNativeDisplayCapture();
-  if (shouldRunFirstTimeInstaller()) {
+  if (isUpdateNowFlag) {
+    createLauncherWindow('update');
+  } else if (shouldRunFirstTimeInstaller()) {
     createLauncherWindow('install');
   } else {
     createLauncherWindow('boot');

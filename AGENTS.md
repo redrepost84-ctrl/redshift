@@ -6,7 +6,8 @@ Whenever you finish implementing a feature, bug fix, UI change, or asset update 
    - Run `npm run build` and `npm test` to confirm zero regressions.
 2. **Ensure Worldwide Online Server (`npm run host:online`) Is Running:**
    - Check if the `npm run host:online` background daemon (or port `8080` + `cloudflared` tunnel) is active and reachable via `/api/health`.
-   - If it is not running (or if `server/redshiftServer.js` / `server/` changed), start or restart `cmd.exe /c "npm.cmd run host:online"` with `IsDaemon: true`, wait for it to write the live `https://....trycloudflare.com` URL into `online-server.json`, and verify `<serverUrl>/api/health` returns `200 OK`.
+   - If `server/` did NOT change and the live tunnel is healthy (`200 OK`), **DO NOT restart `npm run host:online`** (keep the live tunnel URL uninterrupted for connected users).
+   - If `server/redshiftServer.js` / `server/` changed and `host:online` is running with hot-reload support, prefer touching `.reload-server` in the project root to restart only `server.js` without dropping the live `cloudflared` tunnel URL; otherwise start/restart `cmd.exe /c "npm.cmd run host:online"` with `IsDaemon: true`, wait for it to write the live `https://....trycloudflare.com` URL into `online-server.json`, and verify `<serverUrl>/api/health` returns `200 OK`.
 3. **Automatically Bump, Package & Publish the Update to GitHub Releases:**
    - Run:
      ```powershell

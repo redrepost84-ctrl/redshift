@@ -451,6 +451,12 @@
       setProgress(0, 'Connecting to update server...');
 
       const offProg = api.onUpdateProgress((data) => {
+        if (data.latestVersion) {
+          hintLabel.textContent = `Updating to v${data.latestVersion}`;
+          if (data.currentVersion) {
+            versionLabel.textContent = `v${data.currentVersion} → v${data.latestVersion}`;
+          }
+        }
         const meta =
           data.totalBytes > 0
             ? `${formatMB(data.receivedBytes)} / ${formatMB(data.totalBytes)}`
@@ -463,14 +469,18 @@
         offProg();
         offDone();
         offErr();
-        setProgress(100, `Updated to v${data.newVersion || ''}! Restarting...`, '100%');
+        if (data.alreadyUpToDate) {
+          setProgress(100, 'Redshift is up to date! Starting...', 'Up to date');
+        } else {
+          setProgress(100, `Updated to v${data.newVersion || ''}! Restarting...`, '100%');
+        }
         setTimeout(() => {
           if (data.hasFile && api.applyUpdateAndRestart) {
             api.applyUpdateAndRestart();
           } else {
             api.launcherReady();
           }
-        }, 650);
+        }, data.alreadyUpToDate ? 350 : 650);
       });
       const offErr = api.onUpdateError((data) => {
         offProg();

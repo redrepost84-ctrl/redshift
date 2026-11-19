@@ -124,7 +124,11 @@ if (patchOnly) {
   const unpackTmp = path.join(os.tmpdir(), `redshift-asar-patch-${Date.now()}`);
   const existingAsar = path.join(outUnpacked, 'resources', 'app.asar');
   run(`npx asar extract "${existingAsar}" "${unpackTmp}"`);
-  copyDirSafe(path.join(rootDir, 'dist'), path.join(unpackTmp, 'dist'));
+  const unpackDist = path.join(unpackTmp, 'dist');
+  if (fs.existsSync(unpackDist)) {
+    fs.rmSync(unpackDist, { recursive: true, force: true });
+  }
+  copyDirSafe(path.join(rootDir, 'dist'), unpackDist);
   copyDirSafe(path.join(rootDir, 'electron'), path.join(unpackTmp, 'electron'));
   copyDirSafe(path.join(rootDir, 'server'), path.join(unpackTmp, 'server'));
   const dataInsideTmp = path.join(unpackTmp, 'server', 'data');
@@ -136,21 +140,9 @@ if (patchOnly) {
   fs.copyFileSync(iconPng, path.join(unpackTmp, 'public', 'icon.png'));
   run(`npx asar pack "${unpackTmp}" "${outPatchAsar}"`);
   fs.copyFileSync(outPatchAsar, existingAsar);
-  const localInstalledAsar = path.join(
-    process.env.LOCALAPPDATA || '',
-    'Programs',
-    'Redshift',
-    'resources',
-    'app.asar',
-  );
-  if (localInstalledAsar && fs.existsSync(localInstalledAsar)) {
-    try {
-      fs.copyFileSync(outPatchAsar, localInstalledAsar);
-      console.log(`[Publish] Also synced installed app.asar at ${localInstalledAsar}`);
-    } catch (_) {
-      console.log('[Publish] Local installed Redshift.exe is currently open; it will auto-update via Launcher on next restart.');
-    }
-  }
+  // IMPORTANT: Never overwrite %LOCALAPPDATA%\Programs\Redshift\resources\app.asar directly here!
+  // Overwriting app.asar while Redshift.exe is open corrupts Electron's in-memory ASAR byte offsets.
+  // Installed apps will cleanly download Redshift-patch.asar and swap it after exit via the Launcher.
   try {
     fs.rmSync(unpackTmp, { recursive: true, force: true });
   } catch (_) {}

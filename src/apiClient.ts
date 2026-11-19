@@ -185,6 +185,63 @@ export function resolveApiUrl(pathOrUrl: string): string {
   return `${apiServerBaseUrl}${pathOrUrl.startsWith('/') ? '' : '/'}${pathOrUrl}`;
 }
 
+let inflightTunnelRediscovery: Promise<string | null> | null = null;
+let lastTunnelRediscoveryAt = 0;
+const TUNNEL_REDISCOVERY_COOLDOWN_MS = 12_000;
+
+async function tryRediscoverDeadTunnel(failedBaseUrl: string): Promise<boolean> {
+  if (!failedBaseUrl || !failedBaseUrl.includes('trycloudflare.com')) {
+    return false;
+  }
+  if (apiServerBaseUrl && apiServerBaseUrl !== failedBaseUrl) {
+    return true;
+  }
+  if (inflightTunnelRediscovery) {
+    const discovered = await inflightTunnelRediscovery;
+    return Boolean(discovered && discovered !== failedBaseUrl);
+  }
+  const now = Date.now();
+  if (now - lastTunnelRediscoveryAt < TUNNEL_REDISCOVERY_COOLDOWN_MS) {
+    return false;
+  }
+  lastTunnelRediscoveryAt = now;
+  inflightTunnelRediscovery = autoDiscoverWorldwideServer().finally(() => {
+    inflightTunnelRediscovery = null;
+  });
+  const discovered = await inflightTunnelRediscovery;
+  return Boolean(discovered && discovered !== failedBaseUrl);
+}
+
+function isDeadTunnelStatus(status: number): boolean {
+  return status === 530 || status === 502 || status === 503 || status === 504;
+}
+
+async function fetchWithTunnelRecovery(
+  pathOrUrl: string,
+  init: RequestInit,
+): Promise<Response> {
+  const baseBefore = apiServerBaseUrl;
+  try {
+    const res = await fetch(resolveApiUrl(pathOrUrl), init);
+    if (isDeadTunnelStatus(res.status) && baseBefore.includes('trycloudflare.com')) {
+      const switched = await tryRediscoverDeadTunnel(baseBefore);
+      if (switched) {
+        return await fetch(resolveApiUrl(pathOrUrl), init);
+      }
+    }
+    return res;
+  } catch (err) {
+    const isAbort = err instanceof Error && err.name === 'AbortError';
+    if (!isAbort && baseBefore.includes('trycloudflare.com')) {
+      const switched = await tryRediscoverDeadTunnel(baseBefore);
+      if (switched) {
+        return await fetch(resolveApiUrl(pathOrUrl), init);
+      }
+    }
+    throw err;
+  }
+}
+
 /** Resolves server-hosted relative media paths (/api/uploads/..., /gif/...) against the active Redshift server URL. */
 export function resolveMediaUrl(url: string): string {
   if (!url || !apiServerBaseUrl) {
@@ -453,7 +510,7 @@ async function postJson<T extends { ok?: boolean; error?: string }>(
       headers.Authorization = `Bearer ${sessionToken}`;
     }
 
-    const res = await fetch(resolveApiUrl(url), {
+    const res = await fetchWithTunnelRecovery(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
@@ -509,7 +566,7 @@ export async function apiResumeSession(): Promise<{
     return { ok: false };
   }
   try {
-    const res = await fetch(resolveApiUrl('/api/auth/session'), {
+    const res = await fetchWithTunnelRecovery('/api/auth/session', {
       method: 'GET',
       headers: { Authorization: `Bearer ${sessionToken}` },
     });
@@ -769,7 +826,7 @@ export async function apiFetchDmHistory(
     if (opts?.limit) {
       params.set('limit', String(opts.limit));
     }
-    const res = await fetch(resolveApiUrl(`/api/dms/history?${params.toString()}`), {
+    const res = await fetchWithTunnelRecovery(`/api/dms/history?${params.toString()}`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${sessionToken}` },
     });
@@ -802,7 +859,7 @@ export async function apiSearchGlobalMessages(
     if (!sessionToken || !query.trim()) {
       return { ok: true, results: [] };
     }
-    const res = await fetch(resolveApiUrl(`/api/dms/search?q=${encodeURIComponent(query.trim())}`), {
+    const res = await fetchWithTunnelRecovery(`/api/dms/search?q=${encodeURIComponent(query.trim())}`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${sessionToken}` },
     });
@@ -824,7 +881,7 @@ export async function apiFetchLinkPreview(
     if (!sessionToken || !url.trim()) {
       return { ok: false };
     }
-    const res = await fetch(resolveApiUrl(`/api/links/preview?url=${encodeURIComponent(url.trim())}`), {
+    const res = await fetchWithTunnelRecovery(`/api/links/preview?url=${encodeURIComponent(url.trim())}`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${sessionToken}` },
     });
@@ -857,7 +914,7 @@ export async function apiFetchHostScreenSources(): Promise<{
     if (!sessionToken) {
       return { supported: false, sources: [] };
     }
-    const res = await fetch(resolveApiUrl('/api/vc/screen-sources'), {
+    const res = await fetchWithTunnelRecovery('/api/vc/screen-sources', {
       method: 'GET',
       headers: { Authorization: `Bearer ${sessionToken}` },
     });
@@ -901,7 +958,7 @@ export async function apiFetchIceServers(): Promise<RTCIceServer[]> {
     if (!sessionToken) {
       return fallback;
     }
-    const res = await fetch(resolveApiUrl('/api/vc/ice-servers'), {
+    const res = await fetchWithTunnelRecovery('/api/vc/ice-servers', {
       method: 'GET',
       headers: { Authorization: `Bearer ${sessionToken}` },
     });
@@ -934,53 +991,75 @@ export async function apiUploadAttachment(
     return { ok: false, error: 'Error: File exceeds the 1 GB attachment limit' };
   }
 
-  return new Promise((resolve) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', resolveApiUrl('/api/uploads'), true);
-    xhr.setRequestHeader('Authorization', `Bearer ${sessionToken}`);
-    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-    xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name || 'attachment'));
-    xhr.setRequestHeader('X-File-Mime', file.type || 'application/octet-stream');
+  const attemptUpload = (): Promise<{
+    ok: boolean;
+    attachment?: DmAttachment;
+    error?: string;
+    isNetworkError?: boolean;
+    httpStatus?: number;
+  }> =>
+    new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', resolveApiUrl('/api/uploads'), true);
+      xhr.setRequestHeader('Authorization', `Bearer ${sessionToken}`);
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name || 'attachment'));
+      xhr.setRequestHeader('X-File-Mime', file.type || 'application/octet-stream');
 
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && e.total > 0 && onProgress) {
-        const pct = Math.min(100, Math.max(0, Math.round((e.loaded / e.total) * 100)));
-        onProgress(pct);
-      }
-    };
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && e.total > 0 && onProgress) {
+          const pct = Math.min(100, Math.max(0, Math.round((e.loaded / e.total) * 100)));
+          onProgress(pct);
+        }
+      };
 
-    xhr.onload = () => {
-      let parsed: { ok?: boolean; attachment?: DmAttachment; error?: string } | null = null;
-      try {
-        parsed = JSON.parse(xhr.responseText) as {
-          ok?: boolean;
-          attachment?: DmAttachment;
-          error?: string;
-        };
-      } catch {
-        parsed = null;
-      }
-      if (xhr.status >= 200 && xhr.status < 300 && parsed?.ok && parsed.attachment) {
-        onProgress?.(100);
-        resolve({ ok: true, attachment: parsed.attachment });
-        return;
-      }
-      resolve({
-        ok: false,
-        isNetworkError: xhr.status >= 500,
-        error: parsed?.error ?? 'Error: Could not upload file',
-      });
-    };
+      xhr.onload = () => {
+        let parsed: { ok?: boolean; attachment?: DmAttachment; error?: string } | null = null;
+        try {
+          parsed = JSON.parse(xhr.responseText) as {
+            ok?: boolean;
+            attachment?: DmAttachment;
+            error?: string;
+          };
+        } catch {
+          parsed = null;
+        }
+        if (xhr.status >= 200 && xhr.status < 300 && parsed?.ok && parsed.attachment) {
+          onProgress?.(100);
+          resolve({ ok: true, attachment: parsed.attachment });
+          return;
+        }
+        resolve({
+          ok: false,
+          isNetworkError: xhr.status >= 500,
+          httpStatus: xhr.status,
+          error: parsed?.error ?? 'Error: Could not upload file',
+        });
+      };
 
-    xhr.onerror = () => {
-      resolve({ ok: false, isNetworkError: true, error: 'Error: Upload interrupted' });
-    };
-    xhr.onabort = () => {
-      resolve({ ok: false, isNetworkError: true, error: 'Error: Upload aborted' });
-    };
+      xhr.onerror = () => {
+        resolve({ ok: false, isNetworkError: true, error: 'Error: Upload interrupted' });
+      };
+      xhr.onabort = () => {
+        resolve({ ok: false, isNetworkError: true, error: 'Error: Upload aborted' });
+      };
 
-    xhr.send(file);
-  });
+      xhr.send(file);
+    });
+
+  const baseBefore = apiServerBaseUrl;
+  const first = await attemptUpload();
+  if (
+    !first.ok &&
+    baseBefore.includes('trycloudflare.com') &&
+    (first.isNetworkError || (typeof first.httpStatus === 'number' && isDeadTunnelStatus(first.httpStatus)))
+  ) {
+    const switched = await tryRediscoverDeadTunnel(baseBefore);
+    if (switched) {
+      return await attemptUpload();
+    }
+  }
+  return first;
 }
 
 export async function apiSendDmMessage(
@@ -1153,7 +1232,7 @@ export async function apiSearchGifs(
     if (!sessionToken) {
       return { ok: false, total: 0, results: [] };
     }
-    const res = await fetch(resolveApiUrl(`/api/gifs/search?q=${encodeURIComponent(query)}`), {
+    const res = await fetchWithTunnelRecovery(`/api/gifs/search?q=${encodeURIComponent(query)}`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${sessionToken}` },
     });
@@ -1240,7 +1319,7 @@ export async function apiResolveGifLink(
     if (!sessionToken) {
       return { ok: false };
     }
-    const res = await fetch(resolveApiUrl(`/api/gifs/resolve?code=${encodeURIComponent(code)}`), {
+    const res = await fetchWithTunnelRecovery(`/api/gifs/resolve?code=${encodeURIComponent(code)}`, {
       method: 'GET',
       headers: { Authorization: `Bearer ${sessionToken}` },
     });
@@ -1546,8 +1625,8 @@ export async function apiFetchMutualProfile(username: string): Promise<{
     if (!sessionToken) {
       return { ok: false, mutualFriends: [], mutualGroups: [] };
     }
-    const res = await fetch(
-      resolveApiUrl(`/api/friends/mutual?username=${encodeURIComponent(username.trim())}`),
+    const res = await fetchWithTunnelRecovery(
+      `/api/friends/mutual?username=${encodeURIComponent(username.trim())}`,
       {
         method: 'GET',
         headers: { Authorization: `Bearer ${sessionToken}` },
@@ -1774,8 +1853,8 @@ export function connectSocialSocket(handlers: {
       consecutiveFailures += 1;
       handlers.onClose?.();
       if (!closedByCaller && sessionToken) {
-        if (consecutiveFailures >= 2 && apiServerBaseUrl.includes('trycloudflare.com')) {
-          void autoDiscoverWorldwideServer().finally(() => {
+        if (consecutiveFailures >= 1 && apiServerBaseUrl.includes('trycloudflare.com')) {
+          void tryRediscoverDeadTunnel(apiServerBaseUrl).finally(() => {
             if (!closedByCaller && sessionToken) {
               reconnectTimer = window.setTimeout(connect, 1000);
             }
