@@ -90,6 +90,8 @@ const ALLOWED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bm
 const SESSION_STORAGE_KEY = 'redshift.session_token.v1';
 const PERSISTENT_SESSION_KEY = 'redshift.session_persistent_token.v1';
 const SERVER_URL_STORAGE_KEY = 'redshift.server_base_url.v1';
+const SERVER_MANUAL_OVERRIDE_KEY = 'redshift.server_manual_override.v1';
+const DEFAULT_GITHUB_DIRECTORY_REPO = 'redrepost84-ctrl/redshift';
 
 function readStoredServerBaseUrl(): string {
   try {
@@ -99,13 +101,21 @@ function readStoredServerBaseUrl(): string {
   }
 }
 
+export function hasManualServerOverride(): boolean {
+  try {
+    return window.localStorage.getItem(SERVER_MANUAL_OVERRIDE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 let apiServerBaseUrl: string = readStoredServerBaseUrl();
 
 export function getApiServerBaseUrl(): string {
   return apiServerBaseUrl;
 }
 
-export function setApiServerBaseUrl(rawUrl: string): string {
+export function setApiServerBaseUrl(rawUrl: string, isManual = false): string {
   const clean = rawUrl.trim().replace(/\/+$/, '');
   apiServerBaseUrl = clean;
   try {
@@ -114,10 +124,57 @@ export function setApiServerBaseUrl(rawUrl: string): string {
     } else {
       window.localStorage.removeItem(SERVER_URL_STORAGE_KEY);
     }
+    if (isManual) {
+      window.localStorage.setItem(SERVER_MANUAL_OVERRIDE_KEY, '1');
+    }
   } catch {
     // Ignore storage errors.
   }
   return clean;
+}
+
+/**
+ * Automatically checks the GitHub online-server.json directory so every Redshift client
+ * around the world connects to the live online server without needing manual URL entry.
+ */
+export async function autoDiscoverWorldwideServer(githubRepo?: string): Promise<string | null> {
+  const repo = (githubRepo || DEFAULT_GITHUB_DIRECTORY_REPO).trim();
+  if (!repo) return null;
+
+  // If currently stored URL is already reachable, keep it if user manually pinned it
+  if (hasManualServerOverride() && apiServerBaseUrl) {
+    const check = await apiCheckServerHealth(apiServerBaseUrl);
+    if (check.ok) {
+      return apiServerBaseUrl;
+    }
+  }
+
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 3800);
+  try {
+    const res = await fetch(`https://api.github.com/repos/${repo}/contents/online-server.json`, {
+      method: 'GET',
+      cache: 'no-store',
+      headers: { Accept: 'application/vnd.github.raw+json' },
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { serverUrl?: string };
+    const candidate = (data?.serverUrl || '').trim().replace(/\/+$/, '');
+    if (!candidate || !/^https?:\/\//i.test(candidate)) {
+      return null;
+    }
+    const health = await apiCheckServerHealth(candidate);
+    if (health.ok) {
+      setApiServerBaseUrl(candidate, false);
+      return candidate;
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 export function resolveApiUrl(pathOrUrl: string): string {

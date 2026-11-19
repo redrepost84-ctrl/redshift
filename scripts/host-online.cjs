@@ -1,4 +1,4 @@
-const { spawn, execSync } = require('child_process');
+const { spawn, execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const https = require('https');
 const os = require('os');
@@ -7,6 +7,110 @@ const path = require('path');
 const rootDir = path.resolve(__dirname, '..');
 const PORT = Number(process.env.PORT) || 8080;
 const localCfBin = path.join(__dirname, 'cloudflared.exe');
+const updaterCfgPath = path.join(rootDir, 'electron', 'updater-config.json');
+
+function readGitHubToken() {
+  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
+  const ps = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class CredHelper {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct CREDENTIAL {
+    public uint Flags;
+    public uint Type;
+    public string TargetName;
+    public string Comment;
+    public System.Runtime.InteropServices.ComTypes.FILETIME LastWritten;
+    public uint CredentialBlobSize;
+    public IntPtr CredentialBlob;
+    public uint Persist;
+    public uint AttributeCount;
+    public IntPtr Attributes;
+    public string TargetAlias;
+    public string UserName;
+  }
+  [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+  public static extern bool CredRead(string target, uint type, int reservedFlag, out IntPtr credentialPtr);
+  [DllImport("advapi32.dll", SetLastError = true)]
+  public static extern void CredFree([In] IntPtr cred);
+  public static string GetPass(string target) {
+    IntPtr ptr;
+    if (!CredRead(target, 1, 0, out ptr)) return "";
+    try {
+      CREDENTIAL c = (CREDENTIAL)Marshal.PtrToStructure(ptr, typeof(CREDENTIAL));
+      byte[] b = new byte[c.CredentialBlobSize];
+      Marshal.Copy(c.CredentialBlob, b, 0, (int)c.CredentialBlobSize);
+      string u = Encoding.Unicode.GetString(b).TrimEnd('\\0');
+      string a = Encoding.UTF8.GetString(b).TrimEnd('\\0');
+      return u.StartsWith("gh") || u.StartsWith("github_") ? u : a;
+    } finally { CredFree(ptr); }
+  }
+}
+"@
+$t = [CredHelper]::GetPass("GitHub - https://api.github.com/redrepost84-ctrl")
+if (-not $t) { $t = [CredHelper]::GetPass("LegacyGeneric:target=GitHub - https://api.github.com/redrepost84-ctrl") }
+Write-Output $t
+`;
+  try {
+    return execFileSync('powershell.exe', ['-NoProfile', '-Command', ps], { encoding: 'utf8' }).trim();
+  } catch (_) {
+    return '';
+  }
+}
+
+async function publishLiveUrlToGitHub(publicUrl) {
+  let repo = 'redrepost84-ctrl/redshift';
+  try {
+    if (fs.existsSync(updaterCfgPath)) {
+      const cfg = JSON.parse(fs.readFileSync(updaterCfgPath, 'utf8'));
+      if (cfg.githubRepo) repo = cfg.githubRepo.trim();
+    }
+  } catch (_) {}
+
+  const payloadObj = {
+    serverUrl: publicUrl,
+    updatedAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(
+    path.join(rootDir, 'online-server.json'),
+    JSON.stringify(payloadObj, null, 2) + '\n',
+    'utf8',
+  );
+
+  const token = readGitHubToken();
+  if (!token || !repo) return false;
+
+  try {
+    const apiUrl = `https://api.github.com/repos/${repo}/contents/online-server.json`;
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'Redshift-Online-Host',
+    };
+    let existingSha = undefined;
+    const getRes = await fetch(apiUrl, { headers });
+    if (getRes.ok) {
+      const getJson = await getRes.json();
+      existingSha = getJson?.sha;
+    }
+    const contentB64 = Buffer.from(JSON.stringify(payloadObj, null, 2) + '\n', 'utf8').toString('base64');
+    const putRes = await fetch(apiUrl, {
+      method: 'PUT',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: `Update live online server endpoint (${publicUrl})`,
+        content: contentB64,
+        ...(existingSha ? { sha: existingSha } : {}),
+      }),
+    });
+    return putRes.ok;
+  } catch (_) {
+    return false;
+  }
+}
 
 function getLanIp() {
   const nets = os.networkInterfaces();
@@ -118,12 +222,18 @@ async function main() {
       const match = text.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/i);
       if (match && !printedUrl) {
         printedUrl = true;
+        const publicUrl = match[0];
         console.log('\n====================================================');
         console.log('  WORLDWIDE PUBLIC SERVER URL READY:');
-        console.log(`  ${match[0]}`);
-        console.log('  Anyone in the world can paste this URL into');
-        console.log('  Redshift -> Switch Server to chat & call with you!');
+        console.log(`  ${publicUrl}`);
+        console.log('  Publishing live URL to GitHub directory so all');
+        console.log('  Redshift clients auto-connect on startup...');
         console.log('====================================================\n');
+        void publishLiveUrlToGitHub(publicUrl).then((ok) => {
+          if (ok) {
+            console.log(`[Host] Auto-discovery directory updated on GitHub (${publicUrl})`);
+          }
+        });
       }
     };
     tunnelProc.stdout.on('data', handleTunnelOutput);

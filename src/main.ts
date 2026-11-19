@@ -10,6 +10,7 @@ import {
   apiCancelFriendRequest,
   apiCheckServerHealth,
   apiCloseDm,
+  autoDiscoverWorldwideServer,
   apiDeclineFriendRequest,
   apiHideThread,
   apiLeaveGroupDm,
@@ -822,7 +823,7 @@ function createAuthServerBar(): HTMLDivElement {
       return;
     }
 
-    setApiServerBaseUrl(clean);
+    setApiServerBaseUrl(clean, true);
     clearSessionToken();
     const bridge = getDesktopBridge();
     if (bridge) {
@@ -6497,14 +6498,25 @@ function render(): void {
 
 async function bootstrapApp(): Promise<void> {
   const desktopBridge = getDesktopBridge();
+  let githubRepo = 'redrepost84-ctrl/redshift';
   if (desktopBridge) {
     try {
       const cfg = await desktopBridge.getDesktopConfig();
-      if (cfg && typeof cfg.serverUrl === 'string') {
+      if (cfg && typeof cfg.githubRepo === 'string' && cfg.githubRepo.trim()) {
+        githubRepo = cfg.githubRepo.trim();
+      }
+      if (cfg && typeof cfg.serverUrl === 'string' && cfg.serverUrl.trim()) {
         setApiServerBaseUrl(cfg.serverUrl);
       }
     } catch {
       // Fall back to default local server origin.
+    }
+  }
+  // In Electron Desktop (or when no local test server is running), auto-discover the live worldwide server from GitHub
+  if (desktopBridge) {
+    const discovered = await autoDiscoverWorldwideServer(githubRepo);
+    if (discovered) {
+      void desktopBridge.saveDesktopConfig({ serverUrl: discovered });
     }
   }
   if (hasStoredSessionToken()) {
