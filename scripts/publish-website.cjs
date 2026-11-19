@@ -91,8 +91,8 @@ async function main() {
     fs.copyFileSync(pubVer, docsVer);
   }
 
-  // Stage, commit, and push docs/ to GitHub main
-  execSync('git add docs scripts/publish.cjs scripts/publish-website.cjs', { cwd: rootDir, stdio: 'inherit' });
+  // Stage, commit, and push docs/ (and rule/publish scripts) to GitHub main
+  execSync('git add docs AGENTS.md scripts/publish.cjs scripts/publish-website.cjs', { cwd: rootDir, stdio: 'inherit' });
   try {
     execSync('git commit -m "Publish official Redshift download website (GitHub Pages)"', {
       cwd: rootDir,

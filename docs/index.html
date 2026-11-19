@@ -43,7 +43,6 @@
       </a>
 
       <div class="nav-links">
-        <a href="#preview">Live Preview</a>
         <a href="#features">Features</a>
         <a href="#install">How to Install</a>
         <a href="#changelog">Changelog</a>
@@ -74,6 +73,11 @@
     <!-- Hero Section -->
     <section class="hero container">
       <div class="hero-copy">
+        <div class="hero-emblem-wrap" aria-hidden="true">
+          <div class="hero-emblem-ring"></div>
+          <img src="./icon.png" alt="Redshift" class="hero-emblem" width="84" height="84" />
+        </div>
+
         <div class="hero-eyebrow">
           <span class="eyebrow-pulse"></span>
           <span id="hero-release-badge">Redshift v0.1.8 · Official Windows Desktop App · 100% Free</span>
@@ -149,158 +153,6 @@
             <span id="hero-sha-label">SHA-256 Verified</span>
           </button>
         </div>
-      </div>
-
-      <!-- Interactive Redshift Desktop Window Mockup -->
-      <div class="hero-preview-shell" id="preview">
-        <div class="preview-window" role="region" aria-label="Interactive Redshift desktop app preview">
-          <div class="preview-titlebar">
-            <div class="preview-titlebar-left">
-              <img src="./icon.png" alt="" class="preview-titlebar-icon" width="16" height="16" />
-              <span>Redshift</span>
-              <span class="preview-live-tag">INTERACTIVE PREVIEW</span>
-            </div>
-            <div class="preview-window-dots" aria-hidden="true">
-              <span></span><span></span><span></span>
-            </div>
-          </div>
-
-          <div class="preview-workspace">
-            <!-- Left Sidebar -->
-            <aside class="preview-sidebar">
-              <div class="preview-search-bar">Jump to a chat… <kbd>Ctrl+K</kbd></div>
-              <div class="preview-section-label">DIRECT MESSAGES</div>
-
-              <button type="button" class="preview-dm-item preview-dm-item--active" data-preview-thread="squad">
-                <span class="preview-avatar preview-avatar--group">SR</span>
-                <span class="preview-dm-meta">
-                  <span class="preview-dm-name">Squad Room</span>
-                  <span class="preview-dm-sub">3 Members · Live Call</span>
-                </span>
-                <span class="preview-vc-pill">LIVE</span>
-              </button>
-
-              <button type="button" class="preview-dm-item" data-preview-thread="alex">
-                <span class="preview-avatar preview-avatar--cyan">
-                  L
-                  <span class="preview-dot preview-dot--online"></span>
-                </span>
-                <span class="preview-dm-meta">
-                  <span class="preview-dm-name">Leyvora</span>
-                  <span class="preview-dm-sub">watching clips 🎬</span>
-                </span>
-              </button>
-
-              <button type="button" class="preview-dm-item" data-preview-thread="soil">
-                <span class="preview-avatar preview-avatar--amber">
-                  S
-                  <span class="preview-dot preview-dot--dnd"></span>
-                </span>
-                <span class="preview-dm-meta">
-                  <span class="preview-dm-name">LumpOfSoil</span>
-                  <span class="preview-dm-sub">in ranked match</span>
-                </span>
-              </button>
-
-              <div class="preview-vc-bar">
-                <div class="preview-vc-bar-top">
-                  <span class="preview-signal-dot"></span>
-                  <span>Voice Connected · 18ms</span>
-                </div>
-                <div class="preview-vc-bar-sub">Squad Room · 1080p 60fps</div>
-              </div>
-
-              <!-- Interactive Self User Dock -->
-              <div class="preview-user-dock">
-                <div class="preview-dock-user">
-                  <span class="preview-avatar preview-avatar--crimson">
-                    R
-                    <span class="preview-dot preview-dot--online" id="preview-self-dot"></span>
-                  </span>
-                  <div class="preview-dock-meta">
-                    <div class="preview-dock-name">You</div>
-                    <div class="preview-dock-status" id="preview-self-status-label">Online</div>
-                  </div>
-                </div>
-                <div class="preview-status-switcher" role="group" aria-label="Try instant status switching">
-                  <button type="button" class="pstatus-btn pstatus-btn--active" data-set-status="online" title="Online"><span class="pstatus-swatch pstatus-swatch--online"></span></button>
-                  <button type="button" class="pstatus-btn" data-set-status="idle" title="Idle"><span class="pstatus-swatch pstatus-swatch--idle"></span></button>
-                  <button type="button" class="pstatus-btn" data-set-status="dnd" title="Do Not Disturb"><span class="pstatus-swatch pstatus-swatch--dnd"></span></button>
-                  <button type="button" class="pstatus-btn" data-set-status="invisible" title="Invisible"><span class="pstatus-swatch pstatus-swatch--offline"></span></button>
-                </div>
-              </div>
-            </aside>
-
-            <!-- Center Chat Area -->
-            <div class="preview-chat">
-              <div class="preview-chat-header">
-                <div class="preview-chat-header-left">
-                  <span class="preview-header-title" id="preview-thread-title">Squad Room</span>
-                  <span class="preview-header-sub" id="preview-thread-sub">3 Members</span>
-                </div>
-                <div class="preview-header-right">
-                  <span class="preview-update-chip" title="Header update notification in Redshift">
-                    <span class="preview-update-dot"></span>
-                    Up to Date
-                  </span>
-                </div>
-              </div>
-
-              <div class="preview-messages" id="preview-messages">
-                <!-- Populated & interactive via app.js -->
-              </div>
-
-              <div class="preview-composer">
-                <span class="preview-composer-plus">+</span>
-                <span class="preview-composer-placeholder" id="preview-composer-hint">Message Squad Room</span>
-                <span class="preview-composer-badge">GIF</span>
-              </div>
-            </div>
-
-            <!-- Right Group Members Sidebar -->
-            <aside class="preview-members">
-              <div class="preview-section-label">MEMBERS — 3</div>
-              <div class="preview-member-row">
-                <span class="preview-avatar preview-avatar--crimson preview-avatar--sm">
-                  R
-                  <span class="preview-dot preview-dot--online" id="preview-member-self-dot"></span>
-                </span>
-                <div class="preview-member-meta">
-                  <div class="preview-member-name">
-                    You
-                    <svg class="preview-crown" width="13" height="13" viewBox="0 0 24 24" fill="#facc15" aria-label="Group Owner">
-                      <path d="M3 18h18l-2-10-4.5 4L12 5l-2.5 7L5 8l-2 10z" />
-                    </svg>
-                  </div>
-                  <div class="preview-member-sub" id="preview-member-self-sub">Online</div>
-                </div>
-              </div>
-              <div class="preview-member-row">
-                <span class="preview-avatar preview-avatar--cyan preview-avatar--sm">
-                  L
-                  <span class="preview-dot preview-dot--online"></span>
-                </span>
-                <div class="preview-member-meta">
-                  <div class="preview-member-name">Leyvora</div>
-                  <div class="preview-member-sub">watching clips 🎬</div>
-                </div>
-              </div>
-              <div class="preview-member-row">
-                <span class="preview-avatar preview-avatar--amber preview-avatar--sm">
-                  S
-                  <span class="preview-dot preview-dot--dnd"></span>
-                </span>
-                <div class="preview-member-meta">
-                  <div class="preview-member-name">LumpOfSoil</div>
-                  <div class="preview-member-sub">in ranked match</div>
-                </div>
-              </div>
-            </aside>
-          </div>
-        </div>
-        <p class="preview-caption">
-          Try it above: switch threads, click the <strong>SPOILER</strong> blur to reveal/hide it, or flip your status dots in the bottom-left dock to watch the group sidebar sync in 0ms.
-        </p>
       </div>
     </section>
 
