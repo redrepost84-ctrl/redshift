@@ -18,7 +18,10 @@ function getArg(name) {
   return idx >= 0 && idx + 1 < args.length ? args[idx + 1] : '';
 }
 
-const bumpKind = getArg('--bump');
+const bumpKind =
+  getArg('--bump') ||
+  args.find((a) => a === 'patch' || a === 'minor' || a === 'major') ||
+  '';
 let buildVersion = version;
 if (bumpKind === 'patch' || bumpKind === 'minor' || bumpKind === 'major') {
   const parts = version.split('.').map((n) => parseInt(n, 10) || 0);
@@ -133,6 +136,21 @@ if (patchOnly) {
   fs.copyFileSync(iconPng, path.join(unpackTmp, 'public', 'icon.png'));
   run(`npx asar pack "${unpackTmp}" "${outPatchAsar}"`);
   fs.copyFileSync(outPatchAsar, existingAsar);
+  const localInstalledAsar = path.join(
+    process.env.LOCALAPPDATA || '',
+    'Programs',
+    'Redshift',
+    'resources',
+    'app.asar',
+  );
+  if (localInstalledAsar && fs.existsSync(localInstalledAsar)) {
+    try {
+      fs.copyFileSync(outPatchAsar, localInstalledAsar);
+      console.log(`[Publish] Also synced installed app.asar at ${localInstalledAsar}`);
+    } catch (_) {
+      console.log('[Publish] Local installed Redshift.exe is currently open; it will auto-update via Launcher on next restart.');
+    }
+  }
   try {
     fs.rmSync(unpackTmp, { recursive: true, force: true });
   } catch (_) {}

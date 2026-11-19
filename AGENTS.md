@@ -10,7 +10,7 @@ Whenever you finish implementing a feature, bug fix, UI change, or asset update 
 3. **Automatically Bump, Package & Publish the Update to GitHub Releases:**
    - Run:
      ```powershell
-     npm run publish:patch -- --bump patch --notes "<short summary of what changed>"
+     node scripts/publish.cjs --patch-only --bump patch --notes "<short summary of what changed>"
      node scripts/release-github.cjs --patch-only
      ```
    - This updates `publishedbuilds/Redshift-patch.asar`, `publishedbuilds/Redshift/resources/app.asar`, and `publishedbuilds/version.json`, pushes the commit (including the latest `online-server.json`) to `https://github.com/redrepost84-ctrl/redshift`, and uploads `version.json` + `Redshift-patch.asar` to the new GitHub Release tag so every user's Redshift Launcher auto-updates immediately.

@@ -41,7 +41,7 @@ try {
 } catch (_) {}
 
 let bundledUpdaterConfig = {
-  githubRepo: '',
+  githubRepo: 'redrepost84-ctrl/redshift',
   customManifestUrl: '',
   defaultServerUrl: '',
   channel: 'stable',
@@ -49,9 +49,11 @@ let bundledUpdaterConfig = {
 try {
   const cfgPath = path.join(__dirname, 'updater-config.json');
   if (fs.existsSync(cfgPath)) {
+    const rawCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
     bundledUpdaterConfig = {
       ...bundledUpdaterConfig,
-      ...JSON.parse(fs.readFileSync(cfgPath, 'utf8')),
+      ...rawCfg,
+      githubRepo: (rawCfg && rawCfg.githubRepo) || bundledUpdaterConfig.githubRepo,
     };
   }
 } catch (_) {}
@@ -61,7 +63,7 @@ const CONFIG_PATH = path.join(USER_DATA_DIR, 'desktop-config.json');
 function readDesktopConfig() {
   const defaults = {
     serverUrl: bundledUpdaterConfig.defaultServerUrl || '',
-    githubRepo: bundledUpdaterConfig.githubRepo || '',
+    githubRepo: bundledUpdaterConfig.githubRepo || 'redrepost84-ctrl/redshift',
     customManifestUrl: bundledUpdaterConfig.customManifestUrl || '',
     minimizeToTray: true,
     channel: bundledUpdaterConfig.channel || 'stable',
@@ -69,7 +71,11 @@ function readDesktopConfig() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-      return { ...defaults, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
+      const merged = { ...defaults, ...(parsed && typeof parsed === 'object' ? parsed : {}) };
+      if (!merged.githubRepo || !String(merged.githubRepo).trim()) {
+        merged.githubRepo = defaults.githubRepo;
+      }
+      return merged;
     }
   } catch (_) {}
   return defaults;
