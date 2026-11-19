@@ -14,7 +14,7 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
-const { spawn, execFileSync, execSync } = require('child_process');
+const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 
 // Keep user data & SQLite DB safely in %AppData%\Redshift so updates never wipe user data.
@@ -261,13 +261,15 @@ async function ensureEmbeddedServer() {
   const addr = srv.address();
   embeddedServer = srv;
   embeddedServerPort = typeof addr === 'object' && addr ? addr.port : 8080;
-  void ensureWorldwideHostTunnelIfNeeded(embeddedServerPort);
+  setTimeout(() => {
+    void ensureWorldwideHostTunnelIfNeeded(embeddedServerPort);
+  }, 4000).unref();
   return `http://127.0.0.1:${embeddedServerPort}`;
 }
 
-function readHostGitHubToken() {
-  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
-  if (process.platform !== 'win32') return '';
+function readHostGitHubTokenAsync() {
+  if (process.env.GITHUB_TOKEN) return Promise.resolve(process.env.GITHUB_TOKEN);
+  if (process.platform !== 'win32') return Promise.resolve('');
   const ps = `
 Add-Type -TypeDefinition @"
 using System;
@@ -311,14 +313,20 @@ $t = [CredHelper]::GetPass("GitHub - https://api.github.com/redrepost84-ctrl")
 if (-not $t) { $t = [CredHelper]::GetPass("LegacyGeneric:target=GitHub - https://api.github.com/redrepost84-ctrl") }
 Write-Output $t
 `;
-  try {
-    return execFileSync('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', ps], {
-      encoding: 'utf8',
-      windowsHide: true,
-    }).trim();
-  } catch (_) {
-    return '';
-  }
+  return new Promise((resolve) => {
+    try {
+      const child = spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', ps], {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      let out = '';
+      child.stdout.on('data', (d) => (out += d.toString()));
+      child.on('exit', () => resolve(out.trim()));
+      child.on('error', () => resolve(''));
+    } catch (_) {
+      resolve('');
+    }
+  });
 }
 
 async function ensureWorldwideHostTunnelIfNeeded(localPort) {
@@ -344,24 +352,16 @@ async function ensureWorldwideHostTunnelIfNeeded(localPort) {
   } catch (_) {}
 
   // 2. If offline and this machine is the host (has GitHub credential), auto-start Cloudflare Tunnel in background
-  const token = readHostGitHubToken();
+  const token = await readHostGitHubTokenAsync();
   if (!token) return;
 
   const cfCandidates = [
     path.join(USER_DATA_DIR, 'cloudflared.exe'),
     path.join(__dirname, '../scripts/cloudflared.exe'),
-    'cloudflared',
     'C:\\Program Files (x86)\\cloudflared\\cloudflared.exe',
     'C:\\Program Files\\cloudflared\\cloudflared.exe',
   ];
-  let cfBin = null;
-  for (const cand of cfCandidates) {
-    try {
-      execSync(`"${cand}" --version`, { stdio: 'ignore', windowsHide: true });
-      cfBin = cand;
-      break;
-    } catch (_) {}
-  }
+  let cfBin = cfCandidates.find((cand) => fs.existsSync(cand)) || null;
 
   if (!cfBin && process.platform === 'win32') {
     const destCf = path.join(USER_DATA_DIR, 'cloudflared.exe');
@@ -791,7 +791,7 @@ async function createMainWindow() {
     minHeight: 580,
     backgroundColor: '#13141a',
     autoHideMenuBar: true,
-    show: false,
+    show: true,
     icon: getIconPath(true),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -802,6 +802,14 @@ async function createMainWindow() {
   });
 
   Menu.setApplicationMenu(null);
+
+  if (launcherWindow && !launcherWindow.isDestroyed()) {
+    launcherWindow.close();
+    launcherWindow = null;
+  }
+  isTransitioningWindow = false;
+  mainWindow.show();
+  mainWindow.focus();
 
   // Open external http/https links in the user's default browser.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -1130,7 +1138,15 @@ ipcMain.on('apply-update-and-restart', () => {
     }).unref();
 
     isQuitting = true;
-    app.quit();
+    if (tray) {
+      try { tray.destroy(); } catch (_) {}
+      tray = null;
+    }
+    if (embeddedServer) {
+      try { embeddedServer.close(); } catch (_) {}
+      embeddedServer = null;
+    }
+    app.exit(0);
     return;
   }
 
@@ -1199,7 +1215,11 @@ app.on('second-instance', () => {
     mainWindow.show();
     mainWindow.focus();
   } else if (launcherWindow && !launcherWindow.isDestroyed()) {
+    if (launcherWindow.isMinimized()) launcherWindow.restore();
+    launcherWindow.show();
     launcherWindow.focus();
+  } else {
+    void createMainWindow();
   }
 });
 
