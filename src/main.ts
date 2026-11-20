@@ -43,6 +43,7 @@ import {
   hasStoredSessionToken,
   isEmailFormat,
   MAX_UPLOAD_BYTES,
+  resolveMediaUrl,
   setApiServerBaseUrl,
   type SocialSocketHandle,
   validateAvatarFile,
@@ -876,7 +877,7 @@ function resolveProfileAvatar(profile: {
   avatarDataUrl?: string;
 }): string {
   if (profile.avatarDataUrl) {
-    return profile.avatarDataUrl;
+    return resolveMediaUrl(profile.avatarDataUrl);
   }
   const index = profile.avatarPreset ?? 0;
   return PRESET_AVATARS[index] ?? PRESET_AVATARS[0];
@@ -6287,7 +6288,12 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   };
 
   const liveSnapshotPollTimer = window.setInterval(() => {
-    if (document.visibilityState !== 'hidden') {
+    if (document.visibilityState === 'hidden') {
+      return;
+    }
+    // When WebSocket is connected, every change is pushed live; only run a low-frequency 45s safety reconciliation.
+    const minIntervalMs = socketConnected ? 45_000 : 5_000;
+    if (Date.now() - lastLiveSyncPollAt >= minIntervalMs) {
       triggerBackgroundSnapshotSync(false);
     }
   }, 5000);
@@ -6453,8 +6459,47 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         const viewingAtBottom = isVisibleHere && (activeDmIsAtBottom?.() ?? true);
         if (!alreadyHadMessage && !viewingAtBottom) {
           // A genuinely new message arrived while the user isn't looking at the bottom of this thread;
-          // lift any prior read-suppression window so the unread badge displays immediately.
+          // lift any prior read-suppression window and paint the red unread badge IMMEDIATELY (0ms)
+          // without waiting for a separate social:sync roundtrip.
           suppressedUnreadByThread.delete(cacheKey);
+          if (state.snapshot && !message.callLog && !message.systemEvent) {
+            if (groupId) {
+              const prevGrpUnreads = state.snapshot.groupUnreadCounts ?? {};
+              const nextGrpUnreads = {
+                ...prevGrpUnreads,
+                [groupId]: (prevGrpUnreads[groupId] ?? 0) + 1,
+              };
+              const prevGrpMentions = state.snapshot.groupUnreadMentions ?? {};
+              const nextGrpMentions = selfPinged
+                ? { ...prevGrpMentions, [groupId]: (prevGrpMentions[groupId] ?? 0) + 1 }
+                : prevGrpMentions;
+              state.snapshot = {
+                ...state.snapshot,
+                groupUnreadCounts: nextGrpUnreads,
+                groupUnreadMentions: nextGrpMentions,
+              };
+            } else {
+              const pKey = resolvePeerKey(threadUsers);
+              if (pKey) {
+                const prevUnreads = state.snapshot.unreadCounts ?? {};
+                const nextUnreads = {
+                  ...prevUnreads,
+                  [pKey]: (prevUnreads[pKey] ?? 0) + 1,
+                };
+                const prevMentions = state.snapshot.unreadMentions ?? {};
+                const nextMentions = selfPinged
+                  ? { ...prevMentions, [pKey]: (prevMentions[pKey] ?? 0) + 1 }
+                  : prevMentions;
+                state.snapshot = {
+                  ...state.snapshot,
+                  unreadCounts: nextUnreads,
+                  unreadMentions: nextMentions,
+                };
+              }
+            }
+            syncSidebarNavAndDms();
+            syncDocumentTitle();
+          }
         }
         if (isActivelyViewing) {
           activeDmNotifyPeerMessage?.(message, isVisibleHere);

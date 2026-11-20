@@ -130,54 +130,73 @@ export function createDoStore(storage, createSeedDb) {
 
   initSchema();
 
+  const lastSavedKvJson = new Map();
+  const lastSavedAccountsJson = new Map();
+  const lastSavedGroupsJson = new Map();
+
   const getKvRow = (key) => {
     const rows = sql.exec('SELECT json FROM kv_collections WHERE key = ?', key).toArray();
     return rows.length > 0 ? rows[0] : null;
   };
 
   const setKvRow = (key, value) => {
+    const serialized = JSON.stringify(value ?? {});
+    if (lastSavedKvJson.get(key) === serialized) {
+      return;
+    }
     sql.exec(
       'INSERT INTO kv_collections (key, json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET json = excluded.json',
       key,
-      JSON.stringify(value ?? {}),
+      serialized,
     );
+    lastSavedKvJson.set(key, serialized);
   };
 
   const saveAccounts = (accountsList) => {
-    const existingRows = sql.exec('SELECT username FROM accounts').toArray();
     const keepSet = new Set();
     for (const acc of accountsList) {
       if (!acc || typeof acc.username !== 'string') continue;
       const uKey = acc.username.toLowerCase();
       keepSet.add(uKey);
+      const serialized = JSON.stringify(acc);
+      if (lastSavedAccountsJson.get(uKey) === serialized) {
+        continue;
+      }
       sql.exec(
         'INSERT INTO accounts (username, json) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET json = excluded.json',
         uKey,
-        JSON.stringify(acc),
+        serialized,
       );
+      lastSavedAccountsJson.set(uKey, serialized);
     }
-    for (const row of existingRows) {
-      if (!keepSet.has(row.username)) {
-        sql.exec('DELETE FROM accounts WHERE username = ?', row.username);
+    for (const existingKey of Array.from(lastSavedAccountsJson.keys())) {
+      if (!keepSet.has(existingKey)) {
+        sql.exec('DELETE FROM accounts WHERE username = ?', existingKey);
+        lastSavedAccountsJson.delete(existingKey);
       }
     }
   };
 
   const saveGroupDms = (groupDmsMap) => {
-    const existingRows = sql.exec('SELECT id FROM group_dms').toArray();
     const keepSet = new Set();
     for (const [gid, grp] of Object.entries(groupDmsMap || {})) {
       if (!grp || typeof grp !== 'object') continue;
       keepSet.add(gid);
+      const serialized = JSON.stringify(grp);
+      if (lastSavedGroupsJson.get(gid) === serialized) {
+        continue;
+      }
       sql.exec(
         'INSERT INTO group_dms (id, json) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET json = excluded.json',
         gid,
-        JSON.stringify(grp),
+        serialized,
       );
+      lastSavedGroupsJson.set(gid, serialized);
     }
-    for (const row of existingRows) {
-      if (!keepSet.has(row.id)) {
-        sql.exec('DELETE FROM group_dms WHERE id = ?', row.id);
+    for (const existingId of Array.from(lastSavedGroupsJson.keys())) {
+      if (!keepSet.has(existingId)) {
+        sql.exec('DELETE FROM group_dms WHERE id = ?', existingId);
+        lastSavedGroupsJson.delete(existingId);
       }
     }
   };
@@ -239,25 +258,32 @@ export function createDoStore(storage, createSeedDb) {
 
     const dbObj = { ...seed, accounts: [], groupDms: {}, dms: {} };
 
-    const accountRows = sql.exec('SELECT json FROM accounts').toArray();
+    lastSavedAccountsJson.clear();
+    const accountRows = sql.exec('SELECT username, json FROM accounts').toArray();
     for (const row of accountRows) {
       try {
-        dbObj.accounts.push(JSON.parse(row.json));
+        const parsedAcc = JSON.parse(row.json);
+        dbObj.accounts.push(parsedAcc);
+        lastSavedAccountsJson.set(String(row.username).toLowerCase(), row.json);
       } catch {}
     }
 
+    lastSavedGroupsJson.clear();
     const groupRows = sql.exec('SELECT id, json FROM group_dms').toArray();
     for (const row of groupRows) {
       try {
         dbObj.groupDms[row.id] = JSON.parse(row.json);
+        lastSavedGroupsJson.set(row.id, row.json);
       } catch {}
     }
 
+    lastSavedKvJson.clear();
     for (const key of SMALL_KV_KEYS) {
       const row = getKvRow(key);
       if (row && typeof row.json === 'string') {
         try {
           dbObj[key] = JSON.parse(row.json);
+          lastSavedKvJson.set(key, row.json);
         } catch {
           dbObj[key] = seed[key];
         }

@@ -1769,9 +1769,19 @@ export function connectSocialSocket(handlers: {
     }
   };
 
-  const sendFrame = (payload: Record<string, unknown>) => {
+  let pendingControlFrames: Record<string, unknown>[] = [];
+
+  const sendFrame = (payload: Record<string, unknown>, queueIfOffline = false) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(payload));
+      return;
+    }
+    if (queueIfOffline && !closedByCaller && sessionToken) {
+      // Keep only the latest control frame (avoid stale bursts if offline briefly).
+      if (pendingControlFrames.length >= 12) {
+        pendingControlFrames.shift();
+      }
+      pendingControlFrames.push(payload);
     }
   };
 
@@ -1784,16 +1794,33 @@ export function connectSocialSocket(handlers: {
     const wsUrl = resolveWsUrl(`/ws?token=${encodeURIComponent(sessionToken)}`);
     socket = new WebSocket(wsUrl);
 
+    let lastWsActivityAt = Date.now();
+
     socket.addEventListener('open', () => {
       consecutiveFailures = 0;
+      lastWsActivityAt = Date.now();
       stopKeepalive();
+      if (pendingControlFrames.length > 0) {
+        const queued = pendingControlFrames;
+        pendingControlFrames = [];
+        for (const frame of queued) {
+          sendFrame(frame);
+        }
+      }
       keepaliveTimer = window.setInterval(() => {
+        if (Date.now() - lastWsActivityAt > 35_000) {
+          try {
+            socket?.close();
+          } catch {}
+          return;
+        }
         sendFrame({ type: 'ping' });
       }, 15000);
       handlers.onOpen?.();
     });
 
     socket.addEventListener('message', (event) => {
+      lastWsActivityAt = Date.now();
       try {
         const msg = JSON.parse(String(event.data)) as Record<string, unknown>;
         if (msg.type === 'social:sync' && msg.snapshot) {
@@ -1929,13 +1956,13 @@ export function connectSocialSocket(handlers: {
     },
     sendVcJoin: (target: ThreadTarget, muted: boolean, deafened: boolean, ring = true) => {
       const norm = normalizeThreadTarget(target);
-      sendFrame({ type: 'vc:join', ...norm, muted, deafened, ring });
+      sendFrame({ type: 'vc:join', ...norm, muted, deafened, ring }, true);
     },
     sendVcDecline: (threadKey: string) => {
-      sendFrame({ type: 'vc:decline', threadKey });
+      sendFrame({ type: 'vc:decline', threadKey }, true);
     },
     sendVcLeave: (threadKey: string) => {
-      sendFrame({ type: 'vc:leave', threadKey });
+      sendFrame({ type: 'vc:leave', threadKey }, true);
     },
     sendVcVoiceState: (
       threadKey: string,
@@ -1969,6 +1996,7 @@ export function connectSocialSocket(handlers: {
     },
     disconnect: () => {
       closedByCaller = true;
+      pendingControlFrames = [];
       stopKeepalive();
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer);

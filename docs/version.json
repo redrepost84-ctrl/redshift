@@ -1,11 +1,11 @@
 {
-  "version": "0.1.11",
-  "releasedAt": "2026-11-20T21:30:42.187Z",
-  "changelog": "Add Friend now accepts @username (with leading @) and unique Display Names, and desktop clients are guarded against silently falling back to an empty local %AppData% database.",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.11/Redshift-patch.asar",
-  "sha256": "95b3511743c44a3b1c5923ce8890970a324ce98db7a87cffcc7dc8c2566f4227",
-  "size": 6266418,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.11/RedshiftSetup.exe",
+  "version": "0.1.12",
+  "releasedAt": "2026-11-20T21:51:52.750Z",
+  "changelog": "Instant real-time DMs, notifications & calls: replaced 3.46 MB inline base64 snapshot payloads with immutable cached /api/media endpoints (282x smaller), prioritized WebSocket delivery before DB flush, added 0ms DM unread badges, 0ms optimistic VC topbar on join, offline VC control-frame queueing, and eliminated stale ringing after joining calls.",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.12/Redshift-patch.asar",
+  "sha256": "fe37132332b7b45661cbe61f2e09db50097302d3007ba7e4137b38b5244835f5",
+  "size": 6276485,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.12/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

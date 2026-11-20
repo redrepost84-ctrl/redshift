@@ -151,11 +151,24 @@ export function createSqliteStore(createSeedDb) {
     }
   };
 
+  const lastSavedJsonByKey = new Map();
+
   const saveCollections = (dbObj) => {
+    const dirtyEntries = [];
+    for (const key of KV_KEYS) {
+      const val = dbObj[key];
+      const nextJson = JSON.stringify(val ?? {});
+      if (lastSavedJsonByKey.get(key) !== nextJson) {
+        dirtyEntries.push([key, nextJson]);
+      }
+    }
+    if (dirtyEntries.length === 0) {
+      return;
+    }
     runInTransaction(() => {
-      for (const key of KV_KEYS) {
-        const val = dbObj[key];
-        stmtSetKv.run(key, JSON.stringify(val ?? {}));
+      for (const [key, nextJson] of dirtyEntries) {
+        stmtSetKv.run(key, nextJson);
+        lastSavedJsonByKey.set(key, nextJson);
       }
     });
   };
@@ -314,6 +327,7 @@ export function createSqliteStore(createSeedDb) {
     for (const key of KV_KEYS) {
       const row = stmtGetKv.get(key);
       if (row && typeof row.json === 'string') {
+        lastSavedJsonByKey.set(key, row.json);
         try {
           dbObj[key] = JSON.parse(row.json);
         } catch {

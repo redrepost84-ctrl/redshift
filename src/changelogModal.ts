@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.11';
+export const CURRENT_REDSHIFT_VERSION = '0.1.12';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,32 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.12',
+    date: 'November 20, 2026',
+    kicker: 'INSTANT REAL-TIME OVERHAUL',
+    headline: '282x Lighter Snapshots, Instant 0ms DM Badges, Instant Call Rings & Immediate VC Topbar',
+    lead:
+      'Eliminated multi-megabyte inline base64 avatar/banner payloads that were stalling group chat messages, red unread badges, and incoming call popups behind 8–25 second WebSocket queues. Every server-driven update is now delivered instantaneously.',
+    sections: [
+      {
+        heading: 'Real-Time Speed & Performance',
+        items: [
+          '282x Smaller Real-Time Payloads — Avatars, profile banners, and group icons are now served from immutable content-hashed /api/media endpoints instead of repeating megabytes of raw base64 inside every WebSocket sync and snapshot (shrinking live snapshots from 3.46 MB down to ~12 KB).',
+          'WebSocket-First Dispatch & Dirty-Skip SQLite Saves — Live DMs, incoming call rings, and VC state broadcasts now flush directly over TCP_NODELAY WebSockets BEFORE disk persistence or secondary syncs, and SQLite skips rewriting unchanged collections.',
+          'Dead-Socket Watchdog & Reduced Background Polling — Clients automatically detect silent half-open WebSockets after 35s with no frames and reconnect cleanly, while healthy connected clients stop hammering /api/auth/session every 5 seconds.',
+        ],
+      },
+      {
+        heading: 'Instant Notifications & Voice Calls',
+        items: [
+          'Instant 0ms DM & Group Unread Badges — Incoming WebSocket messages immediately increment the sidebar red notification badge and mention pill on the exact millisecond they arrive, without waiting for a follow-up snapshot.',
+          'Instant VC Topbar When Joining From Call Messages — Joining a call via the header Call button, an incoming ring popup, or an inline group chat call log message immediately opens the VC topbar and sidebar call bar with zero delay.',
+          'Eliminated Stale Ringing After Joining — Accepting or joining a call immediately clears the incoming ring popup and ringtone, and late vc:incoming frames for a call you are already in are strictly ignored.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.11',
     date: 'November 20, 2026',

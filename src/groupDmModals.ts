@@ -11,6 +11,7 @@ import {
   apiTransferGroupOwner,
   apiUnblockUser,
   apiUpdateGroupDm,
+  resolveMediaUrl,
 } from './apiClient';
 import {
   attachImageDropZone,
@@ -61,8 +62,13 @@ function createGroupFallbackSvgDataUrl(name: string): string {
 }
 
 export function resolveGroupAvatar(group: { name: string; iconDataUrl?: string }): string {
-  if (group.iconDataUrl && group.iconDataUrl.startsWith('data:image/')) {
-    return group.iconDataUrl;
+  if (
+    group.iconDataUrl &&
+    (group.iconDataUrl.startsWith('data:image/') ||
+      group.iconDataUrl.startsWith('/api/media/') ||
+      /^https?:\/\//i.test(group.iconDataUrl))
+  ) {
+    return resolveMediaUrl(group.iconDataUrl);
   }
   return createGroupFallbackSvgDataUrl(group.name);
 }

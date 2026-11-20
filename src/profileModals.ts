@@ -1,4 +1,4 @@
-import { validateAvatarFile } from './apiClient';
+import { resolveMediaUrl, validateAvatarFile } from './apiClient';
 import { attachImageDropZone, createImageDropOverlay } from './chatUi';
 import { isModalConfirmShortcut, isTopmostModal } from './modalShortcuts';
 
@@ -75,7 +75,7 @@ export function applyBannerBackground(
 
   if (banner.bannerDataUrl) {
     el.style.backgroundColor = '#1b1d24';
-    el.style.backgroundImage = `url("${banner.bannerDataUrl}")`;
+    el.style.backgroundImage = `url("${resolveMediaUrl(banner.bannerDataUrl)}")`;
     el.style.backgroundSize = 'cover';
     el.style.backgroundPosition = 'center';
     el.style.backgroundRepeat = 'no-repeat';

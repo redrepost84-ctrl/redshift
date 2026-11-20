@@ -699,6 +699,90 @@ function hydrateReactions(rawReactions) {
   return result;
 }
 
+/** @type {Map<string, { mime: string; buf: Buffer; hash: string }>} */
+const decodedMediaCache = new Map();
+let lastKnownPublicOrigin = '';
+
+function extractPublicOriginFromReq(req) {
+  const host = String(req?.headers?.host || '').trim();
+  if (!host) return '';
+  const hostOnly = host.split(':')[0].toLowerCase();
+  if (hostOnly === 'localhost' || hostOnly === '127.0.0.1' || hostOnly === '::1' || hostOnly === '[::1]') {
+    return '';
+  }
+  const protoHeader = String(req?.headers?.['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  const proto = protoHeader === 'http' || protoHeader === 'https' ? protoHeader : 'https';
+  const origin = `${proto}://${host}`;
+  lastKnownPublicOrigin = origin;
+  return origin;
+}
+
+function hashMediaDataUrl(dataUrl) {
+  return crypto.createHash('sha1').update(dataUrl).digest('hex').slice(0, 12);
+}
+
+function parseImageDataUrl(dataUrl) {
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+    return null;
+  }
+  const hash = hashMediaDataUrl(dataUrl);
+  const cached = decodedMediaCache.get(hash);
+  if (cached) {
+    return cached;
+  }
+  const commaIdx = dataUrl.indexOf(',');
+  if (commaIdx <= 0) return null;
+  const header = dataUrl.slice(5, commaIdx);
+  const isBase64 = /;base64$/i.test(header);
+  const mime = header.replace(/;base64$/i, '').split(';')[0].trim().toLowerCase() || 'image/png';
+  if (!mime.startsWith('image/') || mime === 'image/svg+xml') {
+    return null;
+  }
+  const rawPayload = dataUrl.slice(commaIdx + 1);
+  const buf = isBase64
+    ? Buffer.from(rawPayload, 'base64')
+    : Buffer.from(decodeURIComponent(rawPayload), 'utf8');
+  const entry = { mime, buf, hash };
+  if (decodedMediaCache.size > 300) {
+    decodedMediaCache.clear();
+  }
+  decodedMediaCache.set(hash, entry);
+  return entry;
+}
+
+function toCachedMediaUrl(kind, id, dataUrl, originPrefix = lastKnownPublicOrigin) {
+  if (typeof dataUrl !== 'string' || !dataUrl.trim()) {
+    return undefined;
+  }
+  if (!dataUrl.startsWith('data:image/')) {
+    return dataUrl;
+  }
+  const hash = hashMediaDataUrl(dataUrl);
+  const rel = `/api/media/${kind}/${encodeURIComponent(id)}?v=${hash}`;
+  return originPrefix ? `${originPrefix}${rel}` : rel;
+}
+
+function getAccountAvatarUrl(account, originPrefix = lastKnownPublicOrigin) {
+  if (!account || account.avatarPreset !== null || !account.avatarDataUrl) {
+    return undefined;
+  }
+  return toCachedMediaUrl('avatar', account.username.toLowerCase(), account.avatarDataUrl, originPrefix);
+}
+
+function getAccountBannerUrl(account, originPrefix = lastKnownPublicOrigin) {
+  if (!account || !account.bannerDataUrl) {
+    return undefined;
+  }
+  return toCachedMediaUrl('banner', account.username.toLowerCase(), account.bannerDataUrl, originPrefix);
+}
+
+function getGroupIconUrl(group, originPrefix = lastKnownPublicOrigin) {
+  if (!group || !group.iconDataUrl) {
+    return undefined;
+  }
+  return toCachedMediaUrl('group-icon', group.id, group.iconDataUrl, originPrefix);
+}
+
 /** @param {StoredUploadMeta} meta */
 function toClientAttachment(meta) {
   return {
@@ -769,10 +853,7 @@ function hydrateMessage(msg, threadList) {
       authorUsername: replyAuthor?.username ?? replyAuthorUsername,
       authorName: replyAuthor?.displayName ?? replyAuthorUsername,
       authorAvatarPreset: replyAuthor ? replyAuthor.avatarPreset : 0,
-      authorAvatarDataUrl:
-        replyAuthor && replyAuthor.avatarPreset === null
-          ? replyAuthor.avatarDataUrl
-          : undefined,
+      authorAvatarDataUrl: getAccountAvatarUrl(replyAuthor),
       content: refTarget ? refTarget.content : missing ? '' : (msg.replyTo.content ?? ''),
       hasImage: refTarget
         ? targetImages.length > 0
@@ -857,8 +938,7 @@ function hydrateMessage(msg, threadList) {
     authorUsername: author?.username ?? msg.authorUsername,
     authorName: author?.displayName ?? msg.authorUsername,
     authorAvatarPreset: author ? author.avatarPreset : 0,
-    authorAvatarDataUrl:
-      author && author.avatarPreset === null ? author.avatarDataUrl : undefined,
+    authorAvatarDataUrl: getAccountAvatarUrl(author),
     content: msg.content,
     imageDataUrl: imageDataUrls[0],
     imageDataUrls: imageDataUrls.length > 0 ? imageDataUrls : undefined,
@@ -971,9 +1051,22 @@ function getCallRecipients(call) {
  * @param {StoredMessage[]} threadList
  */
 function emitCallThreadEvent(call, eventType, storedMsg, threadList) {
+  const hydrated = hydrateMessage(storedMsg, threadList);
+  const wsEvent =
+    call.kind === 'group'
+      ? { type: eventType, groupId: call.groupId, message: hydrated }
+      : {
+          type: eventType,
+          threadUsers: call.allowedUsers.slice(0, 2),
+          message: hydrated,
+        };
+  const recipients = Array.from(getCallRecipients(call));
+  // Deliver the call log message over WebSocket FIRST so clients see it instantaneously.
+  for (const targetKey of recipients) {
+    sendWsEventToUser(targetKey, wsEvent);
+  }
   if (eventType === 'dm:message') {
     const callTs = storedMsg.timestamp || Date.now();
-    const recipients = Array.from(getCallRecipients(call));
     for (const recipient of recipients) {
       const cleanRecipient = recipient.toLowerCase();
       if (call.kind === 'group' && call.groupId) {
@@ -985,22 +1078,10 @@ function emitCallThreadEvent(call, eventType, storedMsg, threadList) {
         }
       }
     }
-    saveDb(db);
     for (const recipient of recipients) {
       pushSnapshotToUser(recipient);
     }
-  }
-  const hydrated = hydrateMessage(storedMsg, threadList);
-  const wsEvent =
-    call.kind === 'group'
-      ? { type: eventType, groupId: call.groupId, message: hydrated }
-      : {
-          type: eventType,
-          threadUsers: call.allowedUsers.slice(0, 2),
-          message: hydrated,
-        };
-  for (const targetKey of getCallRecipients(call)) {
-    sendWsEventToUser(targetKey, wsEvent);
+    saveDb(db);
   }
 }
 
@@ -1035,7 +1116,6 @@ function createCallLogMessage(call) {
     recordOpenDmPeer(call.allowedUsers[0], call.allowedUsers[1]);
     recordOpenDmPeer(call.allowedUsers[1], call.allowedUsers[0]);
   }
-  saveDb(db);
   emitCallThreadEvent(call, 'dm:message', stored, threadList);
 }
 
@@ -1216,7 +1296,7 @@ function sendActiveVcSnapshotsToUser(username) {
           kind: call.kind,
           groupId: call.groupId,
           groupName: grp?.name,
-          groupIconDataUrl: grp?.iconDataUrl || undefined,
+          groupIconDataUrl: getGroupIconUrl(grp),
           caller: toPublicProfile(callerAcc, cleanKey),
         });
       }
@@ -1460,7 +1540,7 @@ function toPublicProfile(account, viewerUsername) {
       createdAt: isPrivate ? 0 : account.createdAt,
       status: 'offline',
       avatarPreset: account.avatarPreset,
-      avatarDataUrl: account.avatarPreset === null ? account.avatarDataUrl : undefined,
+      avatarDataUrl: getAccountAvatarUrl(account),
       bannerColor: undefined,
       bannerDataUrl: undefined,
       customStatus: null,
@@ -1477,9 +1557,9 @@ function toPublicProfile(account, viewerUsername) {
     createdAt: account.createdAt,
     status: getVisibleFriendStatus(account),
     avatarPreset: account.avatarPreset,
-    avatarDataUrl: account.avatarPreset === null ? account.avatarDataUrl : undefined,
+    avatarDataUrl: getAccountAvatarUrl(account),
     bannerColor: account.bannerColor || undefined,
-    bannerDataUrl: account.bannerDataUrl || undefined,
+    bannerDataUrl: getAccountBannerUrl(account),
     customStatus: getActiveCustomStatus(account),
     isProfilePrivate: false,
     isBlockedRelation: false,
@@ -1497,9 +1577,9 @@ function toSelfProfile(account) {
     createdAt: account.createdAt,
     status: account.status ?? 'online',
     avatarPreset: account.avatarPreset,
-    avatarDataUrl: account.avatarPreset === null ? account.avatarDataUrl : undefined,
+    avatarDataUrl: getAccountAvatarUrl(account),
     bannerColor: account.bannerColor || undefined,
-    bannerDataUrl: account.bannerDataUrl || undefined,
+    bannerDataUrl: getAccountBannerUrl(account),
     customStatus: getActiveCustomStatus(account),
     privacy: {
       allowFriendRequests: account.privacy?.allowFriendRequests !== false,
@@ -1525,7 +1605,7 @@ function toClientGroup(group, viewerUsername) {
   return {
     id: group.id,
     name: group.name,
-    iconDataUrl: group.iconDataUrl || undefined,
+    iconDataUrl: getGroupIconUrl(group),
     ownerUsername: group.ownerUsername,
     members,
     createdAt: group.createdAt,
@@ -3074,6 +3154,8 @@ export function createRedshiftServerMiddleware() {
       return;
     }
 
+    extractPublicOriginFromReq(req);
+
     // Allow Electron desktop clients connecting to a remote self-hosted Redshift server.
     const reqOrigin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
     res.setHeader('Access-Control-Allow-Origin', reqOrigin || '*');
@@ -3088,6 +3170,52 @@ export function createRedshiftServerMiddleware() {
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
+      return;
+    }
+
+    // Content-hashed cached binary endpoints for user avatars, banners, and group icons
+    // (eliminates multi-MB inline base64 payloads from JSON snapshots and WebSocket frames).
+    if ((req.method === 'GET' || req.method === 'HEAD') && reqPath.startsWith('/api/media/')) {
+      const rest = reqPath.slice('/api/media/'.length);
+      const slashIdx = rest.indexOf('/');
+      const kind = slashIdx > 0 ? rest.slice(0, slashIdx) : '';
+      const rawId = slashIdx > 0 ? rest.slice(slashIdx + 1).split('/')[0] : '';
+      let targetId = '';
+      try {
+        targetId = decodeURIComponent(rawId);
+      } catch {
+        targetId = rawId;
+      }
+      let rawDataUrl;
+      if (kind === 'avatar' && targetId) {
+        const acc = findAccountByUsername(targetId);
+        rawDataUrl = acc && acc.avatarPreset === null ? acc.avatarDataUrl : undefined;
+      } else if (kind === 'banner' && targetId) {
+        const acc = findAccountByUsername(targetId);
+        rawDataUrl = acc?.bannerDataUrl;
+      } else if (kind === 'group-icon' && targetId) {
+        const grp = db.groupDms[targetId];
+        rawDataUrl = grp?.iconDataUrl;
+      }
+      const parsed = rawDataUrl ? parseImageDataUrl(rawDataUrl) : null;
+      if (!parsed) {
+        res.writeHead(404, { 'Cache-Control': 'no-store' });
+        res.end();
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': parsed.mime,
+        'Content-Length': String(parsed.buf.length),
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'Cross-Origin-Resource-Policy': 'cross-origin',
+        'X-Content-Type-Options': 'nosniff',
+        ETag: `"${parsed.hash}"`,
+      });
+      if (req.method === 'HEAD') {
+        res.end();
+        return;
+      }
+      res.end(parsed.buf);
       return;
     }
 
@@ -3791,12 +3919,14 @@ export function createRedshiftServerMiddleware() {
         body.avatarPreset <= 3
           ? body.avatarPreset
           : null;
-      const avatarDataUrl =
-        avatarPreset === null &&
-        typeof body.avatarDataUrl === 'string' &&
-        body.avatarDataUrl.startsWith('data:image/')
-          ? body.avatarDataUrl
-          : undefined;
+      let avatarDataUrl;
+      if (avatarPreset === null && typeof body.avatarDataUrl === 'string') {
+        if (body.avatarDataUrl.startsWith('data:image/')) {
+          avatarDataUrl = body.avatarDataUrl;
+        } else if (body.avatarDataUrl.includes('/api/media/avatar/')) {
+          avatarDataUrl = activeUser.avatarDataUrl;
+        }
+      }
 
       if (Object.prototype.hasOwnProperty.call(body, 'bannerColor')) {
         if (body.bannerColor === null || body.bannerColor === '') {
@@ -3815,6 +3945,11 @@ export function createRedshiftServerMiddleware() {
       if (Object.prototype.hasOwnProperty.call(body, 'bannerDataUrl')) {
         if (body.bannerDataUrl === null || body.bannerDataUrl === '') {
           activeUser.bannerDataUrl = undefined;
+        } else if (
+          typeof body.bannerDataUrl === 'string' &&
+          body.bannerDataUrl.includes('/api/media/banner/')
+        ) {
+          // Keep existing stored banner unchanged.
         } else if (
           typeof body.bannerDataUrl === 'string' &&
           body.bannerDataUrl.startsWith('data:image/')
@@ -3990,7 +4125,7 @@ export function createRedshiftServerMiddleware() {
           mutualGroups.push({
             id: grp.id,
             name: grp.name,
-            iconDataUrl: grp.iconDataUrl || undefined,
+            iconDataUrl: getGroupIconUrl(grp),
             memberCount: lowerMembers.length,
           });
         }
@@ -4395,7 +4530,7 @@ export function createRedshiftServerMiddleware() {
             actor: toPublicProfile(activeUser, m),
             groupId: id,
             groupName: created.name,
-            groupIconDataUrl: created.iconDataUrl,
+            groupIconDataUrl: getGroupIconUrl(created),
             timestamp: createdAt,
           });
         }
@@ -4432,6 +4567,11 @@ export function createRedshiftServerMiddleware() {
       if (Object.prototype.hasOwnProperty.call(body, 'iconDataUrl')) {
         if (body.iconDataUrl === null || body.iconDataUrl === '') {
           group.iconDataUrl = undefined;
+        } else if (
+          typeof body.iconDataUrl === 'string' &&
+          body.iconDataUrl.includes('/api/media/group-icon/')
+        ) {
+          // Keep existing stored group icon unchanged.
         } else if (
           typeof body.iconDataUrl === 'string' &&
           body.iconDataUrl.startsWith('data:image/')
@@ -4526,7 +4666,7 @@ export function createRedshiftServerMiddleware() {
             actor: toPublicProfile(activeUser, addedKey),
             groupId,
             groupName: group.name,
-            groupIconDataUrl: group.iconDataUrl,
+            groupIconDataUrl: getGroupIconUrl(group),
             timestamp: now,
           });
         }
@@ -4624,7 +4764,7 @@ export function createRedshiftServerMiddleware() {
         actor: toPublicProfile(activeUser, targetKey),
         groupId,
         groupName: group.name,
-        groupIconDataUrl: group.iconDataUrl,
+        groupIconDataUrl: getGroupIconUrl(group),
         timestamp: Date.now(),
       });
 
@@ -5672,28 +5812,28 @@ export function createRedshiftServerMiddleware() {
         touchThreadActivityForUser(ctx.peerKey, `dm:${senderKey}`, msgNow, { unhide: true });
       }
 
-      saveDb(db);
-
-      if (ctx.kind === 'group') {
-        emitGroupTypingState(senderKey, ctx.groupId, false);
-        pushSnapshotToUser(senderKey);
-      } else {
-        emitTypingState(senderKey, ctx.peerKey, false);
-        pushSnapshotToUser(senderKey);
-      }
-
       const hydrated = hydrateMessage(stored, threadList);
       const wsEvent =
         ctx.kind === 'group'
           ? { type: 'dm:message', groupId: ctx.groupId, message: hydrated }
           : { type: 'dm:message', threadUsers: [senderKey, ctx.peerKey], message: hydrated };
 
+      // Push real-time DM event FIRST so recipients receive it & badge updates in <10ms.
       for (const participant of ctx.participants) {
         sendWsEventToUser(participant, wsEvent);
-        if (participant.toLowerCase() !== senderKey) {
-          pushSnapshotToUser(participant);
-        }
       }
+
+      if (ctx.kind === 'group') {
+        emitGroupTypingState(senderKey, ctx.groupId, false);
+      } else {
+        emitTypingState(senderKey, ctx.peerKey, false);
+      }
+
+      for (const participant of ctx.participants) {
+        pushSnapshotToUser(participant);
+      }
+
+      saveDb(db);
 
       sendJson(res, 200, {
         ok: true,
@@ -6575,20 +6715,22 @@ export function attachRedshiftWebSocket(httpServer) {
                   kind: call.kind,
                   groupId: call.groupId,
                   groupName: grp?.name,
-                  groupIconDataUrl: grp?.iconDataUrl || undefined,
+                  groupIconDataUrl: getGroupIconUrl(grp),
                   caller: toPublicProfile(callerAcc, otherKey),
                 });
               }
             }
           }
 
+          // Broadcast live VC state IMMEDIATELY so joining/ringing UI updates in <10ms
+          // before persisting/creating call log messages.
+          broadcastVcState(call);
+
           if (isNewCall) {
             createCallLogMessage(call);
           } else {
             syncCallLogMessage(call, call.everHadAnswer ? 'active' : 'ringing');
           }
-
-          broadcastVcState(call);
         } else if (msg && msg.type === 'vc:decline') {
           const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';
           const call = threadKey ? activeVoiceCalls.get(threadKey) : undefined;
@@ -6728,6 +6870,9 @@ export function attachRedshiftWebSocket(httpServer) {
     if (parsedUrl.pathname !== '/ws' && parsedUrl.pathname !== '/ws/screen-capture') {
       return;
     }
+
+    extractPublicOriginFromReq(req);
+    socket.setNoDelay?.(true);
 
     const token = parsedUrl.searchParams.get('token') ?? '';
     const username = db.sessions[token];

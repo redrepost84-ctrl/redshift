@@ -481,7 +481,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     const deaf = getEffectiveDeafened();
     const snap = options.getSnapshot();
     const hasUnmutedIncoming = Array.from(incomingCalls.keys()).some(
-      (k) => !isThreadMuted(snap, resolveUserThreadMuteKey(k)),
+      (k) => k !== activeCallThreadKey && !isThreadMuted(snap, resolveUserThreadMuteKey(k)),
     );
     if (hasUnmutedIncoming && !deaf) {
       if (activeRingMode !== 'incoming') {
@@ -2593,6 +2593,71 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       callQualityStats = { rttMs: null, packetLossPct: null, quality: 'connecting' };
     };
 
+    const seedOptimisticActiveCall = (
+      target: ThreadTarget,
+      threadKey: string,
+      incoming?: VcIncomingCallPayload,
+    ) => {
+      const snap = options.getSnapshot();
+      const selfUser = snap?.user;
+      if (!selfUser) {
+        return;
+      }
+      const selfKey = selfUser.username.toLowerCase();
+      const existing = callsByThread.get(threadKey);
+      const isGroupCall =
+        threadKey.startsWith('group:') ||
+        incoming?.kind === 'group' ||
+        (typeof target !== 'string' && Boolean(target.groupId));
+      const resolvedGroupId =
+        existing?.groupId ||
+        incoming?.groupId ||
+        (typeof target !== 'string' ? target.groupId : undefined) ||
+        (threadKey.startsWith('group:') ? threadKey.slice('group:'.length) : undefined);
+
+      const selfParticipant = {
+        user: {
+          username: selfUser.username,
+          displayName: selfUser.displayName,
+          bio: selfUser.bio,
+          createdAt: selfUser.createdAt,
+          status: selfUser.status === 'invisible' ? ('offline' as const) : selfUser.status,
+          avatarPreset: selfUser.avatarPreset,
+          avatarDataUrl: selfUser.avatarDataUrl,
+          bannerColor: selfUser.bannerColor,
+          bannerDataUrl: selfUser.bannerDataUrl,
+          customStatus: selfUser.customStatus,
+        },
+        muted: getEffectiveMuted(),
+        deafened: getEffectiveDeafened(),
+        cameraOn: Boolean(localCameraStream),
+        screenSharing: Boolean(localScreenStream),
+        screenPaused: Boolean(localScreenStream && localScreenPaused),
+        joinedAt: Date.now(),
+      };
+
+      const prevParticipants = existing?.participants ?? [];
+      const alreadyListed = prevParticipants.some(
+        (p) => p.user.username.toLowerCase() === selfKey,
+      );
+      const nextParticipants = alreadyListed
+        ? prevParticipants
+        : [...prevParticipants, selfParticipant];
+      const nextRinging = (existing?.ringing ?? []).filter(
+        (r) => r.username.toLowerCase() !== selfKey,
+      );
+
+      callsByThread.set(threadKey, {
+        threadKey,
+        kind: isGroupCall ? 'group' : 'dm',
+        groupId: resolvedGroupId,
+        startedBy: existing?.startedBy ?? incoming?.caller.username ?? selfUser.username,
+        active: true,
+        participants: nextParticipants,
+        ringing: nextRinging,
+      });
+    };
+
     const startOrJoinCall = (target: ThreadTarget, threadKey: string) => {
     refreshIceServers();
     ensureVadContext();
@@ -2600,12 +2665,16 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     if (activeCallThreadKey && activeCallThreadKey !== threadKey) {
       leaveCall();
     }
+    const pendingIncoming = incomingCalls.get(threadKey);
     incomingCalls.delete(threadKey);
     desktopNotifiedCalls.delete(threadKey);
     syncIncomingPopup();
 
     activeCallThreadKey = threadKey;
-    const isJoiningExisting = Boolean(callsByThread.get(threadKey)?.active);
+    const isJoiningExisting = Boolean(callsByThread.get(threadKey)?.active || pendingIncoming);
+    // Immediately populate optimistic VC state so the call topbar & sidebar voice bar render in 0ms
+    // even if joining from an inline GC call message before vc:state roundtrips.
+    seedOptimisticActiveCall(target, threadKey, pendingIncoming);
     void attachLocalMicIfNeeded();
     options
       .getSocket()
@@ -2620,7 +2689,9 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
   };
 
   const acceptIncomingCall = (threadKey: string) => {
+    refreshIceServers();
     ensureVadContext();
+    startCallStatsPolling();
     const incoming = incomingCalls.get(threadKey);
     incomingCalls.delete(threadKey);
     desktopNotifiedCalls.delete(threadKey);
@@ -2638,6 +2709,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       leaveCall();
     }
     activeCallThreadKey = threadKey;
+    seedOptimisticActiveCall(target, threadKey, incoming);
     void attachLocalMicIfNeeded();
     options
       .getSocket()
@@ -2872,6 +2944,14 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
 
   const handleVcIncoming = (payload: VcIncomingCallPayload) => {
     if (activeCallThreadKey === payload.threadKey) {
+      return;
+    }
+    const selfKey = options.getSnapshot()?.user.username.toLowerCase();
+    const existingCall = callsByThread.get(payload.threadKey);
+    if (
+      selfKey &&
+      existingCall?.participants.some((p) => p.user.username.toLowerCase() === selfKey)
+    ) {
       return;
     }
     incomingCalls.set(payload.threadKey, payload);

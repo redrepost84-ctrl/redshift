@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.12',
+      published_at: '2026-11-20T21:55:00Z',
+      body: 'Instant real-time DMs, notifications & calls: replaced 3.46 MB inline base64 snapshot payloads with immutable cached /api/media endpoints (282x smaller), prioritized WebSocket delivery before DB flush, added 0ms DM unread badges and 0ms optimistic VC topbar on join, and fixed delayed ringing after joining calls.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.12`,
+    },
+    {
       tag_name: 'v0.1.11',
       published_at: '2026-11-20T21:22:00Z',
       body: 'Add Friend now accepts @username (with leading @) and unique Display Names, and desktop clients are guarded against silently falling back to an empty local %AppData% database.',

@@ -350,6 +350,67 @@ function hydrateReactions(rawReactions) {
   return result;
 }
 
+const decodedMediaCache = new Map();
+
+function extractPublicOriginFromUrl(urlObj) {
+  const hostOnly = String(urlObj?.hostname || '').toLowerCase();
+  if (
+    !hostOnly ||
+    hostOnly === 'localhost' ||
+    hostOnly === '127.0.0.1' ||
+    hostOnly === '::1' ||
+    hostOnly === '[::1]'
+  ) {
+    return '';
+  }
+  return urlObj.origin;
+}
+
+function hashMediaDataUrl(dataUrl) {
+  return crypto.createHash('sha1').update(dataUrl).digest('hex').slice(0, 12);
+}
+
+function parseImageDataUrl(dataUrl) {
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+    return null;
+  }
+  const hash = hashMediaDataUrl(dataUrl);
+  const cached = decodedMediaCache.get(hash);
+  if (cached) {
+    return cached;
+  }
+  const commaIdx = dataUrl.indexOf(',');
+  if (commaIdx <= 0) return null;
+  const header = dataUrl.slice(5, commaIdx);
+  const isBase64 = /;base64$/i.test(header);
+  const mime = header.replace(/;base64$/i, '').split(';')[0].trim().toLowerCase() || 'image/png';
+  if (!mime.startsWith('image/') || mime === 'image/svg+xml') {
+    return null;
+  }
+  const rawPayload = dataUrl.slice(commaIdx + 1);
+  const buf = isBase64
+    ? Buffer.from(rawPayload, 'base64')
+    : Buffer.from(decodeURIComponent(rawPayload), 'utf8');
+  const entry = { mime, buf, hash };
+  if (decodedMediaCache.size > 300) {
+    decodedMediaCache.clear();
+  }
+  decodedMediaCache.set(hash, entry);
+  return entry;
+}
+
+function toCachedMediaUrl(kind, id, dataUrl, originPrefix = '') {
+  if (typeof dataUrl !== 'string' || !dataUrl.trim()) {
+    return undefined;
+  }
+  if (!dataUrl.startsWith('data:image/')) {
+    return dataUrl;
+  }
+  const hash = hashMediaDataUrl(dataUrl);
+  const rel = `/api/media/${kind}/${encodeURIComponent(id)}?v=${hash}`;
+  return originPrefix ? `${originPrefix}${rel}` : rel;
+}
+
 function toClientAttachment(meta) {
   return {
     id: meta.id,
@@ -426,6 +487,7 @@ export class RedshiftHub extends DurableObject {
     this.typingTimers = new Map();
     this.activeVoiceCalls = new Map();
     this.rateLimiter = createRateLimiter();
+    this.lastKnownPublicOrigin = '';
 
     // Answer {"type":"ping"} with {"type":"pong"} at the edge without even waking the Durable Object!
     try {
@@ -991,6 +1053,42 @@ export class RedshiftHub extends DurableObject {
     };
   }
 
+  getAccountAvatarUrl(account) {
+    if (!account || account.avatarPreset !== null || !account.avatarDataUrl) {
+      return undefined;
+    }
+    return toCachedMediaUrl(
+      'avatar',
+      account.username.toLowerCase(),
+      account.avatarDataUrl,
+      this.lastKnownPublicOrigin,
+    );
+  }
+
+  getAccountBannerUrl(account) {
+    if (!account || !account.bannerDataUrl) {
+      return undefined;
+    }
+    return toCachedMediaUrl(
+      'banner',
+      account.username.toLowerCase(),
+      account.bannerDataUrl,
+      this.lastKnownPublicOrigin,
+    );
+  }
+
+  getGroupIconUrl(group) {
+    if (!group || !group.iconDataUrl) {
+      return undefined;
+    }
+    return toCachedMediaUrl(
+      'group-icon',
+      group.id,
+      group.iconDataUrl,
+      this.lastKnownPublicOrigin,
+    );
+  }
+
   toPublicProfile(account, viewerUsername) {
     const isPrivate = Boolean(account.privacy?.privateProfile);
     const acceptsNonFriendDms = account.privacy?.allowNonFriendDms !== false;
@@ -1005,7 +1103,7 @@ export class RedshiftHub extends DurableObject {
         createdAt: isPrivate ? 0 : account.createdAt,
         status: 'offline',
         avatarPreset: account.avatarPreset,
-        avatarDataUrl: account.avatarPreset === null ? account.avatarDataUrl : undefined,
+        avatarDataUrl: this.getAccountAvatarUrl(account),
         bannerColor: undefined,
         bannerDataUrl: undefined,
         customStatus: null,
@@ -1021,9 +1119,9 @@ export class RedshiftHub extends DurableObject {
       createdAt: account.createdAt,
       status: this.getVisibleFriendStatus(account),
       avatarPreset: account.avatarPreset,
-      avatarDataUrl: account.avatarPreset === null ? account.avatarDataUrl : undefined,
+      avatarDataUrl: this.getAccountAvatarUrl(account),
       bannerColor: account.bannerColor || undefined,
-      bannerDataUrl: account.bannerDataUrl || undefined,
+      bannerDataUrl: this.getAccountBannerUrl(account),
       customStatus: this.getActiveCustomStatus(account),
       isProfilePrivate: false,
       isBlockedRelation: false,
@@ -1040,9 +1138,9 @@ export class RedshiftHub extends DurableObject {
       createdAt: account.createdAt,
       status: account.status ?? 'online',
       avatarPreset: account.avatarPreset,
-      avatarDataUrl: account.avatarPreset === null ? account.avatarDataUrl : undefined,
+      avatarDataUrl: this.getAccountAvatarUrl(account),
       bannerColor: account.bannerColor || undefined,
-      bannerDataUrl: account.bannerDataUrl || undefined,
+      bannerDataUrl: this.getAccountBannerUrl(account),
       customStatus: this.getActiveCustomStatus(account),
       privacy: {
         allowFriendRequests: account.privacy?.allowFriendRequests !== false,
@@ -1062,7 +1160,7 @@ export class RedshiftHub extends DurableObject {
     return {
       id: group.id,
       name: group.name,
-      iconDataUrl: group.iconDataUrl || undefined,
+      iconDataUrl: this.getGroupIconUrl(group),
       ownerUsername: group.ownerUsername,
       members,
       createdAt: group.createdAt,
@@ -1389,8 +1487,7 @@ export class RedshiftHub extends DurableObject {
         authorUsername: replyAuthor?.username ?? replyAuthorUsername,
         authorName: replyAuthor?.displayName ?? replyAuthorUsername,
         authorAvatarPreset: replyAuthor ? replyAuthor.avatarPreset : 0,
-        authorAvatarDataUrl:
-          replyAuthor && replyAuthor.avatarPreset === null ? replyAuthor.avatarDataUrl : undefined,
+        authorAvatarDataUrl: this.getAccountAvatarUrl(replyAuthor),
         content: refTarget ? refTarget.content : missing ? '' : (msg.replyTo.content ?? ''),
         hasImage: refTarget
           ? targetImages.length > 0
@@ -1477,8 +1574,7 @@ export class RedshiftHub extends DurableObject {
       authorUsername: author?.username ?? msg.authorUsername,
       authorName: author?.displayName ?? msg.authorUsername,
       authorAvatarPreset: author ? author.avatarPreset : 0,
-      authorAvatarDataUrl:
-        author && author.avatarPreset === null ? author.avatarDataUrl : undefined,
+      authorAvatarDataUrl: this.getAccountAvatarUrl(author),
       content: msg.content,
       imageDataUrl: imageDataUrls[0],
       imageDataUrls: imageDataUrls.length > 0 ? imageDataUrls : undefined,
@@ -1545,9 +1641,22 @@ export class RedshiftHub extends DurableObject {
   }
 
   emitCallThreadEvent(call, eventType, storedMsg, threadList) {
+    const hydrated = this.hydrateMessage(storedMsg, threadList);
+    const wsEvent =
+      call.kind === 'group'
+        ? { type: eventType, groupId: call.groupId, message: hydrated }
+        : {
+            type: eventType,
+            threadUsers: call.allowedUsers.slice(0, 2),
+            message: hydrated,
+          };
+    const recipients = Array.from(this.getCallRecipients(call));
+    // Push call log message over WebSocket FIRST so clients see it instantaneously.
+    for (const targetKey of recipients) {
+      this.sendWsEventToUser(targetKey, wsEvent);
+    }
     if (eventType === 'dm:message') {
       const callTs = storedMsg.timestamp || Date.now();
-      const recipients = Array.from(this.getCallRecipients(call));
       for (const recipient of recipients) {
         const cleanRecipient = recipient.toLowerCase();
         if (call.kind === 'group' && call.groupId) {
@@ -1563,22 +1672,10 @@ export class RedshiftHub extends DurableObject {
           }
         }
       }
-      this.saveDb();
       for (const recipient of recipients) {
         this.pushSnapshotToUser(recipient);
       }
-    }
-    const hydrated = this.hydrateMessage(storedMsg, threadList);
-    const wsEvent =
-      call.kind === 'group'
-        ? { type: eventType, groupId: call.groupId, message: hydrated }
-        : {
-            type: eventType,
-            threadUsers: call.allowedUsers.slice(0, 2),
-            message: hydrated,
-          };
-    for (const targetKey of this.getCallRecipients(call)) {
-      this.sendWsEventToUser(targetKey, wsEvent);
+      this.saveDb();
     }
   }
 
@@ -1611,7 +1708,6 @@ export class RedshiftHub extends DurableObject {
       this.recordOpenDmPeer(call.allowedUsers[0], call.allowedUsers[1]);
       this.recordOpenDmPeer(call.allowedUsers[1], call.allowedUsers[0]);
     }
-    this.saveDb();
     this.emitCallThreadEvent(call, 'dm:message', stored, threadList);
   }
 
@@ -1762,7 +1858,7 @@ export class RedshiftHub extends DurableObject {
             kind: call.kind,
             groupId: call.groupId,
             groupName: grp?.name,
-            groupIconDataUrl: grp?.iconDataUrl || undefined,
+            groupIconDataUrl: this.getGroupIconUrl(grp),
             caller: this.toPublicProfile(callerAcc, cleanKey),
           });
         }
@@ -2636,12 +2732,15 @@ export class RedshiftHub extends DurableObject {
               kind: call.kind,
               groupId: call.groupId,
               groupName: grp?.name,
-              groupIconDataUrl: grp?.iconDataUrl || undefined,
+              groupIconDataUrl: this.getGroupIconUrl(grp),
               caller: this.toPublicProfile(callerAcc, otherKey),
             });
           }
         }
       }
+
+      // Broadcast live VC state IMMEDIATELY so joining/ringing UI updates in <10ms.
+      this.broadcastVcState(call);
 
       if (isNewCall) {
         this.createCallLogMessage(call);
@@ -2649,7 +2748,6 @@ export class RedshiftHub extends DurableObject {
         this.syncCallLogMessage(call, call.everHadAnswer ? 'active' : 'ringing');
       }
       this.persistActiveVoiceCalls();
-      this.broadcastVcState(call);
       return;
     }
 
@@ -2810,6 +2908,10 @@ export class RedshiftHub extends DurableObject {
     const urlObj = new URL(request.url);
     const reqPath = urlObj.pathname;
     const method = request.method;
+    const pubOrigin = extractPublicOriginFromUrl(urlObj);
+    if (pubOrigin) {
+      this.lastKnownPublicOrigin = pubOrigin;
+    }
 
     // WebSocket Upgrade
     if (reqPath === '/ws' && request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
@@ -2819,6 +2921,48 @@ export class RedshiftHub extends DurableObject {
     // CORS Preflight
     if (method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: buildCorsHeaders(request) });
+    }
+
+    // Content-hashed cached binary endpoints for user avatars, banners, and group icons
+    if ((method === 'GET' || method === 'HEAD') && reqPath.startsWith('/api/media/')) {
+      const rest = reqPath.slice('/api/media/'.length);
+      const slashIdx = rest.indexOf('/');
+      const kind = slashIdx > 0 ? rest.slice(0, slashIdx) : '';
+      const rawId = slashIdx > 0 ? rest.slice(slashIdx + 1).split('/')[0] : '';
+      let targetId = '';
+      try {
+        targetId = decodeURIComponent(rawId);
+      } catch {
+        targetId = rawId;
+      }
+      let rawDataUrl;
+      if (kind === 'avatar' && targetId) {
+        const acc = this.findAccountByUsername(targetId);
+        rawDataUrl = acc && acc.avatarPreset === null ? acc.avatarDataUrl : undefined;
+      } else if (kind === 'banner' && targetId) {
+        const acc = this.findAccountByUsername(targetId);
+        rawDataUrl = acc?.bannerDataUrl;
+      } else if (kind === 'group-icon' && targetId) {
+        const grp = this.db.groupDms[targetId];
+        rawDataUrl = grp?.iconDataUrl;
+      }
+      const parsed = rawDataUrl ? parseImageDataUrl(rawDataUrl) : null;
+      if (!parsed) {
+        return new Response(null, {
+          status: 404,
+          headers: { ...buildCorsHeaders(request), 'Cache-Control': 'no-store' },
+        });
+      }
+      const headers = {
+        ...buildCorsHeaders(request),
+        'Content-Type': parsed.mime,
+        'Content-Length': String(parsed.buf.length),
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'Cross-Origin-Resource-Policy': 'cross-origin',
+        'X-Content-Type-Options': 'nosniff',
+        ETag: `"${parsed.hash}"`,
+      };
+      return new Response(method === 'HEAD' ? null : parsed.buf, { status: 200, headers });
     }
 
     // Root Landing Status
@@ -3474,12 +3618,14 @@ export class RedshiftHub extends DurableObject {
         typeof body.avatarPreset === 'number' && body.avatarPreset >= 0 && body.avatarPreset <= 3
           ? body.avatarPreset
           : null;
-      const avatarDataUrl =
-        avatarPreset === null &&
-        typeof body.avatarDataUrl === 'string' &&
-        body.avatarDataUrl.startsWith('data:image/')
-          ? body.avatarDataUrl
-          : undefined;
+      let avatarDataUrl;
+      if (avatarPreset === null && typeof body.avatarDataUrl === 'string') {
+        if (body.avatarDataUrl.startsWith('data:image/')) {
+          avatarDataUrl = body.avatarDataUrl;
+        } else if (body.avatarDataUrl.includes('/api/media/avatar/')) {
+          avatarDataUrl = activeUser.avatarDataUrl;
+        }
+      }
 
       if (Object.prototype.hasOwnProperty.call(body, 'bannerColor')) {
         if (body.bannerColor === null || body.bannerColor === '') {
@@ -3494,6 +3640,11 @@ export class RedshiftHub extends DurableObject {
       if (Object.prototype.hasOwnProperty.call(body, 'bannerDataUrl')) {
         if (body.bannerDataUrl === null || body.bannerDataUrl === '') {
           activeUser.bannerDataUrl = undefined;
+        } else if (
+          typeof body.bannerDataUrl === 'string' &&
+          body.bannerDataUrl.includes('/api/media/banner/')
+        ) {
+          // Keep existing stored banner unchanged.
         } else if (typeof body.bannerDataUrl === 'string' && body.bannerDataUrl.startsWith('data:image/')) {
           if (body.bannerDataUrl.length > MAX_BANNER_IMAGE_CHARS) {
             return jsonResponse(request, 413, { ok: false, error: 'Error: Banner image is too large' });
@@ -3623,7 +3774,7 @@ export class RedshiftHub extends DurableObject {
           mutualGroups.push({
             id: grp.id,
             name: grp.name,
-            iconDataUrl: grp.iconDataUrl || undefined,
+            iconDataUrl: this.getGroupIconUrl(grp),
             memberCount: lowerMembers.length,
           });
         }
@@ -3904,7 +4055,7 @@ export class RedshiftHub extends DurableObject {
             actor: this.toPublicProfile(activeUser, m),
             groupId: id,
             groupName: created.name,
-            groupIconDataUrl: created.iconDataUrl,
+            groupIconDataUrl: this.getGroupIconUrl(created),
             timestamp: createdAt,
           });
         }
@@ -3932,6 +4083,11 @@ export class RedshiftHub extends DurableObject {
       if (Object.prototype.hasOwnProperty.call(body, 'iconDataUrl')) {
         if (body.iconDataUrl === null || body.iconDataUrl === '') {
           group.iconDataUrl = undefined;
+        } else if (
+          typeof body.iconDataUrl === 'string' &&
+          body.iconDataUrl.includes('/api/media/group-icon/')
+        ) {
+          // Keep existing stored group icon unchanged.
         } else if (typeof body.iconDataUrl === 'string' && body.iconDataUrl.startsWith('data:image/')) {
           if (body.iconDataUrl.length > MAX_BANNER_IMAGE_CHARS) {
             return jsonResponse(request, 413, { ok: false, error: 'Error: Group icon image is too large' });
@@ -4000,7 +4156,7 @@ export class RedshiftHub extends DurableObject {
             actor: this.toPublicProfile(activeUser, addedKey),
             groupId,
             groupName: group.name,
-            groupIconDataUrl: group.iconDataUrl,
+            groupIconDataUrl: this.getGroupIconUrl(group),
             timestamp: now,
           });
         }
@@ -4081,7 +4237,7 @@ export class RedshiftHub extends DurableObject {
         actor: this.toPublicProfile(activeUser, targetKey),
         groupId,
         groupName: group.name,
-        groupIconDataUrl: group.iconDataUrl,
+        groupIconDataUrl: this.getGroupIconUrl(group),
         timestamp: Date.now(),
       });
 
@@ -4881,27 +5037,28 @@ export class RedshiftHub extends DurableObject {
         this.touchThreadActivityForUser(ctx.peerKey, `dm:${selfKey}`, msgNow, { unhide: true });
       }
 
-      this.saveDb();
-
-      if (ctx.kind === 'group') {
-        this.emitGroupTypingState(selfKey, ctx.groupId, false);
-        this.pushSnapshotToUser(selfKey);
-      } else {
-        this.emitTypingState(selfKey, ctx.peerKey, false);
-        this.pushSnapshotToUser(selfKey);
-      }
-
       const hydrated = this.hydrateMessage(stored, threadList);
       const wsEvent =
         ctx.kind === 'group'
           ? { type: 'dm:message', groupId: ctx.groupId, message: hydrated }
           : { type: 'dm:message', threadUsers: [selfKey, ctx.peerKey], message: hydrated };
+
+      // Push real-time DM event FIRST so recipients receive it & badge updates in <10ms.
       for (const participant of ctx.participants) {
         this.sendWsEventToUser(participant, wsEvent);
-        if (participant.toLowerCase() !== selfKey) {
-          this.pushSnapshotToUser(participant);
-        }
       }
+
+      if (ctx.kind === 'group') {
+        this.emitGroupTypingState(selfKey, ctx.groupId, false);
+      } else {
+        this.emitTypingState(selfKey, ctx.peerKey, false);
+      }
+
+      for (const participant of ctx.participants) {
+        this.pushSnapshotToUser(participant);
+      }
+
+      this.saveDb();
       return jsonResponse(request, 200, { ok: true, message: hydrated });
     }
 
