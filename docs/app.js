@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.9',
+      published_at: '2026-11-20T00:25:00Z',
+      body: 'Protected accounts from empty local fallback tunnels after PC sleep/idle and added an automatic self-healing Cloudflare tunnel watchdog to keep the worldwide server reachable continuously.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.9`,
+    },
+    {
       tag_name: 'v0.1.8',
       published_at: '2026-11-19T09:46:00Z',
       body: 'Overhauled the Windows auto-updater swapper with a verified detached worker so patches apply and relaunch reliably every time, and rebuilt the official v0.1.8 RedshiftSetup.exe one-click installer.',

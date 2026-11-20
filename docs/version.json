@@ -1,11 +1,11 @@
 {
-  "version": "0.1.8",
-  "releasedAt": "2026-11-19T09:45:30.668Z",
-  "changelog": "Fixed auto-updater closing without applying patch or relaunching (replaced detached PowerShell with verified detached cmd.exe worker) and rebuilt v0.1.8 RedshiftSetup.exe",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.8/Redshift-patch.asar",
-  "sha256": "7d135370906ff3ed10a488329342308e97c27f15aafab0ac15c9a71d8522c324",
-  "size": 8755705,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.8/RedshiftSetup.exe",
+  "version": "0.1.9",
+  "releasedAt": "2026-11-20T00:28:47.070Z",
+  "changelog": "Self-healing Cloudflare tunnel watchdog after PC sleep/idle & prevented desktop app from falling back onto empty local AppData database",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.9/Redshift-patch.asar",
+  "sha256": "ff0f4d207b49431fa36094181326dd583a6499e3c923077bbd5025e00db6bbb8",
+  "size": 6260582,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.9/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

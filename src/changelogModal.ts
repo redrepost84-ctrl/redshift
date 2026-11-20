@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.8';
+export const CURRENT_REDSHIFT_VERSION = '0.1.9';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,23 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.9',
+    date: 'November 19, 2026',
+    kicker: 'ONLINE SERVER PROTECTION & AUTO-HEALING',
+    headline: 'Self-Healing Worldwide Tunnel & Account Database Safeguard',
+    lead:
+      'Prevented the desktop app from ever falling back onto an empty local database when the worldwide tunnel expires after sleep, and upgraded the worldwide host daemon with automatic 45-second tunnel health recovery.',
+    sections: [
+      {
+        heading: 'Reliability & Safeguards',
+        items: [
+          'Protected Accounts From Empty Embedded Fallback — The desktop app will never spin up a fallback tunnel against an empty %AppData% database; it only ever connects to or tunnels the real worldwide server database.',
+          'Auto-Healing Worldwide Tunnel Watchdog — The host server now checks live tunnel health every 45 seconds and automatically restores a fresh public endpoint after sleep or network changes with zero data loss.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.8',
     date: 'November 19, 2026',

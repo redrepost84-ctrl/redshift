@@ -250,15 +250,22 @@ async function main() {
   reloadWatchTimer.unref();
 
   let tunnelProc = null;
+  let activePublicUrl = '';
+  let tunnelConsecutiveFails = 0;
+  let tunnelRestarting = false;
   const noTunnel = process.argv.includes('--no-tunnel');
   const cfBin = noTunnel ? null : await ensureCloudflared();
 
-  if (cfBin) {
+  function startTunnel() {
+    if (!cfBin || isShuttingDown) return;
+    tunnelRestarting = false;
+    tunnelConsecutiveFails = 0;
     console.log('[Host] Starting Cloudflare Quick Tunnel for worldwide HTTPS/WSS access...');
-    tunnelProc = spawn(cfBin, ['tunnel', '--url', `http://127.0.0.1:${PORT}`], {
+    const proc = spawn(cfBin, ['tunnel', '--url', `http://127.0.0.1:${PORT}`], {
       cwd: rootDir,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    tunnelProc = proc;
 
     let printedUrl = false;
     const handleTunnelOutput = (chunk) => {
@@ -267,6 +274,8 @@ async function main() {
       if (match && !printedUrl) {
         printedUrl = true;
         const publicUrl = match[0];
+        activePublicUrl = publicUrl;
+        tunnelConsecutiveFails = 0;
         console.log('\n====================================================');
         console.log('  WORLDWIDE PUBLIC SERVER URL READY:');
         console.log(`  ${publicUrl}`);
@@ -280,13 +289,64 @@ async function main() {
         });
       }
     };
-    tunnelProc.stdout.on('data', handleTunnelOutput);
-    tunnelProc.stderr.on('data', handleTunnelOutput);
+    proc.stdout.on('data', handleTunnelOutput);
+    proc.stderr.on('data', handleTunnelOutput);
+    proc.on('exit', (code) => {
+      if (isShuttingDown || tunnelProc !== proc) return;
+      tunnelProc = null;
+      activePublicUrl = '';
+      console.warn(`[Host] Cloudflare tunnel exited (code ${code}); auto-restarting in 2s...`);
+      setTimeout(startTunnel, 2000);
+    });
   }
+
+  startTunnel();
+
+  // Auto-healing tunnel watchdog: detects expired/dead quick tunnels (e.g. after PC sleep/wake)
+  // and restarts ONLY cloudflared while keeping server.js and all user data untouched.
+  const tunnelWatchdogTimer = setInterval(async () => {
+    if (isShuttingDown || !cfBin || tunnelRestarting || !activePublicUrl) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    let healthy = false;
+    try {
+      const r = await fetch(`${activePublicUrl}/api/health`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      healthy = r.ok;
+    } catch (_) {
+      healthy = false;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (healthy) {
+      tunnelConsecutiveFails = 0;
+      return;
+    }
+
+    tunnelConsecutiveFails += 1;
+    if (tunnelConsecutiveFails >= 2) {
+      tunnelRestarting = true;
+      console.warn(
+        `[Host] Live tunnel ${activePublicUrl} stopped responding (likely expired after sleep); auto-restarting tunnel...`,
+      );
+      const oldProc = tunnelProc;
+      tunnelProc = null;
+      activePublicUrl = '';
+      if (oldProc) {
+        try { oldProc.kill(); } catch (_) {}
+      }
+      setTimeout(startTunnel, 1200);
+    }
+  }, 45_000);
+  tunnelWatchdogTimer.unref();
 
   function shutdown() {
     isShuttingDown = true;
     clearInterval(reloadWatchTimer);
+    clearInterval(tunnelWatchdogTimer);
     if (tunnelProc) {
       try { tunnelProc.kill(); } catch (_) {}
     }

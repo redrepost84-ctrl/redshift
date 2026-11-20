@@ -415,7 +415,13 @@ async function ensureWorldwideHostTunnelIfNeeded(localPort) {
     }
   } catch (_) {}
 
-  // 2. If offline and this machine is the host (has GitHub credential), auto-start Cloudflare Tunnel in background
+  // 2. Only auto-host a fallback tunnel if the real main Redshift server (port 8080) is running locally.
+  // Never expose or publish an empty per-user embedded %AppData% database over the worldwide server directory!
+  const mainServerAlive = await probeHttpUrl('http://127.0.0.1:8080/api/health', 1800);
+  if (!mainServerAlive) {
+    return;
+  }
+
   const token = await readHostGitHubTokenAsync();
   if (!token) return;
 
@@ -444,7 +450,7 @@ async function ensureWorldwideHostTunnelIfNeeded(localPort) {
   }
   if (!cfBin) return;
 
-  backgroundTunnelProc = spawn(cfBin, ['tunnel', '--url', `http://127.0.0.1:${localPort}`], {
+  backgroundTunnelProc = spawn(cfBin, ['tunnel', '--url', 'http://127.0.0.1:8080'], {
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
