@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.9';
+export const CURRENT_REDSHIFT_VERSION = '0.1.10';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,24 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.10',
+    date: 'November 19, 2026',
+    kicker: 'CHAT SCROLL & NOTIFICATION FIX',
+    headline: 'Eliminated Ghost Unread Badges & Random Scroll-Up Jumps When Switching DMs',
+    lead:
+      'Fixed unread notifications reappearing for messages you already read after switching to another DM, and fixed chats randomly opening scrolled up to the top instead of staying pinned at the latest message.',
+    sections: [
+      {
+        heading: 'Bug Fixes',
+        items: [
+          'Fixed Ghost Unread Badges After Switching Chats — Replaced the single-thread 900ms read guard with per-thread read tracking, in-flight ACK protection, and automatic read clearing when scrolling to the bottom or switching away so background snapshot polls can never resurrect badges for messages you already read.',
+          'Fixed Chats Randomly Opening Scrolled Up — Initial scroll positioning now always waits until the message list is mounted and measured in the DOM before positioning the unread divider or pinning to the bottom, preventing cached threads from getting stuck at scrollTop 0.',
+          'Prevented Duplicate Notifications — Replayed or already-seen message IDs no longer re-trigger notification chimes or badges.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.9',
     date: 'November 19, 2026',

@@ -8,3 +8,5 @@ dist
 server/data/
 publishedbuilds/
 scripts/cloudflared.exe
+.wrangler/
+cloudflare/.wrangler/

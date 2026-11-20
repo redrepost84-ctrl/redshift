@@ -190,8 +190,14 @@ let inflightTunnelRediscovery: Promise<string | null> | null = null;
 let lastTunnelRediscoveryAt = 0;
 const TUNNEL_REDISCOVERY_COOLDOWN_MS = 12_000;
 
+function isAutoDiscoverableRemoteUrl(rawUrl: string): boolean {
+  if (!rawUrl || hasManualServerOverride()) return false;
+  if (!/^https:\/\//i.test(rawUrl)) return false;
+  return !/^https:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(rawUrl);
+}
+
 async function tryRediscoverDeadTunnel(failedBaseUrl: string): Promise<boolean> {
-  if (!failedBaseUrl || !failedBaseUrl.includes('trycloudflare.com')) {
+  if (!isAutoDiscoverableRemoteUrl(failedBaseUrl)) {
     return false;
   }
   if (apiServerBaseUrl && apiServerBaseUrl !== failedBaseUrl) {
@@ -224,7 +230,7 @@ async function fetchWithTunnelRecovery(
   const baseBefore = apiServerBaseUrl;
   try {
     const res = await fetch(resolveApiUrl(pathOrUrl), init);
-    if (isDeadTunnelStatus(res.status) && baseBefore.includes('trycloudflare.com')) {
+    if (isDeadTunnelStatus(res.status) && isAutoDiscoverableRemoteUrl(baseBefore)) {
       const switched = await tryRediscoverDeadTunnel(baseBefore);
       if (switched) {
         return await fetch(resolveApiUrl(pathOrUrl), init);
@@ -233,7 +239,7 @@ async function fetchWithTunnelRecovery(
     return res;
   } catch (err) {
     const isAbort = err instanceof Error && err.name === 'AbortError';
-    if (!isAbort && baseBefore.includes('trycloudflare.com')) {
+    if (!isAbort && isAutoDiscoverableRemoteUrl(baseBefore)) {
       const switched = await tryRediscoverDeadTunnel(baseBefore);
       if (switched) {
         return await fetch(resolveApiUrl(pathOrUrl), init);
@@ -1882,7 +1888,7 @@ export function connectSocialSocket(handlers: {
       consecutiveFailures += 1;
       handlers.onClose?.();
       if (!closedByCaller && sessionToken) {
-        if (consecutiveFailures >= 1 && apiServerBaseUrl.includes('trycloudflare.com')) {
+        if (consecutiveFailures >= 1 && isAutoDiscoverableRemoteUrl(apiServerBaseUrl)) {
           void tryRediscoverDeadTunnel(apiServerBaseUrl).finally(() => {
             if (!closedByCaller && sessionToken) {
               reconnectTimer = window.setTimeout(connect, 1000);

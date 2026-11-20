@@ -1733,6 +1733,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   let activeDmNotifyPeerMessage:
     | ((msg: ChatMessage, wasVisible: boolean) => void)
     | null = null;
+  let activeDmIsAtBottom: (() => boolean) | null = null;
   let activeFriendsHandle: FriendsPanelHandle | null = null;
   let dmLoadSeq = 0;
 
@@ -1814,7 +1815,23 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     string,
     Map<string, { displayName: string; timerId: number }>
   >();
-  let suppressUnread: { kind: 'dm' | 'group'; id: string; until: number } | null = null;
+  const suppressedUnreadByThread = new Map<string, number>();
+  const pendingMarkReadInFlight = new Map<string, number>();
+  const lastAutoMarkReadAt = new Map<string, number>();
+
+  const isThreadUnreadSuppressed = (cacheKey: string, now = Date.now()): boolean => {
+    if ((pendingMarkReadInFlight.get(cacheKey) ?? 0) > 0) {
+      return true;
+    }
+    const until = suppressedUnreadByThread.get(cacheKey);
+    if (until !== undefined) {
+      if (now < until) {
+        return true;
+      }
+      suppressedUnreadByThread.delete(cacheKey);
+    }
+    return false;
+  };
 
   const upsertDmMessage = (cacheKey: string, msg: ChatMessage) => {
     const list = dmMessagesByThread.get(cacheKey) ?? [];
@@ -2273,13 +2290,42 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     getDesktopBridge()?.setUnreadCount(alertTotal);
   };
 
-  const markThreadAsRead = (target: { kind: 'dm'; id: string } | { kind: 'group'; id: string }) => {
+  const markThreadAsRead = (
+    target: { kind: 'dm'; id: string } | { kind: 'group'; id: string },
+    retryAttempt = 0,
+  ) => {
     const cleanId = target.kind === 'dm' ? target.id.toLowerCase() : target.id;
     const snap = state.snapshot;
     if (!snap) {
       return;
     }
-    suppressUnread = { kind: target.kind, id: cleanId, until: Date.now() + 900 };
+    const cacheKey =
+      target.kind === 'group' ? groupThreadCacheKey(cleanId) : dmThreadCacheKey(cleanId);
+    const now = Date.now();
+    suppressedUnreadByThread.set(cacheKey, now + 4500);
+    pendingMarkReadInFlight.set(cacheKey, (pendingMarkReadInFlight.get(cacheKey) ?? 0) + 1);
+    lastAutoMarkReadAt.set(cacheKey, now);
+
+    const finalizeInFlight = (ok: boolean) => {
+      const nextCount = Math.max(0, (pendingMarkReadInFlight.get(cacheKey) ?? 1) - 1);
+      if (nextCount === 0) {
+        pendingMarkReadInFlight.delete(cacheKey);
+      } else {
+        pendingMarkReadInFlight.set(cacheKey, nextCount);
+      }
+      if (ok) {
+        // Keep short post-ACK grace window so an already-in-flight 5s snapshot poll cannot resurrect this badge.
+        const currentUntil = suppressedUnreadByThread.get(cacheKey) ?? 0;
+        suppressedUnreadByThread.set(cacheKey, Math.max(currentUntil, Date.now() + 2500));
+      } else if (retryAttempt < 1 && !workspaceDestroyed) {
+        window.setTimeout(() => {
+          if (!workspaceDestroyed && state.snapshot) {
+            markThreadAsRead(target, retryAttempt + 1);
+          }
+        }, 1200);
+      }
+    };
+
     if (target.kind === 'group') {
       let clearedAny = false;
       if (snap.groupUnreadCounts && snap.groupUnreadCounts[cleanId]) {
@@ -2294,10 +2340,20 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         syncSidebarNavAndDms();
       }
       void apiMarkDmRead({ groupId: cleanId }).then((res) => {
-        if (res.ok && res.snapshot && state.snapshot) {
-          state.snapshot.groupUnreadCounts = res.snapshot.groupUnreadCounts;
-          state.snapshot.groupUnreadMentions = res.snapshot.groupUnreadMentions;
-          syncSidebarNavAndDms();
+        finalizeInFlight(res.ok);
+        if (res.ok && state.snapshot) {
+          let changed = false;
+          if (state.snapshot.groupUnreadCounts?.[cleanId]) {
+            delete state.snapshot.groupUnreadCounts[cleanId];
+            changed = true;
+          }
+          if (state.snapshot.groupUnreadMentions?.[cleanId]) {
+            delete state.snapshot.groupUnreadMentions[cleanId];
+            changed = true;
+          }
+          if (changed) {
+            syncSidebarNavAndDms();
+          }
         }
       });
     } else {
@@ -2314,10 +2370,20 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         syncSidebarNavAndDms();
       }
       void apiMarkDmRead({ peerUsername: cleanId }).then((res) => {
-        if (res.ok && res.snapshot && state.snapshot) {
-          state.snapshot.unreadCounts = res.snapshot.unreadCounts;
-          state.snapshot.unreadMentions = res.snapshot.unreadMentions;
-          syncSidebarNavAndDms();
+        finalizeInFlight(res.ok);
+        if (res.ok && state.snapshot) {
+          let changed = false;
+          if (state.snapshot.unreadCounts?.[cleanId]) {
+            delete state.snapshot.unreadCounts[cleanId];
+            changed = true;
+          }
+          if (state.snapshot.unreadMentions?.[cleanId]) {
+            delete state.snapshot.unreadMentions[cleanId];
+            changed = true;
+          }
+          if (changed) {
+            syncSidebarNavAndDms();
+          }
         }
       });
     }
@@ -3579,14 +3645,72 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     let pinnedToBottom = savedThreadScroll ? savedThreadScroll.atBottom : true;
     let programmaticScrollUntil = 0;
 
+    const isAtBottomNow = (): boolean => {
+      if (!chatMessages.isConnected || chatMessages.clientHeight <= 0) {
+        return pinnedToBottom;
+      }
+      return chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight <= 64;
+    };
+
+    const hasUnreadOnThisThread = (): boolean => {
+      const snap = state.snapshot;
+      if (!snap) return false;
+      if (isGroup) {
+        return (
+          (snap.groupUnreadCounts?.[groupId] ?? 0) > 0 ||
+          (snap.groupUnreadMentions?.[groupId] ?? 0) > 0
+        );
+      }
+      return (
+        (snap.unreadCounts?.[peerKey] ?? 0) > 0 || (snap.unreadMentions?.[peerKey] ?? 0) > 0
+      );
+    };
+
     const scrollToBottomPinned = () => {
       pinnedToBottom = true;
-      const gap = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight;
-      if (gap > 1) {
-        programmaticScrollUntil = Date.now() + 80;
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+      if (chatMessages.isConnected && chatMessages.clientHeight > 0) {
+        const gap = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight;
+        if (gap > 1) {
+          programmaticScrollUntil = Date.now() + 80;
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        dmScrollStateByThread.set(cacheKey, { atBottom: true, scrollTop: chatMessages.scrollTop });
+      } else {
+        dmScrollStateByThread.set(cacheKey, { atBottom: true, scrollTop: 0 });
       }
-      dmScrollStateByThread.set(cacheKey, { atBottom: true, scrollTop: chatMessages.scrollTop });
+    };
+
+    activeDmIsAtBottom = () => pinnedToBottom || isAtBottomNow();
+
+    const applyInitialScrollPosition = () => {
+      if (!chatMessages.isConnected || chatMessages.clientHeight <= 0) {
+        return;
+      }
+      initialScrollApplied = true;
+      const dividerEl = messageList.querySelector('.dm-unread-divider') as HTMLElement | null;
+      if (dividerEl) {
+        pinnedToBottom = false;
+        programmaticScrollUntil = Date.now() + 100;
+        const maxTop = Math.max(0, chatMessages.scrollHeight - chatMessages.clientHeight);
+        const targetTop = Math.max(0, Math.min(maxTop, dividerEl.offsetTop - 96));
+        chatMessages.scrollTop = targetTop;
+        const atBot =
+          chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight <= 64;
+        pinnedToBottom = atBot;
+        dmScrollStateByThread.set(cacheKey, { atBottom: atBot, scrollTop: chatMessages.scrollTop });
+      } else if (savedThreadScroll && !savedThreadScroll.atBottom) {
+        pinnedToBottom = false;
+        programmaticScrollUntil = Date.now() + 100;
+        const maxTop = Math.max(0, chatMessages.scrollHeight - chatMessages.clientHeight);
+        const targetTop = Math.max(0, Math.min(maxTop, savedThreadScroll.scrollTop));
+        chatMessages.scrollTop = targetTop;
+        const atBot =
+          chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight <= 64;
+        pinnedToBottom = atBot;
+        dmScrollStateByThread.set(cacheKey, { atBottom: atBot, scrollTop: chatMessages.scrollTop });
+      } else {
+        scrollToBottomPinned();
+      }
     };
 
     const syncHistoryBanner = () => {
@@ -3774,11 +3898,14 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       if (initialScrollApplied && !loadingOlderMessages && Date.now() > programmaticScrollUntil) {
         const distFromBottom =
           chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight;
-        pinnedToBottom = distFromBottom <= 40;
+        pinnedToBottom = distFromBottom <= 64;
         dmScrollStateByThread.set(cacheKey, {
           atBottom: pinnedToBottom,
           scrollTop: chatMessages.scrollTop,
         });
+        if (pinnedToBottom && hasUnreadOnThisThread()) {
+          markThreadAsRead(readTarget);
+        }
       }
       if (chatMessages.scrollTop <= 96 && historyLoaded && dmHasMoreByThread.get(cacheKey)) {
         void loadOlderMessagesPage();
@@ -3792,6 +3919,9 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       dmScrollStateByThread.set(cacheKey, { atBottom: true, scrollTop: chatMessages.scrollHeight });
       programmaticScrollUntil = Date.now() + 350;
       chatMessages.scrollTo({ top: chatMessages.scrollHeight, behavior: 'smooth' });
+      if (hasUnreadOnThisThread()) {
+        markThreadAsRead(readTarget);
+      }
       syncJumpBar();
       chatInput.focus();
     });
@@ -4393,23 +4523,9 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         }
       }
 
-      if (historyLoaded && !initialScrollApplied) {
-        initialScrollApplied = true;
-        const dividerEl = messageList.querySelector('.dm-unread-divider') as HTMLElement | null;
-        if (dividerEl) {
-          pinnedToBottom = false;
-          programmaticScrollUntil = Date.now() + 80;
-          const maxTop = Math.max(0, chatMessages.scrollHeight - chatMessages.clientHeight);
-          chatMessages.scrollTop = Math.max(0, Math.min(maxTop, dividerEl.offsetTop - 96));
-        } else if (savedThreadScroll && !savedThreadScroll.atBottom) {
-          pinnedToBottom = false;
-          programmaticScrollUntil = Date.now() + 80;
-          const maxTop = Math.max(0, chatMessages.scrollHeight - chatMessages.clientHeight);
-          chatMessages.scrollTop = Math.max(0, Math.min(maxTop, savedThreadScroll.scrollTop));
-        } else {
-          scrollToBottomPinned();
-        }
-      } else if (!skipBottomScrollOnce && (wasAtBottom || pinnedToBottom) && !editingMessageId) {
+      if (historyLoaded && !initialScrollApplied && chatMessages.isConnected && chatMessages.clientHeight > 0) {
+        applyInitialScrollPosition();
+      } else if (!skipBottomScrollOnce && (wasAtBottom || pinnedToBottom) && !editingMessageId && chatMessages.isConnected) {
         scrollToBottomPinned();
       }
       skipBottomScrollOnce = false;
@@ -4840,7 +4956,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
           voiceNote: result.meta,
           replyTo: replyRef,
         });
-        chatMessages.scrollTop = chatMessages.scrollHeight;
+        scrollToBottomPinned();
         syncJumpBar();
       } finally {
         voiceRecBusy = false;
@@ -5091,7 +5207,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         gif,
         replyTo: replyRef,
       });
-      chatMessages.scrollTop = chatMessages.scrollHeight;
+      scrollToBottomPinned();
       syncJumpBar();
       chatInput.focus();
     };
@@ -5281,6 +5397,16 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     });
 
     activeDmCleanup = () => {
+      if (chatMessages.isConnected && chatMessages.clientHeight > 0 && initialScrollApplied) {
+        const atBot = pinnedToBottom || isAtBottomNow();
+        dmScrollStateByThread.set(cacheKey, {
+          atBottom: atBot,
+          scrollTop: chatMessages.scrollTop,
+        });
+        if (atBot && hasUnreadOnThisThread()) {
+          markThreadAsRead(readTarget);
+        }
+      }
       cancelActiveVoiceRecording();
       detachDmDropZone();
       revokeStagedAttachmentUrls(pendingAttachments);
@@ -5300,6 +5426,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       activeVcBarSyncer = null;
       activeDmErrorReporter = null;
       activeDmNotifyPeerMessage = null;
+      activeDmIsAtBottom = null;
     };
 
     composerAnchor.appendChild(composerBox);
@@ -5321,6 +5448,11 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         : null;
     if (jumpForThisThread) {
       pendingGlobalJump = null;
+    }
+
+    if (historyLoaded && !jumpForThisThread) {
+      applyInitialScrollPosition();
+      syncJumpBar();
     }
 
     const hydratedAgeMs = Date.now() - (dmHistoryHydratedAt.get(cacheKey) ?? 0);
@@ -5360,15 +5492,8 @@ function renderWorkspaceScreen(root: HTMLElement): void {
 
     requestAnimationFrame(() => {
       resizeComposer();
-      if (!unreadMarkerMessageId && initialUnreadRemaining === 0) {
-        if (savedThreadScroll && !savedThreadScroll.atBottom) {
-          pinnedToBottom = false;
-          programmaticScrollUntil = Date.now() + 80;
-          const maxTop = Math.max(0, chatMessages.scrollHeight - chatMessages.clientHeight);
-          chatMessages.scrollTop = Math.max(0, Math.min(maxTop, savedThreadScroll.scrollTop));
-        } else {
-          scrollToBottomPinned();
-        }
+      if (!jumpForThisThread && historyLoaded) {
+        applyInitialScrollPosition();
       }
       syncJumpBar();
       chatInput.focus();
@@ -5541,21 +5666,67 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       }
     }
 
-    if (suppressUnread && Date.now() < suppressUnread.until) {
-      if (suppressUnread.kind === 'dm') {
-        if (nextSnapshot.unreadCounts?.[suppressUnread.id]) {
-          delete nextSnapshot.unreadCounts[suppressUnread.id];
-        }
-        if (nextSnapshot.unreadMentions?.[suppressUnread.id]) {
-          delete nextSnapshot.unreadMentions[suppressUnread.id];
+    const snapNow = Date.now();
+    // Strip unread badges for any thread recently marked read (or with /api/dms/read still in-flight)
+    // so an overlapping 5s snapshot poll or another thread's read ACK never resurrects already-seen badges.
+    if (nextSnapshot.unreadCounts) {
+      for (const peerId of Object.keys(nextSnapshot.unreadCounts)) {
+        if (isThreadUnreadSuppressed(dmThreadCacheKey(peerId), snapNow)) {
+          delete nextSnapshot.unreadCounts[peerId];
         }
       }
-      if (suppressUnread.kind === 'group') {
-        if (nextSnapshot.groupUnreadCounts?.[suppressUnread.id]) {
-          delete nextSnapshot.groupUnreadCounts[suppressUnread.id];
+    }
+    if (nextSnapshot.unreadMentions) {
+      for (const peerId of Object.keys(nextSnapshot.unreadMentions)) {
+        if (isThreadUnreadSuppressed(dmThreadCacheKey(peerId), snapNow)) {
+          delete nextSnapshot.unreadMentions[peerId];
         }
-        if (nextSnapshot.groupUnreadMentions?.[suppressUnread.id]) {
-          delete nextSnapshot.groupUnreadMentions[suppressUnread.id];
+      }
+    }
+    if (nextSnapshot.groupUnreadCounts) {
+      for (const grpId of Object.keys(nextSnapshot.groupUnreadCounts)) {
+        if (isThreadUnreadSuppressed(groupThreadCacheKey(grpId), snapNow)) {
+          delete nextSnapshot.groupUnreadCounts[grpId];
+        }
+      }
+    }
+    if (nextSnapshot.groupUnreadMentions) {
+      for (const grpId of Object.keys(nextSnapshot.groupUnreadMentions)) {
+        if (isThreadUnreadSuppressed(groupThreadCacheKey(grpId), snapNow)) {
+          delete nextSnapshot.groupUnreadMentions[grpId];
+        }
+      }
+    }
+
+    // If the user is actively viewing a thread at the bottom in a visible window, never allow
+    // a hidden unread count to linger behind `!isSelected` and pop up when they switch chats.
+    let autoMarkViewedTarget: { kind: 'dm'; id: string } | { kind: 'group'; id: string } | null = null;
+    if (document.visibilityState !== 'hidden' && (activeDmIsAtBottom?.() ?? true)) {
+      if (state.mainView === 'dm' && state.activeDmUsername) {
+        const activePeer = state.activeDmUsername.toLowerCase();
+        const activeKey = dmThreadCacheKey(activePeer);
+        const hadUnread =
+          (nextSnapshot.unreadCounts?.[activePeer] ?? 0) > 0 ||
+          (nextSnapshot.unreadMentions?.[activePeer] ?? 0) > 0;
+        if (hadUnread) {
+          if (nextSnapshot.unreadCounts) delete nextSnapshot.unreadCounts[activePeer];
+          if (nextSnapshot.unreadMentions) delete nextSnapshot.unreadMentions[activePeer];
+          if (snapNow - (lastAutoMarkReadAt.get(activeKey) ?? 0) > 1500) {
+            autoMarkViewedTarget = { kind: 'dm', id: activePeer };
+          }
+        }
+      } else if (state.mainView === 'group' && state.activeGroupId) {
+        const activeGrp = state.activeGroupId;
+        const activeKey = groupThreadCacheKey(activeGrp);
+        const hadUnread =
+          (nextSnapshot.groupUnreadCounts?.[activeGrp] ?? 0) > 0 ||
+          (nextSnapshot.groupUnreadMentions?.[activeGrp] ?? 0) > 0;
+        if (hadUnread) {
+          if (nextSnapshot.groupUnreadCounts) delete nextSnapshot.groupUnreadCounts[activeGrp];
+          if (nextSnapshot.groupUnreadMentions) delete nextSnapshot.groupUnreadMentions[activeGrp];
+          if (snapNow - (lastAutoMarkReadAt.get(activeKey) ?? 0) > 1500) {
+            autoMarkViewedTarget = { kind: 'group', id: activeGrp };
+          }
         }
       }
     }
@@ -5594,6 +5765,9 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     }
 
     state.snapshot = nextSnapshot;
+    if (autoMarkViewedTarget) {
+      markThreadAsRead(autoMarkViewedTarget);
+    }
 
     // Background message capture: if any inactive DM or Group Chat received newer activity or
     // unread messages (e.g. while browsing elsewhere or during a brief WS hiccup), prefetch it now.
@@ -6223,6 +6397,9 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         return;
       }
 
+      const alreadyHadMessage = (dmMessagesByThread.get(cacheKey) ?? []).some(
+        (m) => m.id === message.id && !m.isPending,
+      );
       upsertDmMessage(cacheKey, message);
 
       // Background message capture: if this thread hasn't loaded its preceding history yet,
@@ -6273,10 +6450,16 @@ function renderWorkspaceScreen(root: HTMLElement): void {
 
       if (!isFromSelf) {
         clearThreadTyping(cacheKey, message.authorUsername);
+        const viewingAtBottom = isVisibleHere && (activeDmIsAtBottom?.() ?? true);
+        if (!alreadyHadMessage && !viewingAtBottom) {
+          // A genuinely new message arrived while the user isn't looking at the bottom of this thread;
+          // lift any prior read-suppression window so the unread badge displays immediately.
+          suppressedUnreadByThread.delete(cacheKey);
+        }
         if (isActivelyViewing) {
           activeDmNotifyPeerMessage?.(message, isVisibleHere);
         }
-        if (isVisibleHere) {
+        if (viewingAtBottom) {
           if (groupId) {
             markThreadAsRead({ kind: 'group', id: groupId });
           } else {
@@ -6287,6 +6470,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
           }
         }
         if (
+          !alreadyHadMessage &&
           !isFocusedOnThread &&
           !message.callLog &&
           !message.systemEvent &&

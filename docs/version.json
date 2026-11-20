@@ -1,11 +1,11 @@
 {
-  "version": "0.1.9",
-  "releasedAt": "2026-11-20T00:28:47.070Z",
-  "changelog": "Self-healing Cloudflare tunnel watchdog after PC sleep/idle & prevented desktop app from falling back onto empty local AppData database",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.9/Redshift-patch.asar",
-  "sha256": "ff0f4d207b49431fa36094181326dd583a6499e3c923077bbd5025e00db6bbb8",
-  "size": 6260582,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.9/RedshiftSetup.exe",
+  "version": "0.1.10",
+  "releasedAt": "2026-11-20T01:03:51.949Z",
+  "changelog": "Fixed ghost unread DM notification badges reappearing for already-read messages when switching chats, and fixed cached DMs randomly opening scrolled up to the top instead of pinned at the latest message.",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.10/Redshift-patch.asar",
+  "sha256": "b304fae9a732c40d1d0774f6fd65bd9c5a0e95f99fcaf3281cccd7f8d15e02a4",
+  "size": 6264451,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.10/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

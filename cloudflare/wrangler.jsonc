@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "redshift-server",
+  "main": "worker.js",
+  "compatibility_date": "2025-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "REDSHIFT_HUB",
+        "class_name": "RedshiftHub"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RedshiftHub"]
+    }
+  ],
+  "vars": {
+    "REDSHIFT_VERSION": "0.1.10",
+    "GITHUB_REPO": "redrepost84-ctrl/redshift"
+  }
+}
