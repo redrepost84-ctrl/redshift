@@ -4,10 +4,14 @@ Whenever you finish implementing a feature, bug fix, UI change, or asset update 
 
 1. **Verify Build & Tests:**
    - Run `npm run build` and `npm test` to confirm zero regressions.
-2. **Ensure Worldwide Online Server (`npm run host:online`) Is Running:**
-   - Check if the `npm run host:online` background daemon (or port `8080` + `cloudflared` tunnel) is active and reachable via `/api/health`.
-   - If `server/` did NOT change and the live tunnel is healthy (`200 OK`), **DO NOT restart `npm run host:online`** (keep the live tunnel URL uninterrupted for connected users).
-   - If `server/redshiftServer.js` / `server/` changed and `host:online` is running with hot-reload support, prefer touching `.reload-server` in the project root to restart only `server.js` without dropping the live `cloudflared` tunnel URL; otherwise start/restart `cmd.exe /c "npm.cmd run host:online"` with `IsDaemon: true`, wait for it to write the live `https://....trycloudflare.com` URL into `online-server.json`, and verify `<serverUrl>/api/health` returns `200 OK`.
+2. **Keep the 24/7 Cloudflare Workers Cloud Server Updated & Healthy:**
+   - The permanent worldwide Redshift server runs 24/7 on **Cloudflare Workers + SQLite Durable Objects** at `https://redshift-server.redrepost84.workers.dev` (listed in `online-server.json`). It stays online even when the user's PC is powered off and Antigravity is closed — **DO NOT start local `npm run host:online` / `trycloudflare.com` tunnels** or overwrite `online-server.json` with a temporary tunnel URL.
+   - Whenever you change backend API/WebSocket logic in `server/redshiftServer.js` / `server/dbStore.js`, you **MUST mirror the same change into `cloudflare/worker.js` / `cloudflare/doStore.js`**, keep `cloudflare/wrangler.jsonc` `REDSHIFT_VERSION` aligned, and deploy to Cloudflare using the `CLOUDFLARE_API_TOKEN` stored in local gitignored `.env`:
+     ```powershell
+     Get-Content .env | ForEach-Object { if ($_ -match '^([^#=]+)=(.*)$') { [System.Environment]::SetEnvironmentVariable($matches[1].Trim(), $matches[2].Trim(), 'Process') } }
+     cd cloudflare; .\node_modules\.bin\wrangler.cmd deploy
+     ```
+   - Verify `https://redshift-server.redrepost84.workers.dev/api/health` returns `200 OK` before ending your turn.
 3. **Automatically Bump, Package & Publish the Update to GitHub Releases:**
    - Run:
      ```powershell

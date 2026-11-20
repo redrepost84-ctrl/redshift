@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.12';
+export const CURRENT_REDSHIFT_VERSION = '0.1.13';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,24 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.13',
+    date: 'November 20, 2026',
+    kicker: '24/7 PERMANENT CLOUD SERVER',
+    headline: 'Moved Worldwide Redshift Server to 24/7 Cloudflare Edge — Never Goes Down on PC Sleep or Restart',
+    lead:
+      'Redshift now runs 24/7 on a permanent Cloudflare Workers + SQLite Durable Object server instead of temporary local PC tunnels. All accounts, group chats, messages, voice notes, GIFs, and videos stay online around the clock with sub-200ms global latency.',
+    sections: [
+      {
+        heading: 'Always-On Cloud Infrastructure',
+        items: [
+          'Permanent 24/7 Cloud Endpoint — Migrated all 21 accounts, group chats, message history, active sessions, and uploaded media to Cloudflare Workers + SQLite Durable Objects so the server stays up 24/7 even when the host PC is turned off.',
+          'Zero-Configuration Automatic Cutover — Clients automatically discover and fail over to the permanent 24/7 cloud endpoint even if GitHub raw lookup is temporarily slow or rate-limited.',
+          'Global Edge Speed — Live snapshots load in under 200ms (~13 KB) with 1-year immutable cached /api/media images and full HTTP Range video streaming.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.12',
     date: 'November 20, 2026',

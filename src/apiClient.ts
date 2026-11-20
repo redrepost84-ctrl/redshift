@@ -93,6 +93,7 @@ const PERSISTENT_SESSION_KEY = 'redshift.session_persistent_token.v1';
 const SERVER_URL_STORAGE_KEY = 'redshift.server_base_url.v1';
 const SERVER_MANUAL_OVERRIDE_KEY = 'redshift.server_manual_override.v1';
 const DEFAULT_GITHUB_DIRECTORY_REPO = 'redrepost84-ctrl/redshift';
+const PERMANENT_CLOUD_SERVER_URL = 'https://redshift-server.redrepost84.workers.dev';
 
 function readStoredServerBaseUrl(): string {
   try {
@@ -175,6 +176,17 @@ export async function autoDiscoverWorldwideServer(githubRepo?: string): Promise<
     } finally {
       window.clearTimeout(timer);
     }
+  }
+
+  // Fallback directly to the permanent 24/7 Cloudflare Workers server if GitHub raw/API is rate-limited.
+  try {
+    const health = await apiCheckServerHealth(PERMANENT_CLOUD_SERVER_URL);
+    if (health.ok) {
+      setApiServerBaseUrl(PERMANENT_CLOUD_SERVER_URL, false);
+      return PERMANENT_CLOUD_SERVER_URL;
+    }
+  } catch {
+    // Ignore fallback failure
   }
   return null;
 }
@@ -1102,7 +1114,7 @@ export async function apiUploadAttachment(
   const first = await attemptUpload();
   if (
     !first.ok &&
-    baseBefore.includes('trycloudflare.com') &&
+    isAutoDiscoverableRemoteUrl(baseBefore) &&
     (first.isNetworkError || (typeof first.httpStatus === 'number' && isDeadTunnelStatus(first.httpStatus)))
   ) {
     const switched = await tryRediscoverDeadTunnel(baseBefore);

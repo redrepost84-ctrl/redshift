@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.13',
+      published_at: '2026-11-20T23:00:00Z',
+      body: 'Permanent 24/7 Cloud Server: migrated Redshift to Cloudflare Workers + SQLite Durable Objects so chats, voice calls, GIFs, and uploads stay online 24/7 even when the host PC is off or restarted.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.13`,
+    },
+    {
       tag_name: 'v0.1.12',
       published_at: '2026-11-20T21:55:00Z',
       body: 'Instant real-time DMs, notifications & calls: replaced 3.46 MB inline base64 snapshot payloads with immutable cached /api/media endpoints (282x smaller), prioritized WebSocket delivery before DB flush, added 0ms DM unread badges and 0ms optimistic VC topbar on join, and fixed delayed ringing after joining calls.',
