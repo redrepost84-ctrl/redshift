@@ -1018,6 +1018,16 @@ async function run() {
         );
         await cdp.evalJson(`(() => {
           document.querySelector('.group-friend-pick-row[data-friend-username="carol_t"]')?.click();
+          return true;
+        })()`);
+        await waitFor(
+          async () =>
+            await cdp.evalJson(
+              `Boolean(document.querySelector('[data-action="confirm-add-group-friends"]:not([disabled])'))`,
+            ),
+          3000,
+        );
+        await cdp.evalJson(`(() => {
           document.querySelector('[data-action="confirm-add-group-friends"]')?.click();
           return true;
         })()`);

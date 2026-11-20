@@ -149,7 +149,7 @@ export async function autoDiscoverWorldwideServer(githubRepo?: string): Promise<
 
   for (const lookupUrl of lookupUrls) {
     const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 3800);
+    const timer = window.setTimeout(() => controller.abort(), 6500);
     try {
       const res = await fetch(lookupUrl, {
         method: 'GET',
@@ -227,6 +227,22 @@ async function fetchWithTunnelRecovery(
   pathOrUrl: string,
   init: RequestInit,
 ): Promise<Response> {
+  // Desktop clients must never silently fall back to an empty local %AppData% embedded server
+  // when worldwide auto-discovery hasn't connected yet; discover the live worldwide server first.
+  const currentPort = typeof window !== 'undefined' ? Number(window.location.port) || 0 : 0;
+  const isAutomatedTestPort = currentPort >= 18000 && currentPort < 19000;
+  if (
+    !apiServerBaseUrl &&
+    !hasManualServerOverride() &&
+    !isAutomatedTestPort &&
+    typeof window !== 'undefined' &&
+    Boolean(getDesktopBridge())
+  ) {
+    const discovered = await autoDiscoverWorldwideServer();
+    if (!discovered) {
+      throw new Error('WORLDWIDE_SERVER_UNREACHABLE');
+    }
+  }
   const baseBefore = apiServerBaseUrl;
   try {
     const res = await fetch(resolveApiUrl(pathOrUrl), init);

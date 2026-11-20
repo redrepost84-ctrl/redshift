@@ -3635,20 +3635,38 @@ export class RedshiftHub extends DurableObject {
     if (method === 'POST' && reqPath === '/api/friends/request') {
       const targetRaw = typeof body.username === 'string' ? body.username.trim() : '';
       if (!targetRaw) return jsonResponse(request, 400, { ok: false, error: 'Error: Please enter a username' });
-      if (/\s/.test(targetRaw)) {
-        return jsonResponse(request, 400, { ok: false, error: 'Error: Usernames cannot contain spaces' });
+      const cleanedInput = targetRaw.startsWith('@') ? targetRaw.slice(1).trim() : targetRaw;
+      if (!cleanedInput) {
+        return jsonResponse(request, 400, { ok: false, error: 'Error: Please enter a username' });
       }
-      if (targetRaw.includes('@')) {
+      if (cleanedInput.includes('@')) {
         return jsonResponse(request, 400, {
           ok: false,
           error: 'Error: Enter a username, not an email address',
         });
       }
-      const target = this.findAccountByUsername(targetRaw);
+      let target = !/\s/.test(cleanedInput) ? this.findAccountByUsername(cleanedInput) : undefined;
+      if (!target) {
+        const lowerDisplay = cleanedInput.toLowerCase();
+        const displayMatches = this.db.accounts.filter(
+          (acc) => acc.displayName.trim().toLowerCase() === lowerDisplay,
+        );
+        if (displayMatches.length === 1) {
+          target = displayMatches[0];
+        } else if (displayMatches.length > 1) {
+          return jsonResponse(request, 409, {
+            ok: false,
+            error: `Error: Multiple users share the display name "${cleanedInput}" — enter their exact @username instead`,
+          });
+        }
+      }
+      if (!target && /\s/.test(cleanedInput)) {
+        return jsonResponse(request, 400, { ok: false, error: 'Error: Usernames cannot contain spaces' });
+      }
       if (!target) {
         return jsonResponse(request, 404, {
           ok: false,
-          error: `Error: No user found with username "${targetRaw}"`,
+          error: `Error: No user found with username "${cleanedInput}"`,
         });
       }
       const toKey = target.username.toLowerCase();

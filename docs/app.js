@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.11',
+      published_at: '2026-11-20T21:22:00Z',
+      body: 'Add Friend now accepts @username (with leading @) and unique Display Names, and desktop clients are guarded against silently falling back to an empty local %AppData% database.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.11`,
+    },
+    {
       tag_name: 'v0.1.10',
       published_at: '2026-11-20T00:58:00Z',
       body: 'Fixed ghost unread DM notification badges reappearing for already-read messages when switching chats, and fixed cached DMs randomly opening scrolled up to the top instead of pinned at the latest message.',

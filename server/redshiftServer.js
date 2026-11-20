@@ -4012,11 +4012,12 @@ export function createRedshiftServerMiddleware() {
         sendJson(res, 400, { ok: false, error: 'Error: Please enter a username' });
         return;
       }
-      if (/\s/.test(targetRaw)) {
-        sendJson(res, 400, { ok: false, error: 'Error: Usernames cannot contain spaces' });
+      const cleanedInput = targetRaw.startsWith('@') ? targetRaw.slice(1).trim() : targetRaw;
+      if (!cleanedInput) {
+        sendJson(res, 400, { ok: false, error: 'Error: Please enter a username' });
         return;
       }
-      if (targetRaw.includes('@')) {
+      if (cleanedInput.includes('@')) {
         sendJson(res, 400, {
           ok: false,
           error: 'Error: Enter a username, not an email address',
@@ -4024,11 +4025,30 @@ export function createRedshiftServerMiddleware() {
         return;
       }
 
-      const target = findAccountByUsername(targetRaw);
+      let target = !/\s/.test(cleanedInput) ? findAccountByUsername(cleanedInput) : undefined;
+      if (!target) {
+        const lowerDisplay = cleanedInput.toLowerCase();
+        const displayMatches = db.accounts.filter(
+          (acc) => acc.displayName.trim().toLowerCase() === lowerDisplay,
+        );
+        if (displayMatches.length === 1) {
+          target = displayMatches[0];
+        } else if (displayMatches.length > 1) {
+          sendJson(res, 409, {
+            ok: false,
+            error: `Error: Multiple users share the display name "${cleanedInput}" — enter their exact @username instead`,
+          });
+          return;
+        }
+      }
+      if (!target && /\s/.test(cleanedInput)) {
+        sendJson(res, 400, { ok: false, error: 'Error: Usernames cannot contain spaces' });
+        return;
+      }
       if (!target) {
         sendJson(res, 404, {
           ok: false,
-          error: `Error: No user found with username "${targetRaw}"`,
+          error: `Error: No user found with username "${cleanedInput}"`,
         });
         return;
       }

@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.10';
+export const CURRENT_REDSHIFT_VERSION = '0.1.11';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,23 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.11',
+    date: 'November 20, 2026',
+    kicker: 'FRIEND REQUESTS & CONNECTION SAFEGUARD',
+    headline: 'Smarter Add Friend (@username & Display Name Support) & Local-DB Fallback Guard',
+    lead:
+      'Friend requests now accept @username (with or without the @ prefix) as well as unique display names, and desktop clients can no longer silently fall back to an empty local %AppData% database if worldwide server discovery is momentarily slow.',
+    sections: [
+      {
+        heading: 'Improvements & Fixes',
+        items: [
+          'Smarter Add Friend Lookup — Typing @username (with a leading @) or a unique Display Name now finds the user instead of failing with "No user found" or "Enter a username, not an email address".',
+          'Prevented Stranded Local Accounts — Desktop clients now retry worldwide server discovery before allowing Sign Up, Sign In, or Add Friend so new users never accidentally register inside an empty local %AppData% database.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.10',
     date: 'November 19, 2026',
