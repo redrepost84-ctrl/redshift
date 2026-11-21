@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
+import { connect } from 'cloudflare:sockets';
 import crypto from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { createDoStore, SMALL_KV_KEYS, UPLOAD_CHUNK_SIZE } from './doStore.js';
@@ -475,6 +476,134 @@ function escapeHtml(text) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+function wrapBase6476(text) {
+  const b64 = Buffer.from(String(text || ''), 'utf8').toString('base64');
+  const lines = [];
+  for (let i = 0; i < b64.length; i += 76) {
+    lines.push(b64.slice(i, i + 76));
+  }
+  return lines.join('\r\n');
+}
+
+async function sendEmailViaSmtps({ host, port, user, pass, to, subject, textBody, htmlBody }) {
+  const cleanUser = String(user || '').replace(/[\r\n<>]/g, '').trim();
+  const cleanTo = String(to || '').replace(/[\r\n<>]/g, '').trim();
+  if (!cleanUser || !cleanTo || !pass) {
+    throw new Error('Missing SMTP credentials or recipient');
+  }
+
+  const socket = connect(
+    { hostname: host || 'smtp.gmail.com', port: Number(port) || 465 },
+    { secureTransport: 'on', allowHalfOpen: false },
+  );
+
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const reader = socket.readable.getReader();
+  const writer = socket.writable.getWriter();
+  let buffered = '';
+
+  const readSmtpResponse = async (timeoutMs = 12_000) => {
+    const deadline = Date.now() + timeoutMs;
+    const lines = [];
+    while (true) {
+      let idx = buffered.indexOf('\r\n');
+      while (idx === -1) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          throw new Error('SMTP read timeout');
+        }
+        const readResult = await Promise.race([
+          reader.read(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('SMTP read timeout')), remaining)),
+        ]);
+        if (readResult.done) {
+          throw new Error('SMTP connection closed unexpectedly');
+        }
+        buffered += decoder.decode(readResult.value, { stream: true });
+        idx = buffered.indexOf('\r\n');
+      }
+      const line = buffered.slice(0, idx);
+      buffered = buffered.slice(idx + 2);
+      lines.push(line);
+      if (/^\d{3}(?: |$)/.test(line)) {
+        return { code: Number(line.slice(0, 3)), text: lines.join('\n') };
+      }
+    }
+  };
+
+  const sendCommand = async (cmd, expectedCodes) => {
+    await writer.write(encoder.encode(`${cmd}\r\n`));
+    const resp = await readSmtpResponse();
+    if (!expectedCodes.includes(resp.code)) {
+      throw new Error(`SMTP error ${resp.code}: ${resp.text}`);
+    }
+    return resp;
+  };
+
+  try {
+    const greeting = await readSmtpResponse();
+    if (greeting.code !== 220) {
+      throw new Error(`SMTP greeting error ${greeting.code}: ${greeting.text}`);
+    }
+    await sendCommand('EHLO redshift.gg', [250]);
+    await sendCommand('AUTH LOGIN', [334]);
+    await sendCommand(Buffer.from(cleanUser, 'utf8').toString('base64'), [334]);
+    await sendCommand(Buffer.from(pass, 'utf8').toString('base64'), [235]);
+    await sendCommand(`MAIL FROM:<${cleanUser}>`, [250]);
+    await sendCommand(`RCPT TO:<${cleanTo}>`, [250, 251]);
+    await sendCommand('DATA', [354]);
+
+    const boundary = `redshift_${crypto.randomBytes(12).toString('hex')}`;
+    const encodedSubject = `=?UTF-8?B?${Buffer.from(subject, 'utf8').toString('base64')}?=`;
+    const msgId = `<${crypto.randomUUID()}@redshift.gg>`;
+    const rawMime = [
+      `From: "Redshift" <${cleanUser}>`,
+      `To: <${cleanTo}>`,
+      `Subject: ${encodedSubject}`,
+      `Date: ${new Date().toUTCString()}`,
+      `Message-ID: ${msgId}`,
+      'MIME-Version: 1.0',
+      `Content-Type: multipart/alternative; boundary="${boundary}"`,
+      '',
+      `--${boundary}`,
+      'Content-Type: text/plain; charset=UTF-8',
+      'Content-Transfer-Encoding: base64',
+      '',
+      wrapBase6476(textBody),
+      '',
+      `--${boundary}`,
+      'Content-Type: text/html; charset=UTF-8',
+      'Content-Transfer-Encoding: base64',
+      '',
+      wrapBase6476(htmlBody),
+      '',
+      `--${boundary}--`,
+      '.',
+      '',
+    ].join('\r\n');
+
+    await writer.write(encoder.encode(rawMime));
+    const dataResp = await readSmtpResponse(15_000);
+    if (dataResp.code !== 250) {
+      throw new Error(`SMTP DATA rejected ${dataResp.code}: ${dataResp.text}`);
+    }
+    try {
+      await writer.write(encoder.encode('QUIT\r\n'));
+    } catch {}
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {}
+    try {
+      writer.releaseLock();
+    } catch {}
+    try {
+      await socket.close();
+    } catch {}
+  }
 }
 
 export class RedshiftHub extends DurableObject {
@@ -2192,9 +2321,16 @@ export class RedshiftHub extends DurableObject {
 
   // --- Password Reset Helpers ---
   async issueResetEmail(toEmail) {
+    const smtpUser = String(this.env.SMTP_USER || '').trim();
+    const smtpPass = String(this.env.SMTP_PASS || '').replace(/\s+/g, '').trim();
+    const smtpHost = String(this.env.SMTP_HOST || 'smtp.gmail.com').trim();
+    const smtpPort = Number(this.env.SMTP_PORT || 465) || 465;
+    const hasSmtp = Boolean(smtpUser && smtpPass && EMAIL_REGEX.test(smtpUser));
+
     const resendApiKey = String(this.env.RESEND_API_KEY || '').trim();
     const resendFrom = String(this.env.RESEND_FROM || 'Redshift <onboarding@resend.dev>').trim();
-    if (!resendApiKey) {
+
+    if (!hasSmtp && !resendApiKey) {
       return {
         status: 503,
         payload: {
@@ -2222,27 +2358,53 @@ export class RedshiftHub extends DurableObject {
     const code = generateSecureResetCode();
     const safeEmail = escapeHtml(toEmail);
     const safeCode = escapeHtml(code);
+    const subject = 'Redshift — Your Password Reset Code';
+    const textBody = [
+      'Redshift Password Reset',
+      '',
+      `We received a password reset request for ${toEmail}.`,
+      `Your 6-character verification code is: ${code}`,
+      '',
+      'This code expires in 10 minutes. If you did not request this, you can safely ignore this email.',
+    ].join('\n');
+    const htmlBody = `<div style="background:#15161a;color:#f2f3f5;font-family:'Segoe UI',Arial,sans-serif;padding:32px 20px;"><div style="max-width:440px;margin:0 auto;background:#1b1d23;border:1px solid #2b2e38;border-radius:10px;padding:28px;"><div style="font-size:26px;font-weight:700;color:#eb4248;letter-spacing:-0.02em;">Redshift</div><p style="margin:14px 0 0;font-size:14px;line-height:1.5;color:#b5bac1;">We received a password reset request for <strong style="color:#ffffff;">${safeEmail}</strong>.</p><p style="margin:14px 0 8px;font-size:13px;color:#b5bac1;">Enter this 6-character verification code:</p><div style="background:#121318;border:1px solid #351a20;border-radius:8px;padding:14px;text-align:center;font-family:Consolas,monospace;font-size:26px;font-weight:700;letter-spacing:6px;color:#ffffff;">${safeCode}</div><p style="margin:16px 0 0;font-size:12px;color:#828691;line-height:1.45;">This code expires in 10 minutes. If you did not request a password reset, you can ignore this email.</p></div></div>`;
+
     try {
-      const resp = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${resendApiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: resendFrom,
-          to: [toEmail],
-          subject: 'Redshift — Your Password Reset Code',
-          html: `<div style="background:#15161a;color:#f2f3f5;font-family:'Segoe UI',Arial,sans-serif;padding:32px 20px;"><div style="max-width:440px;margin:0 auto;background:#1b1d23;border:1px solid #2b2e38;border-radius:10px;padding:28px;"><div style="font-size:26px;font-weight:700;color:#eb4248;">Redshift</div><p style="margin:14px 0 0;font-size:14px;color:#b5bac1;">Password reset code for <strong style="color:#fff;">${safeEmail}</strong>:</p><div style="margin-top:12px;background:#121318;border:1px solid #351a20;border-radius:8px;padding:14px;text-align:center;font-family:Consolas,monospace;font-size:26px;font-weight:700;letter-spacing:6px;color:#fff;">${safeCode}</div><p style="margin:16px 0 0;font-size:12px;color:#828691;">Expires in 10 minutes.</p></div></div>`,
-        }),
-      });
-      if (!resp.ok) {
-        return {
-          status: 500,
-          payload: { ok: false, error: 'Error: Could not send verification email. Please try again' },
-        };
+      if (hasSmtp) {
+        await sendEmailViaSmtps({
+          host: smtpHost,
+          port: smtpPort,
+          user: smtpUser,
+          pass: smtpPass,
+          to: toEmail,
+          subject,
+          textBody,
+          htmlBody,
+        });
+      } else {
+        const resp = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${resendApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: resendFrom,
+            to: [toEmail],
+            subject,
+            text: textBody,
+            html: htmlBody,
+          }),
+        });
+        if (!resp.ok) {
+          return {
+            status: 500,
+            payload: { ok: false, error: 'Error: Could not send verification email. Please try again' },
+          };
+        }
       }
-    } catch {
+    } catch (err) {
+      console.error('[Redshift Cloud] Failed to send reset email:', err?.message || err);
       return {
         status: 500,
         payload: { ok: false, error: 'Error: Could not send verification email. Please try again' },
@@ -3058,6 +3220,10 @@ export class RedshiftHub extends DurableObject {
           uploadedBlobBytes: blobs.reduce((sum, b) => sum + b.totalBytes, 0),
           communityGifs: this.db.communityGifs.length,
           onlineUsers: this.countOnlineUsers(),
+          smtpConfigured: Boolean(
+            String(this.env.SMTP_USER || '').trim() &&
+              String(this.env.SMTP_PASS || '').replace(/\s+/g, '').trim(),
+          ),
         });
       }
 
