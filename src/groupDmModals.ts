@@ -970,6 +970,9 @@ export function createGroupMembersPanel(options: {
   resolveAvatar: (profile: { avatarPreset: number | null; avatarDataUrl?: string }) => string;
   onOpenDmWithMember: (username: string) => void;
   onViewMemberProfile?: (member: PublicProfile) => void;
+  canRingToCall?: (member: PublicProfile) => boolean;
+  onRingToCall?: (member: PublicProfile) => void;
+  onStartCallWithMember?: (member: PublicProfile) => void;
   onSnapshotUpdated?: (snapshot: SocialSnapshot) => void;
 }): GroupMembersPanelHandle {
   let currentGroup = options.initialGroup;
@@ -1092,6 +1095,24 @@ export function createGroupMembersPanel(options: {
               options.onOpenDmWithMember(member.username);
             },
           });
+          if (options.canRingToCall?.(member) && options.onRingToCall) {
+            items.push({
+              label: 'Ring to Call',
+              icon: 'phone',
+              onSelect: () => {
+                options.onRingToCall?.(member);
+              },
+            });
+          }
+          if (options.onStartCallWithMember) {
+            items.push({
+              label: 'Start a Call',
+              icon: 'phone',
+              onSelect: () => {
+                options.onStartCallWithMember?.(member);
+              },
+            });
+          }
         }
 
         items.push({

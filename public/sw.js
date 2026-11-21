@@ -24,7 +24,8 @@ self.addEventListener('push', (event) => {
     title: 'Redshift',
     body: 'New activity in Redshift',
     tag: 'redshift-general',
-    icon: './icon.png',
+    icon: '',
+    presetAvatar: null,
     badge: './icon.png',
     threadKind: '',
     threadId: '',
@@ -47,10 +48,39 @@ self.addEventListener('push', (event) => {
     }
   }
 
+  let resolvedIcon = '';
+  if (typeof payload.icon === 'string' && payload.icon.trim()) {
+    try {
+      resolvedIcon = new URL(payload.icon.trim(), self.registration.scope).toString();
+    } catch {
+      resolvedIcon = payload.icon.trim();
+    }
+  } else if (
+    typeof payload.presetAvatar === 'number' &&
+    Number.isInteger(payload.presetAvatar) &&
+    payload.presetAvatar >= 0 &&
+    payload.presetAvatar <= 3
+  ) {
+    resolvedIcon = new URL(
+      `./preset-avatar-${payload.presetAvatar}.png`,
+      self.registration.scope,
+    ).toString();
+  }
+  if (!resolvedIcon) {
+    resolvedIcon = new URL('./icon.png', self.registration.scope).toString();
+  }
+
+  let resolvedBadge = '';
+  try {
+    resolvedBadge = new URL(payload.badge || './icon.png', self.registration.scope).toString();
+  } catch {
+    resolvedBadge = payload.badge || './icon.png';
+  }
+
   const options = {
     body: String(payload.body || ''),
-    icon: payload.icon || './icon.png',
-    badge: payload.badge || './icon.png',
+    icon: resolvedIcon,
+    badge: resolvedBadge,
     tag: payload.tag || 'redshift-general',
     renotify: true,
     data: {

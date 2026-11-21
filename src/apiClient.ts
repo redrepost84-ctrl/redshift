@@ -1827,6 +1827,7 @@ export interface SocialSocketHandle {
     ring?: boolean,
     reconnect?: boolean,
   ) => void;
+  sendVcRing: (threadKey: string, targetUsername?: string) => void;
   sendVcDecline: (threadKey: string) => void;
   sendVcLeave: (threadKey: string) => void;
   sendVcVoiceState: (
@@ -2103,6 +2104,16 @@ export function connectSocialSocket(handlers: {
     ) => {
       const norm = normalizeThreadTarget(target);
       sendFrame({ type: 'vc:join', ...norm, muted, deafened, ring, reconnect }, true);
+    },
+    sendVcRing: (threadKey: string, targetUsername?: string) => {
+      sendFrame(
+        {
+          type: 'vc:ring',
+          threadKey,
+          ...(targetUsername ? { targetUsername } : {}),
+        },
+        true,
+      );
     },
     sendVcDecline: (threadKey: string) => {
       sendFrame({ type: 'vc:decline', threadKey }, true);

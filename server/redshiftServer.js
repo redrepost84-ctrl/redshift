@@ -1291,6 +1291,71 @@ function clearAllRingingInCall(call) {
   call.ringing.clear();
 }
 
+/**
+ * Rings eligible non-connected participants for a call (initial start or mid-call re-ring)
+ * without resetting active participants, streams, activities, or timers.
+ */
+function ringCallTargets(call, ctx, callerKey, requestedTargets = null) {
+  const callerAcc = findAccountByUsername(callerKey);
+  const grp = ctx.groupId ? db.groupDms[ctx.groupId] : undefined;
+  const targetSet =
+    Array.isArray(requestedTargets) && requestedTargets.length > 0
+      ? new Set(requestedTargets.map((u) => String(u).trim().toLowerCase()).filter(Boolean))
+      : null;
+  let rangAny = false;
+
+  for (const otherRaw of ctx.participants) {
+    const otherKey = otherRaw.toLowerCase();
+    if (targetSet && !targetSet.has(otherKey)) continue;
+    if (otherKey === callerKey || call.participants.has(otherKey)) {
+      continue;
+    }
+    if (hasAnyBlockBetween(callerKey, otherKey)) {
+      continue;
+    }
+    const otherAcc = findAccountByUsername(otherKey);
+    if (!otherAcc) {
+      continue;
+    }
+    if (
+      ctx.kind === 'dm' &&
+      !areFriends(callerKey, otherKey) &&
+      otherAcc.privacy?.allowNonFriendDms === false
+    ) {
+      continue;
+    }
+    const prevRing = call.ringing.get(otherKey);
+    if (prevRing?.timeoutId) {
+      clearTimeout(prevRing.timeoutId);
+    }
+    const targetCall = call;
+    const timeoutId = setTimeout(() => {
+      if (activeVoiceCalls.get(targetCall.threadKey) !== targetCall) {
+        return;
+      }
+      if (stopRingingUser(targetCall, otherKey)) {
+        finalizeCallIfDone(targetCall);
+        broadcastVcState(targetCall);
+      }
+    }, VC_RING_TIMEOUT_MS);
+
+    call.ringing.set(otherKey, { username: otherKey, timeoutId });
+    rangAny = true;
+    if (callerAcc) {
+      sendWsEventToUser(otherKey, {
+        type: 'vc:incoming',
+        threadKey: call.threadKey,
+        kind: call.kind,
+        groupId: call.groupId,
+        groupName: grp?.name,
+        groupIconDataUrl: getGroupIconUrl(grp),
+        caller: toPublicProfile(callerAcc, otherKey),
+      });
+    }
+  }
+  return rangAny;
+}
+
 /** @param {string} username */
 function sendActiveVcSnapshotsToUser(username) {
   const cleanKey = username.toLowerCase();
@@ -7122,51 +7187,7 @@ export function attachRedshiftWebSocket(httpServer) {
 
           const shouldRing = isNewCall && msg.ring !== false;
           if (shouldRing) {
-            const callerAcc = findAccountByUsername(ownerKey);
-            const grp = ctx.groupId ? db.groupDms[ctx.groupId] : undefined;
-            for (const otherRaw of ctx.participants) {
-              const otherKey = otherRaw.toLowerCase();
-              if (otherKey === ownerKey || call.participants.has(otherKey)) {
-                continue;
-              }
-              if (hasAnyBlockBetween(ownerKey, otherKey)) {
-                continue;
-              }
-              const otherAcc = findAccountByUsername(otherKey);
-              if (!otherAcc) {
-                continue;
-              }
-              if (
-                ctx.kind === 'dm' &&
-                !areFriends(ownerKey, otherKey) &&
-                otherAcc.privacy?.allowNonFriendDms === false
-              ) {
-                continue;
-              }
-              const targetCall = call;
-              const timeoutId = setTimeout(() => {
-                if (activeVoiceCalls.get(targetCall.threadKey) !== targetCall) {
-                  return;
-                }
-                if (stopRingingUser(targetCall, otherKey)) {
-                  finalizeCallIfDone(targetCall);
-                  broadcastVcState(targetCall);
-                }
-              }, VC_RING_TIMEOUT_MS);
-
-              call.ringing.set(otherKey, { username: otherKey, timeoutId });
-              if (callerAcc) {
-                sendWsEventToUser(otherKey, {
-                  type: 'vc:incoming',
-                  threadKey: call.threadKey,
-                  kind: call.kind,
-                  groupId: call.groupId,
-                  groupName: grp?.name,
-                  groupIconDataUrl: getGroupIconUrl(grp),
-                  caller: toPublicProfile(callerAcc, otherKey),
-                });
-              }
-            }
+            ringCallTargets(call, ctx, ownerKey);
           }
 
           // Broadcast live VC state IMMEDIATELY so joining/ringing UI updates in <10ms
@@ -7178,6 +7199,29 @@ export function attachRedshiftWebSocket(httpServer) {
             createCallLogMessage(call);
           } else {
             syncCallLogMessage(call, call.everHadAnswer ? 'active' : 'ringing');
+          }
+        } else if (msg && msg.type === 'vc:ring') {
+          const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';
+          const call = threadKey ? activeVoiceCalls.get(threadKey) : undefined;
+          if (call && !call.finalized && call.participants.has(ownerKey)) {
+            const targetUser =
+              typeof msg.targetUsername === 'string' ? msg.targetUsername.trim().toLowerCase() : '';
+            const peerForCtx =
+              call.kind === 'dm'
+                ? call.allowedUsers.find((u) => u.toLowerCase() !== ownerKey) || targetUser
+                : '';
+            const ctx = resolveThreadContext(
+              ownerKey,
+              call.kind === 'group' ? { groupId: call.groupId } : { peerUsername: peerForCtx },
+            );
+            if (ctx.ok) {
+              if (ctx.kind === 'group') {
+                call.allowedUsers = ctx.participants.map((u) => u.toLowerCase());
+              }
+              if (ringCallTargets(call, ctx, ownerKey, targetUser ? [targetUser] : null)) {
+                broadcastVcState(call);
+              }
+            }
           }
         } else if (msg && msg.type === 'vc:decline') {
           const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';

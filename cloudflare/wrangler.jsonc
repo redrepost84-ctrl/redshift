@@ -19,7 +19,7 @@
     }
   ],
   "vars": {
-    "REDSHIFT_VERSION": "0.1.23",
+    "REDSHIFT_VERSION": "0.1.24",
     "GITHUB_REPO": "redrepost84-ctrl/redshift"
   }
 }

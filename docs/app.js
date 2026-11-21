@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.24',
+      published_at: '2026-11-21T08:20:00Z',
+      body: 'Right-click "Start a Call" on in-call profiles with Are-You-Sure confirmation (opens DM & starts call), "Ring to Call" from DMs/Group Chats/Members to ring people into your ongoing call without resetting it, universal mobile touch long-press context menus across the app, and Web Push / notification sender profile picture icons.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.24`,
+    },
+    {
       tag_name: 'v0.1.23',
       published_at: '2026-11-21T08:05:00Z',
       body: 'Quoridor 17×17 side-groove walls with glowing green/red wall telegraph, Minesweeper Last Man Standing (survivor or fastest clear wins), ⚡ Blitz (10s/turn) Chess & Checkers, 30s VexilloGuessr turn timer, top-left green Game Controller / Phone badges on DM & Group lists, top-left Eye viewer/spectator counters on streams & activities, automatic previous-activity end when joining another, mid-call leave/rejoin kick-and-ring fix, mobile fullscreen autoscaling (no top/bottom lines), keyboard composer lift, aligned mobile DM status dots, un-clipped mobile Profile UI with Edit Profile & Custom Status buttons, and clean neutral VC Activities button.',

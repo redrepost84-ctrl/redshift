@@ -150,6 +150,7 @@ import {
 import { createVoiceManager } from './voiceManager';
 import {
   attachGlobalEditableContextMenu,
+  attachGlobalLongPressContextMenu,
   buildMuteMenuEntries,
   type ContextMenuItem,
   copyToClipboard,
@@ -2891,8 +2892,18 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     const threadKey = groupThreadCacheKey(latestGroup.id);
     const isViewing = state.mainView === 'group' && state.activeGroupId === latestGroup.id;
     const unreadCount = snap.groupUnreadCounts?.[latestGroup.id] ?? 0;
-    const inCall = voiceManager.getActiveCallThreadKey() === threadKey;
-    const activeCall = Boolean(voiceManager.getCallStateForThread(threadKey)?.active);
+    const activeCallKeyNow = voiceManager.getActiveCallThreadKey();
+    const inCall = activeCallKeyNow === threadKey;
+    const inOtherCall = Boolean(activeCallKeyNow && !inCall);
+    const groupCallState = voiceManager.getCallStateForThread(threadKey);
+    const activeCall = Boolean(groupCallState?.active);
+    const selfKey = snap.user.username.toLowerCase();
+    const connectedMemberKeys = new Set(
+      (groupCallState?.participants ?? []).map((p) => p.user.username.toLowerCase()),
+    );
+    const hasUnjoinedMembers = latestGroup.members.some(
+      (m) => m.username.toLowerCase() !== selfKey && !connectedMemberKeys.has(m.username.toLowerCase()),
+    );
     const existingMemberKeys = new Set(latestGroup.members.map((m) => m.username.toLowerCase()));
     const invitableCount = snap.friends.filter(
       (f) => !existingMemberKeys.has(f.username.toLowerCase()),
@@ -2940,11 +2951,28 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       onSelect: () => {
         if (inCall) {
           voiceManager.leaveCall();
+        } else if (inOtherCall) {
+          void voiceManager.confirmAndSwitchToCall(
+            { groupId: latestGroup.id },
+            threadKey,
+            latestGroup.name,
+            () => openGroupChatById(latestGroup.id),
+          );
         } else {
           voiceManager.startOrJoinCall({ groupId: latestGroup.id }, threadKey);
         }
       },
     });
+
+    if (inCall && hasUnjoinedMembers) {
+      items.push({
+        label: 'Ring to Call',
+        icon: 'phone',
+        onSelect: () => {
+          voiceManager.ringUserInCurrentCall();
+        },
+      });
+    }
 
     if (unreadCount > 0) {
       items.push({
@@ -3040,8 +3068,11 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     );
     const unreadCount = snap.unreadCounts?.[peerKey] ?? 0;
     const hasHistory = (dmMessagesByThread.get(threadKey)?.length ?? 0) > 0;
-    const inCall = voiceManager.getActiveCallThreadKey() === vcThreadKey;
+    const activeCallKeyNow = voiceManager.getActiveCallThreadKey();
+    const inCall = activeCallKeyNow === vcThreadKey;
+    const otherCallActive = Boolean(activeCallKeyNow && !inCall);
     const activeCall = Boolean(voiceManager.getCallStateForThread(vcThreadKey)?.active);
+    const canRingPeer = !isBlockedRel && voiceManager.canRingUserInCurrentCall(latestPeer.username);
 
     const items: ContextMenuItem[] = [];
     if (!isViewing) {
@@ -3060,17 +3091,36 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       },
     });
 
+    if (canRingPeer) {
+      items.push({
+        label: 'Ring to Call',
+        icon: 'phone',
+        onSelect: () => {
+          voiceManager.ringUserInCurrentCall(latestPeer.username);
+        },
+      });
+    }
+
     if (inCall || activeCall || !isBlockedRel) {
       items.push({
         label: inCall
           ? 'Leave Voice Call'
           : activeCall
             ? 'Join Active Call'
-            : 'Start Voice Call',
+            : otherCallActive
+              ? 'Start a Call'
+              : 'Start Voice Call',
         icon: inCall ? 'phone-off' : 'phone',
         onSelect: () => {
           if (inCall) {
             voiceManager.leaveCall();
+          } else if (otherCallActive) {
+            void voiceManager.confirmAndSwitchToCall(
+              { peerUsername: latestPeer.username },
+              vcThreadKey,
+              latestPeer.displayName,
+              () => openDirectMessageWithUser(latestPeer.username),
+            );
           } else {
             voiceManager.startOrJoinCall({ peerUsername: latestPeer.username }, vcThreadKey);
           }
@@ -3716,6 +3766,22 @@ function renderWorkspaceScreen(root: HTMLElement): void {
             },
             onViewMemberProfile: (member) => {
               openProfileModalForUser(member);
+            },
+            canRingToCall: (member) => voiceManager.canRingUserInCurrentCall(member.username),
+            onRingToCall: (member) => {
+              voiceManager.ringUserInCurrentCall(member.username);
+            },
+            onStartCallWithMember: (member) => {
+              const sKey = state.snapshot?.user.username.toLowerCase();
+              if (!sKey) return;
+              const mKey = member.username.toLowerCase();
+              const dmKey = [sKey, mKey].sort().join('::');
+              void voiceManager.confirmAndSwitchToCall(
+                { peerUsername: member.username },
+                dmKey,
+                member.displayName,
+                () => openDirectMessageWithUser(member.username),
+              );
             },
             onSnapshotUpdated: (nextSnapshot) => {
               applyLiveSnapshot(nextSnapshot);
@@ -4821,7 +4887,19 @@ function renderWorkspaceScreen(root: HTMLElement): void {
               callItems.push({
                 label: isRingingOrLive ? 'Join Call' : 'Call Back',
                 icon: 'phone',
-                onSelect: () => voiceManager.startOrJoinCall(apiTarget, vcThreadKey),
+                onSelect: () => {
+                  const otherActive = Boolean(voiceManager.getActiveCallThreadKey());
+                  const label = isGroup
+                    ? (state.snapshot?.groups?.find((g) => g.id === groupId)?.name ??
+                      (initialTarget.kind === 'group' ? initialTarget.group.name : 'Group Call'))
+                    : ((state.snapshot && findKnownDmPeer(state.snapshot, peerKey)?.displayName) ??
+                      peerKey);
+                  if (otherActive) {
+                    void voiceManager.confirmAndSwitchToCall(apiTarget, vcThreadKey, label);
+                  } else {
+                    voiceManager.startOrJoinCall(apiTarget, vcThreadKey);
+                  }
+                },
               });
             }
             callItems.push(
@@ -5986,6 +6064,22 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       },
       onOpenDm: (friendUsername) => {
         openDirectMessageWithUser(friendUsername);
+      },
+      canRingToCall: (friend) => voiceManager.canRingUserInCurrentCall(friend.username),
+      onRingToCall: (friend) => {
+        voiceManager.ringUserInCurrentCall(friend.username);
+      },
+      onStartCallWithFriend: (friend) => {
+        const sKey = state.snapshot?.user.username.toLowerCase();
+        if (!sKey) return;
+        const fKey = friend.username.toLowerCase();
+        const dmKey = [sKey, fKey].sort().join('::');
+        void voiceManager.confirmAndSwitchToCall(
+          { peerUsername: friend.username },
+          dmKey,
+          friend.displayName,
+          () => openDirectMessageWithUser(friend.username),
+        );
       },
       onSnapshotUpdated: (nextSnapshot) => {
         applyLiveSnapshot(nextSnapshot);
@@ -7518,6 +7612,7 @@ function attachMobileViewportSync(): void {
 
 async function bootstrapApp(): Promise<void> {
   attachGlobalEditableContextMenu();
+  attachGlobalLongPressContextMenu();
   attachMobileViewportSync();
   void registerRedshiftServiceWorker();
   const desktopBridge = getDesktopBridge();

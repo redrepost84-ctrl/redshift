@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.23';
+export const CURRENT_REDSHIFT_VERSION = '0.1.24';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,25 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.24',
+    date: 'November 21, 2026',
+    kicker: 'START A CALL & RING TO CALL MENUS, GLOBAL MOBILE LONG-PRESS & SENDER AVATAR NOTIFICATIONS',
+    headline: 'Right-Click "Start a Call" Confirmation, Non-Resetting "Ring to Call", Universal Mobile Long-Press & Profile Avatar Notifications',
+    lead:
+      'Added quick voice-call controls everywhere you interact with people in calls, DMs, group chats, and mobile: right-clicking a profile in a call offers "Start a Call" with a confirmation popup that navigates to their DM and dials them, "Ring to Call" lets you ring DM peers or Group Chat members right into your ongoing call without resetting it, mobile long-press now opens any Redshift context menu globally, and Web Push / desktop notifications use the messenger’s profile picture.',
+    sections: [
+      {
+        heading: 'Calls, Mobile Gestures & Notifications',
+        items: [
+          'Start a Call with Confirmation — Right-clicking (or long-pressing) a participant tile in a call or user in DMs/Group Members/Friends while already in a call opens a "Start a Call" option with an Are-You-Sure dialog; confirming leaves your old call, opens their DM thread, and starts a direct call.',
+          'Ring to Call Without Resetting — While in an ongoing DM or Group call, right-clicking a non-connected Group Chat member (in DMs, Group Members, or the GC row) or an unanswered DM peer offers "Ring to Call", ringing them right into the live call without resetting streams, games, or participants.',
+          'Global Mobile Long-Press Context Menus — Holding (440ms) on mobile touches now opens context menus across DMs, Group Chats, Group Members, Friends, VC tiles, headers, and messages, with click-through protection and native Safari callout suppression.',
+          'Messenger Profile Picture Notifications — Push notification payloads and Service Worker handling now attach the sender/caller’s custom avatar or preset avatar URL so supported Android & desktop OS notifications display the messenger’s profile picture instead of the Redshift app icon.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.23',
     date: 'November 20, 2026',

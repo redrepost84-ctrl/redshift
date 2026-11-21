@@ -5,6 +5,7 @@ import {
   type SocialSocketHandle,
   type ThreadTarget,
 } from './apiClient';
+import { openConfirmPopup } from './chatUi';
 import { type ContextMenuItem, openContextMenu } from './contextMenu';
 import { getDesktopBridge } from './desktopBridge';
 import { resolveGroupAvatar } from './groupDmModals';
@@ -93,6 +94,14 @@ export interface VoiceManagerOptions {
 
 export interface VoiceManagerHandle {
   startOrJoinCall: (target: ThreadTarget, threadKey: string) => void;
+  ringUserInCurrentCall: (targetUsername?: string) => boolean;
+  canRingUserInCurrentCall: (peerUsername: string) => boolean;
+  confirmAndSwitchToCall: (
+    target: ThreadTarget,
+    threadKey: string,
+    targetLabel: string,
+    beforeSwitch?: () => void,
+  ) => Promise<boolean>;
   leaveCall: () => void;
   acceptIncomingCall: (threadKey: string) => void;
   declineIncomingCall: (threadKey: string) => void;
@@ -2399,18 +2408,22 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     user: PublicProfile,
     clientX: number,
     clientY: number,
-    stageMeta?: { stageKey?: string; videoEl?: HTMLVideoElement | null },
+    stageMeta?: { stageKey?: string; videoEl?: HTMLVideoElement | null; ringingOnly?: boolean },
   ) => {
     const peerKey = user.username.toLowerCase();
+    const selfKey = options.getSnapshot()?.user.username.toLowerCase() ?? '';
+    const dmThreadKey = selfKey ? [selfKey, peerKey].sort().join('::') : '';
+    const ringingOnly = Boolean(stageMeta?.ringingOnly);
     const initial = getVoiceUserVolume(peerKey);
     const activeCall = activeCallThreadKey ? callsByThread.get(activeCallThreadKey) : null;
     const participantState = activeCall?.participants.find(
       (p) => p.user.username.toLowerCase() === peerKey,
     );
     const hasScreenShare = Boolean(
-      peers.get(peerKey)?.screenAudioBranch ||
-        peers.get(peerKey)?.remoteScreenStream ||
-        participantState?.screenSharing,
+      !ringingOnly &&
+        (peers.get(peerKey)?.screenAudioBranch ||
+          peers.get(peerKey)?.remoteScreenStream ||
+          participantState?.screenSharing),
     );
 
     const volHeader = document.createElement('div');
@@ -2501,45 +2514,55 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     });
     syncSliderUi(initial);
 
-    const items: ContextMenuItem[] = [
-      {
-        label: 'Mute Locally',
-        icon: 'headphones-off',
-        checked: initial.muted,
-        closeOnSelect: false,
-        onSelect: () => {
-          const cur = getVoiceUserVolume(peerKey);
-          const next = setVoiceUserVolume(peerKey, { muted: !cur.muted });
-          syncSliderUi(next);
-        },
-      },
-      ...(hasScreenShare
-        ? [
-            {
-              label: 'Mute Stream Audio',
-              icon: 'screen' as const,
-              checked: getVoiceUserScreenVolume(peerKey).muted,
-              closeOnSelect: false,
-              onSelect: () => {
-                const cur = getVoiceUserScreenVolume(peerKey);
-                setVoiceUserScreenVolume(peerKey, { muted: !cur.muted });
-                syncSliderUi(getVoiceUserVolume(peerKey));
-              },
+    const items: ContextMenuItem[] = ringingOnly
+      ? [
+          {
+            label: 'Ring to Call',
+            icon: 'phone',
+            onSelect: () => {
+              ringUserInCurrentCall(user.username);
             },
-          ]
-        : []),
-      {
-        label: 'Reset Volume (100%)',
-        icon: 'reset',
-        onSelect: () => {
-          const next = setVoiceUserVolume(peerKey, { volume: 100, muted: false });
-          setVoiceUserScreenVolume(peerKey, { volume: 100, muted: false });
-          syncSliderUi(next);
-        },
-      },
-    ];
+          },
+        ]
+      : [
+          {
+            label: 'Mute Locally',
+            icon: 'headphones-off',
+            checked: initial.muted,
+            closeOnSelect: false,
+            onSelect: () => {
+              const cur = getVoiceUserVolume(peerKey);
+              const next = setVoiceUserVolume(peerKey, { muted: !cur.muted });
+              syncSliderUi(next);
+            },
+          },
+          ...(hasScreenShare
+            ? [
+                {
+                  label: 'Mute Stream Audio',
+                  icon: 'screen' as const,
+                  checked: getVoiceUserScreenVolume(peerKey).muted,
+                  closeOnSelect: false,
+                  onSelect: () => {
+                    const cur = getVoiceUserScreenVolume(peerKey);
+                    setVoiceUserScreenVolume(peerKey, { muted: !cur.muted });
+                    syncSliderUi(getVoiceUserVolume(peerKey));
+                  },
+                },
+              ]
+            : []),
+          {
+            label: 'Reset Volume (100%)',
+            icon: 'reset',
+            onSelect: () => {
+              const next = setVoiceUserVolume(peerKey, { volume: 100, muted: false });
+              setVoiceUserScreenVolume(peerKey, { volume: 100, muted: false });
+              syncSliderUi(next);
+            },
+          },
+        ];
 
-    if (stageMeta?.stageKey) {
+    if (!ringingOnly && stageMeta?.stageKey) {
       const sKey = stageMeta.stageKey;
       const isRemoteScreenKey = sKey.startsWith('scr:');
       const isWatched = !isRemoteScreenKey || watchedStreamKeys.has(sKey);
@@ -2568,6 +2591,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       }
     }
     if (
+      !ringingOnly &&
       stageMeta?.videoEl &&
       typeof document.pictureInPictureEnabled === 'boolean' &&
       document.pictureInPictureEnabled
@@ -2582,20 +2606,40 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       });
     }
 
-    if (options.onOpenDm || options.onViewProfile) {
+    const canStartDirectCall = Boolean(
+      dmThreadKey && activeCallThreadKey && activeCallThreadKey !== dmThreadKey,
+    );
+    if (options.onOpenDm || options.onViewProfile || canStartDirectCall) {
+      let needDivider = items.length > 0;
+      const pushWithDiv = (entry: ContextMenuItem) => {
+        items.push(needDivider ? { ...entry, dividerBefore: true } : entry);
+        needDivider = false;
+      };
+      if (canStartDirectCall) {
+        pushWithDiv({
+          label: 'Start a Call',
+          icon: 'phone',
+          onSelect: () => {
+            void confirmAndSwitchToCall(
+              { peerUsername: user.username },
+              dmThreadKey,
+              user.displayName,
+              () => options.onOpenDm?.(user.username),
+            );
+          },
+        });
+      }
       if (options.onOpenDm) {
-        items.push({
+        pushWithDiv({
           label: 'Message User',
           icon: 'message',
-          dividerBefore: true,
           onSelect: () => options.onOpenDm?.(user.username),
         });
       }
       if (options.onViewProfile) {
-        items.push({
+        pushWithDiv({
           label: 'View Profile',
           icon: 'user',
-          dividerBefore: !options.onOpenDm,
           onSelect: () => options.onViewProfile?.(user),
         });
       }
@@ -2605,7 +2649,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       clientX,
       clientY,
       minWidth: 230,
-      headerWidget: volHeader,
+      headerWidget: ringingOnly ? undefined : volHeader,
       items,
     });
   };
@@ -2888,6 +2932,59 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     startVadPolling();
     syncRingAudio();
     options.onStateChanged();
+  };
+
+  const ringUserInCurrentCall = (targetUsername?: string): boolean => {
+    if (!activeCallThreadKey) {
+      return false;
+    }
+    options.getSocket()?.sendVcRing(activeCallThreadKey, targetUsername);
+    return true;
+  };
+
+  const canRingUserInCurrentCall = (peerUsername: string): boolean => {
+    const snap = options.getSnapshot();
+    const selfKey = snap?.user.username.toLowerCase() ?? '';
+    const peerKey = peerUsername.trim().toLowerCase();
+    if (!activeCallThreadKey || !selfKey || !peerKey || peerKey === selfKey) {
+      return false;
+    }
+    const activeCall = callsByThread.get(activeCallThreadKey);
+    if (!activeCall || !activeCall.active) {
+      return false;
+    }
+    if (activeCall.participants.some((p) => p.user.username.toLowerCase() === peerKey)) {
+      return false;
+    }
+    if (activeCall.kind === 'dm') {
+      return activeCallThreadKey === [selfKey, peerKey].sort().join('::');
+    }
+    if (activeCall.kind === 'group' && activeCall.groupId) {
+      const grp = snap?.groups?.find((g) => g.id === activeCall.groupId);
+      return Boolean(grp?.members.some((m) => m.username.toLowerCase() === peerKey));
+    }
+    return false;
+  };
+
+  const confirmAndSwitchToCall = async (
+    target: ThreadTarget,
+    threadKey: string,
+    targetLabel: string,
+    beforeSwitch?: () => void,
+  ): Promise<boolean> => {
+    if (activeCallThreadKey && activeCallThreadKey !== threadKey) {
+      const confirmed = await openConfirmPopup({
+        title: `Start a Call with ${targetLabel}?`,
+        message: `You are currently in another voice call. Are you sure you want to leave your current call and start a call with ${targetLabel}?`,
+        confirmLabel: 'Start Call',
+      });
+      if (!confirmed || destroyed) {
+        return false;
+      }
+    }
+    beforeSwitch?.();
+    startOrJoinCall(target, threadKey);
+    return true;
   };
 
   const acceptIncomingCall = (threadKey: string) => {
@@ -3275,6 +3372,9 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     ) {
       return;
     }
+    if (!incomingCalls.has(payload.threadKey)) {
+      desktopNotifiedCalls.delete(payload.threadKey);
+    }
     incomingCalls.set(payload.threadKey, payload);
     syncIncomingPopup();
     syncRingAudio();
@@ -3294,12 +3394,9 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
             : payload.caller.displayName,
         body:
           payload.kind === 'group'
-            ? `${payload.caller.displayName} started a voice call — click to view`
+            ? `${payload.caller.displayName} is ringing you to join — click to answer`
             : 'Incoming Redshift voice call — click to answer',
-        icon:
-          payload.kind === 'group' && grp
-            ? resolveGroupAvatar(grp)
-            : options.resolveAvatar(payload.caller),
+        icon: options.resolveAvatar(payload.caller),
         tag: `redshift-call-${payload.threadKey}`,
         badge: 'CALL',
         userStatus: snap?.user.status,
@@ -3559,28 +3656,35 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       tile.appendChild(subEl);
     }
 
-    if (!opts.ringing) {
-      if (opts.isSelf) {
-        tile.title = 'Right-click for voice options';
+    if (opts.ringing) {
+      if (!opts.isSelf) {
+        tile.title = 'Right-click to ring again or start a DM call';
         tile.addEventListener('contextmenu', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          openSelfVoiceMenu(e.clientX, e.clientY, {
-            stageKey: opts.cameraStream ? opts.stageKey : undefined,
-            anchorEl: tile,
-          });
-        });
-      } else {
-        tile.title = 'Right-click to adjust volume & user options';
-        tile.addEventListener('contextmenu', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          openRemoteParticipantMenu(user, e.clientX, e.clientY, {
-            stageKey: opts.cameraStream ? opts.stageKey : undefined,
-            videoEl: tile.querySelector('video'),
-          });
+          openRemoteParticipantMenu(user, e.clientX, e.clientY, { ringingOnly: true });
         });
       }
+    } else if (opts.isSelf) {
+      tile.title = 'Right-click for voice options';
+      tile.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openSelfVoiceMenu(e.clientX, e.clientY, {
+          stageKey: opts.cameraStream ? opts.stageKey : undefined,
+          anchorEl: tile,
+        });
+      });
+    } else {
+      tile.title = 'Right-click to adjust volume & user options';
+      tile.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openRemoteParticipantMenu(user, e.clientX, e.clientY, {
+          stageKey: opts.cameraStream ? opts.stageKey : undefined,
+          videoEl: tile.querySelector('video'),
+        });
+      });
     }
 
     return tile;
@@ -5106,6 +5210,9 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
 
   return {
     startOrJoinCall,
+    ringUserInCurrentCall,
+    canRingUserInCurrentCall,
+    confirmAndSwitchToCall,
     leaveCall,
     acceptIncomingCall,
     declineIncomingCall,

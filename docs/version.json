@@ -1,11 +1,11 @@
 {
-  "version": "0.1.23",
-  "releasedAt": "2026-11-21T08:07:00.967Z",
-  "changelog": "Quoridor 17x17 groove walls + telegraph, Minesweeper Last Man Standing, Chess/Checkers Blitz 10s & Vexillo 30s timers, sidebar green controller/phone badges, stream/activity Eye counters, auto-end previous activity on join, mid-call stability fix, and mobile fullscreen/keyboard/DM-dot/profile UI fixes",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.23/Redshift-patch.asar",
-  "sha256": "59ebfe44e96feec8c36fd38c6f3c3a841f4b755ed508aa61d31f1c957328fbc0",
-  "size": 6507319,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.23/RedshiftSetup.exe",
+  "version": "0.1.24",
+  "releasedAt": "2026-11-21T08:28:00.298Z",
+  "changelog": "Right-click Start a Call confirmation + DM jump, non-resetting Ring to Call from DMs/Group Chats/Members, global mobile long-press context menus, and messenger profile picture notification icons",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.24/Redshift-patch.asar",
+  "sha256": "bc59331374eed4915a788f45e9265f05f54b993c2253b3ab5da6f5c0197a76f4",
+  "size": 6518154,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.24/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

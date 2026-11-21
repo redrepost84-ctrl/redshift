@@ -32,6 +32,9 @@ interface FriendsViewOptions {
   activeTab: FriendsTab;
   onTabChange: (tab: FriendsTab) => void;
   onOpenDm: (friendUsername: string) => void;
+  canRingToCall?: (friend: PublicProfile) => boolean;
+  onRingToCall?: (friend: PublicProfile) => void;
+  onStartCallWithFriend?: (friend: PublicProfile) => void;
   onSnapshotUpdated: (snapshot: SocialSnapshot) => void;
 }
 
@@ -284,42 +287,57 @@ export function renderFriendsPanel(
     });
 
     const openMenuForFriend = (anchorEl?: HTMLElement, clientX?: number, clientY?: number) => {
+      const items = [
+        {
+          label: 'Message',
+          onSelect: () => options.onOpenDm(friend.username),
+        },
+        {
+          label: 'View Profile',
+          onSelect: () => {
+            openPublicProfileModal({
+              initialUser: friend,
+              getSnapshot: options.getSnapshot,
+              resolveAvatar: options.resolveAvatar,
+              onSnapshotUpdated: options.onSnapshotUpdated,
+              onOpenDm: options.onOpenDm,
+            });
+          },
+        },
+      ];
+      if (options.canRingToCall?.(friend) && options.onRingToCall) {
+        items.push({
+          label: 'Ring to Call',
+          onSelect: () => options.onRingToCall?.(friend),
+        });
+      }
+      if (options.onStartCallWithFriend) {
+        items.push({
+          label: 'Start a Call',
+          onSelect: () => options.onStartCallWithFriend?.(friend),
+        });
+      }
+      items.push(
+        {
+          label: 'Remove Friend',
+          danger: true,
+          onSelect: () => {
+            void confirmFriendRelationAction('remove', friend, options.onSnapshotUpdated);
+          },
+        } as (typeof items)[number] & { danger?: boolean },
+        {
+          label: 'Block',
+          danger: true,
+          onSelect: () => {
+            void confirmFriendRelationAction('block', friend, options.onSnapshotUpdated);
+          },
+        } as (typeof items)[number] & { danger?: boolean },
+      );
       openFloatingActionMenu({
         anchorEl,
         clientX,
         clientY,
-        items: [
-          {
-            label: 'Message',
-            onSelect: () => options.onOpenDm(friend.username),
-          },
-          {
-            label: 'View Profile',
-            onSelect: () => {
-              openPublicProfileModal({
-                initialUser: friend,
-                getSnapshot: options.getSnapshot,
-                resolveAvatar: options.resolveAvatar,
-                onSnapshotUpdated: options.onSnapshotUpdated,
-                onOpenDm: options.onOpenDm,
-              });
-            },
-          },
-          {
-            label: 'Remove Friend',
-            danger: true,
-            onSelect: () => {
-              void confirmFriendRelationAction('remove', friend, options.onSnapshotUpdated);
-            },
-          },
-          {
-            label: 'Block',
-            danger: true,
-            onSelect: () => {
-              void confirmFriendRelationAction('block', friend, options.onSnapshotUpdated);
-            },
-          },
-        ],
+        items,
       });
     };
 

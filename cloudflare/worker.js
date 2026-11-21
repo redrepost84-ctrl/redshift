@@ -1248,6 +1248,30 @@ export class RedshiftHub extends DurableObject {
     );
   }
 
+  /**
+   * Builds sender avatar fields (`icon` URL or `presetAvatar` index) for Web Push payloads
+   * so mobile/desktop notifications show the messenger's profile picture instead of the app icon.
+   */
+  getNotificationAvatarPayload(account) {
+    if (!account) return {};
+    const customUrl = account.avatarDataUrl
+      ? account.avatarDataUrl.startsWith('data:image/')
+        ? this.getAccountAvatarUrl(account)
+        : account.avatarDataUrl
+      : undefined;
+    if (customUrl) {
+      return { icon: customUrl };
+    }
+    const presetIdx =
+      typeof account.avatarPreset === 'number' &&
+      Number.isInteger(account.avatarPreset) &&
+      account.avatarPreset >= 0 &&
+      account.avatarPreset <= 3
+        ? account.avatarPreset
+        : 0;
+    return { presetAvatar: presetIdx };
+  }
+
   getAccountBannerUrl(account) {
     if (!account || !account.bannerDataUrl) {
       return undefined;
@@ -1895,6 +1919,7 @@ export class RedshiftHub extends DurableObject {
     });
     if (eventPayload && typeof eventPayload === 'object') {
       const actorName = eventPayload.actor?.displayName || eventPayload.actor?.username || 'Someone';
+      const actorAvatarFields = this.getNotificationAvatarPayload(eventPayload.actor);
       if (eventPayload.kind === 'friend-request') {
         this.sendPushToUser(recipientUsername, {
           title: 'New Friend Request',
@@ -1902,6 +1927,7 @@ export class RedshiftHub extends DurableObject {
           tag: `friend-req:${eventPayload.actor?.username || ''}`,
           threadKind: 'friends',
           threadId: 'pending',
+          ...actorAvatarFields,
         });
       } else if (eventPayload.kind === 'group-added' && eventPayload.groupId) {
         this.sendPushToUser(recipientUsername, {
@@ -1910,6 +1936,7 @@ export class RedshiftHub extends DurableObject {
           tag: `group-add:${eventPayload.groupId}`,
           threadKind: 'group',
           threadId: eventPayload.groupId,
+          ...actorAvatarFields,
         });
       }
     }
@@ -2109,6 +2136,73 @@ export class RedshiftHub extends DurableObject {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Rings eligible non-connected thread participants for either initial `vc:join` or mid-call `vc:ring`
+   * without resetting ongoing call state, participants, streams, or activities.
+   */
+  ringCallTargets(call, ctx, callerKey, requestedTargets = null, ongoingRing = false) {
+    const callerAcc = this.findAccountByUsername(callerKey);
+    const grp = ctx.groupId ? this.db.groupDms[ctx.groupId] : undefined;
+    const now = Date.now();
+    const targetSet =
+      Array.isArray(requestedTargets) && requestedTargets.length > 0
+        ? new Set(requestedTargets.map((u) => String(u).trim().toLowerCase()).filter(Boolean))
+        : null;
+    const callerAvatarFields = this.getNotificationAvatarPayload(callerAcc);
+    let rangAny = false;
+
+    for (const otherRaw of ctx.participants) {
+      const otherKey = otherRaw.toLowerCase();
+      if (targetSet && !targetSet.has(otherKey)) continue;
+      if (otherKey === callerKey || call.participants.has(otherKey)) continue;
+      if (this.hasAnyBlockBetween(callerKey, otherKey)) continue;
+      const otherAcc = this.findAccountByUsername(otherKey);
+      if (!otherAcc) continue;
+      if (
+        ctx.kind === 'dm' &&
+        !this.areFriends(callerKey, otherKey) &&
+        otherAcc.privacy?.allowNonFriendDms === false
+      ) {
+        continue;
+      }
+      call.ringing.set(otherKey, { username: otherKey, expiresAt: now + VC_RING_TIMEOUT_MS });
+      rangAny = true;
+      if (callerAcc) {
+        this.sendWsEventToUser(otherKey, {
+          type: 'vc:incoming',
+          threadKey: call.threadKey,
+          kind: call.kind,
+          groupId: call.groupId,
+          groupName: grp?.name,
+          groupIconDataUrl: this.getGroupIconUrl(grp),
+          caller: this.toPublicProfile(callerAcc, otherKey),
+        });
+        const callThreadMuteKey =
+          call.kind === 'group' && call.groupId ? `group:${call.groupId}` : `dm:${callerKey}`;
+        if (!this.isThreadMutedForPush(otherKey, callThreadMuteKey, true)) {
+          this.sendPushToUser(
+            otherKey,
+            {
+              title: call.kind === 'group' ? grp?.name || 'Group Call' : callerAcc.displayName,
+              body:
+                call.kind === 'group'
+                  ? ongoingRing
+                    ? `${callerAcc.displayName} is ringing you into the call`
+                    : `${callerAcc.displayName} started a call`
+                  : 'Incoming voice call...',
+              tag: `vc:${call.threadKey}`,
+              threadKind: call.kind === 'group' ? 'group' : 'dm',
+              threadId: call.kind === 'group' ? call.groupId : callerKey,
+              ...callerAvatarFields,
+            },
+            { ttl: 35, urgency: 'high' },
+          );
+        }
+      }
+    }
+    return rangAny;
   }
 
   clearAllRingingInCall(call) {
@@ -3358,52 +3452,7 @@ export class RedshiftHub extends DurableObject {
 
       const shouldRing = isNewCall && msg.ring !== false;
       if (shouldRing) {
-        const callerAcc = this.findAccountByUsername(ownerKey);
-        const grp = ctx.groupId ? this.db.groupDms[ctx.groupId] : undefined;
-        for (const otherRaw of ctx.participants) {
-          const otherKey = otherRaw.toLowerCase();
-          if (otherKey === ownerKey || call.participants.has(otherKey)) continue;
-          if (this.hasAnyBlockBetween(ownerKey, otherKey)) continue;
-          const otherAcc = this.findAccountByUsername(otherKey);
-          if (!otherAcc) continue;
-          if (
-            ctx.kind === 'dm' &&
-            !this.areFriends(ownerKey, otherKey) &&
-            otherAcc.privacy?.allowNonFriendDms === false
-          ) {
-            continue;
-          }
-          call.ringing.set(otherKey, { username: otherKey, expiresAt: now + VC_RING_TIMEOUT_MS });
-          if (callerAcc) {
-            this.sendWsEventToUser(otherKey, {
-              type: 'vc:incoming',
-              threadKey: call.threadKey,
-              kind: call.kind,
-              groupId: call.groupId,
-              groupName: grp?.name,
-              groupIconDataUrl: this.getGroupIconUrl(grp),
-              caller: this.toPublicProfile(callerAcc, otherKey),
-            });
-            const callThreadMuteKey =
-              call.kind === 'group' && call.groupId ? `group:${call.groupId}` : `dm:${ownerKey}`;
-            if (!this.isThreadMutedForPush(otherKey, callThreadMuteKey, true)) {
-              this.sendPushToUser(
-                otherKey,
-                {
-                  title: call.kind === 'group' ? grp?.name || 'Group Call' : callerAcc.displayName,
-                  body:
-                    call.kind === 'group'
-                      ? `${callerAcc.displayName} started a call`
-                      : 'Incoming voice call...',
-                  tag: `vc:${call.threadKey}`,
-                  threadKind: call.kind === 'group' ? 'group' : 'dm',
-                  threadId: call.kind === 'group' ? call.groupId : ownerKey,
-                },
-                { ttl: 35, urgency: 'high' },
-              );
-            }
-          }
-        }
+        this.ringCallTargets(call, ctx, ownerKey, null, false);
       }
 
       // Broadcast live VC state IMMEDIATELY so joining/ringing UI updates in <10ms.
@@ -3416,6 +3465,42 @@ export class RedshiftHub extends DurableObject {
         this.syncCallLogMessage(call, call.everHadAnswer ? 'active' : 'ringing');
       }
       this.persistActiveVoiceCalls();
+      return;
+    }
+
+    if (msg.type === 'vc:ring') {
+      const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';
+      const call = threadKey ? this.activeVoiceCalls.get(threadKey) : undefined;
+      if (!call || call.finalized || !call.participants.has(ownerKey)) {
+        return;
+      }
+      const targetUser =
+        typeof msg.targetUsername === 'string' ? msg.targetUsername.trim().toLowerCase() : '';
+      const peerForCtx =
+        call.kind === 'dm'
+          ? call.allowedUsers.find((u) => u.toLowerCase() !== ownerKey) || targetUser
+          : '';
+      const ctx = this.resolveThreadContext(
+        ownerKey,
+        call.kind === 'group' ? { groupId: call.groupId } : { peerUsername: peerForCtx },
+      );
+      if (!ctx.ok) {
+        return;
+      }
+      if (ctx.kind === 'group') {
+        call.allowedUsers = ctx.participants.map((u) => u.toLowerCase());
+      }
+      const rang = this.ringCallTargets(
+        call,
+        ctx,
+        ownerKey,
+        targetUser ? [targetUser] : null,
+        true,
+      );
+      if (rang) {
+        this.broadcastVcState(call);
+        this.persistActiveVoiceCalls();
+      }
       return;
     }
 
@@ -6163,6 +6248,7 @@ export class RedshiftHub extends DurableObject {
         const userMuteKey = ctx.kind === 'group' ? `group:${ctx.groupId}` : `dm:${selfKey}`;
         const isPinged = mentionedUsers.has(pKey) || replyTargetUser === pKey;
         if (this.isThreadMutedForPush(pKey, userMuteKey, isPinged)) continue;
+        const pushAvatarFields = this.getNotificationAvatarPayload(activeUser);
         this.sendPushToUser(pKey, {
           title:
             ctx.kind === 'group'
@@ -6172,6 +6258,7 @@ export class RedshiftHub extends DurableObject {
           tag: userMuteKey,
           threadKind: ctx.kind === 'group' ? 'group' : 'dm',
           threadId: ctx.kind === 'group' ? ctx.groupId : selfKey,
+          ...pushAvatarFields,
         });
       }
 

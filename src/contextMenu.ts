@@ -516,6 +516,132 @@ export function attachGlobalEditableContextMenu(): () => void {
   };
 }
 
+/**
+ * Enables mobile/touch long-press (440ms hold) to open Redshift context menus anywhere
+ * an element handles `contextmenu` (e.g. profiles, DMs, GC members, VC tiles, messages),
+ * while suppressing trailing tap-through clicks and Android duplicate native contextmenu events.
+ */
+export function attachGlobalLongPressContextMenu(): () => void {
+  const LONG_PRESS_MS = 440;
+  let longPressTimer: number | null = null;
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchOriginTarget: HTMLElement | null = null;
+  let syntheticFiredAt = 0;
+  let suppressNextClickUntil = 0;
+
+  const clearLongPress = () => {
+    if (longPressTimer !== null) {
+      window.clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  };
+
+  const onTouchStart = (ev: TouchEvent) => {
+    if (ev.touches.length !== 1) {
+      clearLongPress();
+      return;
+    }
+    const target = ev.target instanceof HTMLElement ? ev.target : null;
+    if (
+      !target ||
+      target.closest(
+        '.floating-action-menu, .ctx-menu, input, textarea, select, [contenteditable="true"], .chat-message-actions, .msg-action-btn, .composer-icon-btn, .vc-ctrl-btn, .vc-activity-stage, [data-no-long-press]',
+      )
+    ) {
+      clearLongPress();
+      return;
+    }
+    const touch = ev.touches[0];
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+    touchOriginTarget = target;
+    clearLongPress();
+    longPressTimer = window.setTimeout(() => {
+      longPressTimer = null;
+      const origin = touchOriginTarget;
+      if (!origin || !origin.isConnected) {
+        return;
+      }
+      syntheticFiredAt = Date.now();
+      const ctxEvent = new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: touchStartX,
+        clientY: touchStartY,
+      });
+      origin.dispatchEvent(ctxEvent);
+      if (ctxEvent.defaultPrevented) {
+        suppressNextClickUntil = Date.now() + 600;
+        try {
+          navigator.vibrate?.(10);
+        } catch {}
+      }
+    }, LONG_PRESS_MS);
+  };
+
+  const onTouchMove = (ev: TouchEvent) => {
+    if (longPressTimer === null || ev.touches.length !== 1) return;
+    const t = ev.touches[0];
+    if (Math.hypot(t.clientX - touchStartX, t.clientY - touchStartY) > 10) {
+      clearLongPress();
+    }
+  };
+
+  const onTouchEndOrCancel = () => {
+    clearLongPress();
+  };
+
+  const onScroll = () => {
+    clearLongPress();
+  };
+
+  const onNativeContextMenu = (ev: MouseEvent) => {
+    if (!ev.isTrusted) {
+      return;
+    }
+    clearLongPress();
+    if (Date.now() - syntheticFiredAt < 650) {
+      ev.preventDefault();
+      ev.stopPropagation();
+    }
+  };
+
+  const onCaptureClick = (ev: MouseEvent) => {
+    if (Date.now() > suppressNextClickUntil) {
+      return;
+    }
+    const target = ev.target instanceof HTMLElement ? ev.target : null;
+    if (target?.closest('.floating-action-menu, .ctx-menu')) {
+      suppressNextClickUntil = 0;
+      return;
+    }
+    ev.preventDefault();
+    ev.stopPropagation();
+    ev.stopImmediatePropagation();
+    suppressNextClickUntil = 0;
+  };
+
+  document.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
+  document.addEventListener('touchmove', onTouchMove, { passive: true, capture: true });
+  document.addEventListener('touchend', onTouchEndOrCancel, { passive: true, capture: true });
+  document.addEventListener('touchcancel', onTouchEndOrCancel, { passive: true, capture: true });
+  window.addEventListener('scroll', onScroll, { passive: true, capture: true });
+  window.addEventListener('contextmenu', onNativeContextMenu, true);
+  window.addEventListener('click', onCaptureClick, true);
+
+  return () => {
+    clearLongPress();
+    document.removeEventListener('touchstart', onTouchStart, true);
+    document.removeEventListener('touchmove', onTouchMove, true);
+    document.removeEventListener('touchend', onTouchEndOrCancel, true);
+    document.removeEventListener('touchcancel', onTouchEndOrCancel, true);
+    window.removeEventListener('scroll', onScroll, true);
+    window.removeEventListener('contextmenu', onNativeContextMenu, true);
+    window.removeEventListener('click', onCaptureClick, true);
+  };
+}
+
 /** Triggers a browser download for a file or media attachment URL. */
 export function triggerDownload(href: string, filename: string): void {
   const link = document.createElement('a');

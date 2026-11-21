@@ -14844,3 +14844,21 @@ body {
     opacity: 1;
   }
 }
+
+/* Mobile Touch: prevent iOS Safari callout/text-selection loupe from overriding long-press context menus */
+@media (hover: none) and (pointer: coarse) {
+  .sidebar-dm-item,
+  .sidebar-dm-item--group,
+  .friend-row,
+  .group-member-row,
+  .vc-participant-tile,
+  .vc-screen-share-tile,
+  .vc-sidebar-status-card,
+  .dm-header,
+  .chat-message-avatar,
+  .chat-message-author {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
