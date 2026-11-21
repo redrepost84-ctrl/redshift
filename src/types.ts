@@ -425,3 +425,57 @@ export interface VcSpeakingEventPayload {
   username: string;
   speaking: boolean;
 }
+
+export type ActivityGameId =
+  | 'chess'
+  | 'checkers'
+  | 'minesweeper'
+  | 'vexilloguessr'
+  | 'pool'
+  | 'quoridor';
+
+export interface ActivityPlayerEntry {
+  username: string;
+  displayName: string;
+  avatarPreset: number | null;
+  avatarDataUrl?: string;
+  seat: number;
+  wins: number;
+}
+
+export interface ActivitySpectatorEntry {
+  username: string;
+  displayName: string;
+  avatarPreset: number | null;
+  avatarDataUrl?: string;
+}
+
+export interface ActivityLobby {
+  id: string;
+  gameId: ActivityGameId;
+  threadKey: string;
+  isPublic: boolean;
+  title: string;
+  hostUsername: string;
+  maxPlayers: number;
+  status: 'waiting' | 'playing' | 'finished';
+  players: ActivityPlayerEntry[];
+  spectators: ActivitySpectatorEntry[];
+  gameState: any;
+  version: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ActivityListEventPayload {
+  lobbies: ActivityLobby[];
+}
+
+export interface ActivityLobbyUpdateEventPayload {
+  lobby: ActivityLobby;
+}
+
+export interface ActivityLobbyRemovedEventPayload {
+  lobbyId: string;
+  threadKey?: string;
+}

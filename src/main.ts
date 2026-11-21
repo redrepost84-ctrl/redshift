@@ -6715,6 +6715,15 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     onVcError: (errMsg) => {
       activeDmErrorReporter?.(errMsg);
     },
+    onActivityList: (payload) => {
+      voiceManager.handleActivityList(payload);
+    },
+    onActivityLobbyUpdate: (payload) => {
+      voiceManager.handleActivityLobbyUpdate(payload);
+    },
+    onActivityLobbyRemoved: (payload) => {
+      voiceManager.handleActivityLobbyRemoved(payload);
+    },
     onDmMessage: ({ threadUsers, groupId, message }) => {
       const cacheKey = resolveEventCacheKey({ threadUsers, groupId });
       const selfKey = state.snapshot?.user.username.toLowerCase();

@@ -1,5 +1,9 @@
 import { getDesktopBridge } from './desktopBridge';
 import type {
+  ActivityListEventPayload,
+  ActivityLobby,
+  ActivityLobbyRemovedEventPayload,
+  ActivityLobbyUpdateEventPayload,
   AttachmentKind,
   ChatMessage,
   DmAttachment,
@@ -1833,6 +1837,7 @@ export interface SocialSocketHandle {
   ) => void;
   sendVcSpeaking: (threadKey: string, speaking: boolean) => void;
   sendVcSignal: (threadKey: string, toUsername: string, signal: VcSignalData) => void;
+  sendActivityFrame: (payload: Record<string, unknown>) => void;
   disconnect: () => void;
 }
 
@@ -1856,6 +1861,9 @@ export function connectSocialSocket(handlers: {
   onVcSpeaking?: (payload: VcSpeakingEventPayload) => void;
   onVcTransferred?: (payload: VcTransferredEventPayload) => void;
   onVcError?: (error: string) => void;
+  onActivityList?: (payload: ActivityListEventPayload) => void;
+  onActivityLobbyUpdate?: (payload: ActivityLobbyUpdateEventPayload) => void;
+  onActivityLobbyRemoved?: (payload: ActivityLobbyRemovedEventPayload) => void;
 }): SocialSocketHandle {
   let closedByCaller = false;
   let socket: WebSocket | null = null;
@@ -2026,6 +2034,15 @@ export function connectSocialSocket(handlers: {
           });
         } else if (msg.type === 'vc:error' && typeof msg.error === 'string') {
           handlers.onVcError?.(msg.error);
+        } else if (msg.type === 'activity:list' && Array.isArray(msg.lobbies)) {
+          handlers.onActivityList?.({ lobbies: msg.lobbies as ActivityLobby[] });
+        } else if (msg.type === 'activity:lobby-update' && msg.lobby) {
+          handlers.onActivityLobbyUpdate?.({ lobby: msg.lobby as ActivityLobby });
+        } else if (msg.type === 'activity:lobby-removed' && typeof msg.lobbyId === 'string') {
+          handlers.onActivityLobbyRemoved?.({
+            lobbyId: msg.lobbyId,
+            threadKey: typeof msg.threadKey === 'string' ? msg.threadKey : undefined,
+          });
         }
       } catch {
         // Ignore malformed websocket frames.
@@ -2100,6 +2117,9 @@ export function connectSocialSocket(handlers: {
     },
     sendVcSignal: (threadKey: string, toUsername: string, signal: VcSignalData) => {
       sendFrame({ type: 'vc:signal', threadKey, toUsername, signal });
+    },
+    sendActivityFrame: (payload: Record<string, unknown>) => {
+      sendFrame(payload, true);
     },
     disconnect: () => {
       closedByCaller = true;

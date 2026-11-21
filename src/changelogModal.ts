@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.20';
+export const CURRENT_REDSHIFT_VERSION = '0.1.21';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,24 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.21',
+    date: 'November 20, 2026',
+    kicker: 'VOICE CALL ACTIVITIES & 6 BUILT-IN ONLINE GAMES',
+    headline: 'Play Chess, Checkers, Minesweeper, VexilloGuessr, 8-Ball Pool & Quoridor Live in Calls',
+    lead:
+      'Added an Activities button to the voice call bar with a horizontally scrollable chat-bubble game launcher, stream-style join/watch tiles so nobody is forced into a game screen, and 6 built-in online multiplayer games with lobbies.',
+    sections: [
+      {
+        heading: 'Built-In Multiplayer Games & Stream-Style Lobbies',
+        items: [
+          'Scrollable Chat-Bubble Game Launcher — Click the new Activities icon in the voice call bar to scroll left-to-right through built-in Redshift game logos.',
+          'Stream-Style Activity Tiles — Active lobbies appear as compact tiles in the call stage. You are never forced to watch or play, and you can click Hide Game anytime to minimize the board without restarting or leaving your match.',
+          '6 Online Multiplayer Games With Lobbies — Play competitive 1v1 Chess, Checkers, Minesweeper Race (first to flag all wins / first to hit a mine loses), VexilloGuessr (turn-based 4-choice world flag duel with 3 lives each), 8-Ball Pool, and 2–4 player Quoridor (1v1, 1v1v1, or 1v1v1v1).',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.20',
     date: 'November 20, 2026',

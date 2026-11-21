@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.21',
+      published_at: '2026-11-21T06:09:00Z',
+      body: 'Voice Call Activities: Added an Activities button in the VC bar with a horizontally scrollable chat-bubble game launcher, stream-style join/watch/hide tiles so nobody is forced into a game screen or forced to restart, and 6 built-in online multiplayer games with lobbies (Chess, Checkers, Minesweeper Race, VexilloGuessr, 8-Ball Pool, and 2–4 player Quoridor).',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.21`,
+    },
+    {
       tag_name: 'v0.1.20',
       published_at: '2026-11-21T05:18:00Z',
       body: 'Fixed DM threads with custom status replies failing to appear on desktop and mobile, and repositioned the iPhone Sign-Up/Auth Back button safely below the iOS top pull-down drag zone with an inline thumb-reachable Back button.',

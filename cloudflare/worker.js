@@ -617,6 +617,7 @@ export class RedshiftHub extends DurableObject {
     this.lastSeenByUser = new Map();
     this.typingTimers = new Map();
     this.activeVoiceCalls = new Map();
+    this.activeActivityLobbies = new Map();
     this.rateLimiter = createRateLimiter();
     this.lastKnownPublicOrigin = '';
 
@@ -635,6 +636,38 @@ export class RedshiftHub extends DurableObject {
     const hasOpenSockets = this.ctx.getWebSockets().length > 0;
     this.db = this.store.loadDb(!hasOpenSockets);
     this.restoreActiveVoiceCalls();
+    this.restoreActiveActivityLobbies();
+  }
+
+  persistActiveActivityLobbies() {
+    const cutoff = Date.now() - 45 * 60 * 1000;
+    const list = [];
+    for (const [id, lobby] of this.activeActivityLobbies.entries()) {
+      if ((lobby.updatedAt || lobby.createdAt || 0) < cutoff) {
+        this.activeActivityLobbies.delete(id);
+        continue;
+      }
+      list.push(lobby);
+    }
+    this.store.setKvRow('_activeActivityLobbies', list);
+  }
+
+  restoreActiveActivityLobbies() {
+    this.activeActivityLobbies.clear();
+    const row = this.store.getKvRow('_activeActivityLobbies');
+    if (!row || !row.json) return;
+    try {
+      const list = JSON.parse(row.json);
+      if (!Array.isArray(list)) return;
+      const cutoff = Date.now() - 45 * 60 * 1000;
+      for (const lobby of list) {
+        if (lobby && lobby.id && (lobby.updatedAt || lobby.createdAt || 0) >= cutoff) {
+          this.activeActivityLobbies.set(lobby.id, lobby);
+        }
+      }
+    } catch {
+      // Ignore corrupt cached lobbies.
+    }
   }
 
   saveDb() {
@@ -2118,6 +2151,123 @@ export class RedshiftHub extends DurableObject {
     }
   }
 
+  buildActivityUserProfile(username) {
+    const acc = this.findAccountByUsername(username);
+    if (!acc) {
+      return {
+        username,
+        displayName: username,
+        avatarPreset: 0,
+        avatarDataUrl: undefined,
+      };
+    }
+    return {
+      username: acc.username,
+      displayName: acc.displayName,
+      avatarPreset: acc.avatarPreset ?? null,
+      avatarDataUrl: this.getAccountAvatarUrl(acc),
+    };
+  }
+
+  serializeActivityLobby(lobby) {
+    return {
+      id: lobby.id,
+      gameId: lobby.gameId,
+      threadKey: lobby.threadKey,
+      isPublic: Boolean(lobby.isPublic),
+      title: lobby.title,
+      hostUsername: lobby.hostUsername,
+      maxPlayers: lobby.maxPlayers,
+      status: lobby.status,
+      players: (lobby.players || []).map((p) => ({
+        ...this.buildActivityUserProfile(p.username),
+        seat: p.seat ?? 0,
+        wins: p.wins ?? 0,
+      })),
+      spectators: (lobby.spectators || []).map((s) => ({
+        ...this.buildActivityUserProfile(s.username),
+      })),
+      gameState: lobby.gameState ?? null,
+      version: lobby.version ?? 1,
+      createdAt: lobby.createdAt,
+      updatedAt: lobby.updatedAt,
+    };
+  }
+
+  getActivityLobbyRecipients(lobby) {
+    const recipients = new Set();
+    for (const p of lobby.players || []) {
+      if (p?.username) recipients.add(p.username.toLowerCase());
+    }
+    for (const s of lobby.spectators || []) {
+      if (s?.username) recipients.add(s.username.toLowerCase());
+    }
+    if (lobby.threadKey) {
+      const call = this.activeVoiceCalls.get(lobby.threadKey);
+      if (call) {
+        for (const u of this.getCallRecipients(call)) {
+          recipients.add(u.toLowerCase());
+        }
+      } else if (lobby.threadKey.startsWith('group:')) {
+        const gid = lobby.threadKey.slice('group:'.length);
+        const grp = this.db.groupDms[gid];
+        for (const m of grp?.members || []) {
+          recipients.add(m.toLowerCase());
+        }
+      } else {
+        for (const part of lobby.threadKey.split('::')) {
+          if (part) recipients.add(part.toLowerCase());
+        }
+      }
+    }
+    if (lobby.isPublic) {
+      for (const ws of this.ctx.getWebSockets()) {
+        const att = ws.deserializeAttachment();
+        if (att?.username) {
+          recipients.add(att.username.toLowerCase());
+        }
+      }
+    }
+    return recipients;
+  }
+
+  broadcastActivityLobby(lobby) {
+    const payload = {
+      type: 'activity:lobby-update',
+      lobby: this.serializeActivityLobby(lobby),
+    };
+    for (const targetKey of this.getActivityLobbyRecipients(lobby)) {
+      this.sendWsEventToUser(targetKey, payload);
+    }
+  }
+
+  sendActiveActivitiesToUser(username, specificWs = null) {
+    const cutoff = Date.now() - 45 * 60 * 1000;
+    const cleanKey = username.toLowerCase();
+    const list = [];
+    for (const [id, lobby] of this.activeActivityLobbies.entries()) {
+      if ((lobby.updatedAt || lobby.createdAt || 0) < cutoff) {
+        this.activeActivityLobbies.delete(id);
+        continue;
+      }
+      const rec = this.getActivityLobbyRecipients(lobby);
+      if (lobby.isPublic || rec.has(cleanKey)) {
+        list.push(this.serializeActivityLobby(lobby));
+      }
+    }
+    const payload = {
+      type: 'activity:list',
+      lobbies: list,
+    };
+    if (specificWs) {
+      try {
+        specificWs.send(JSON.stringify(payload));
+      } catch {}
+    } else {
+      this.sendWsEventToUser(cleanKey, payload);
+    }
+  }
+
   cleanupUserFromVoiceCalls(username) {
     const cleanKey = username.toLowerCase();
     let anyChanged = false;
@@ -2882,6 +3032,7 @@ export class RedshiftHub extends DurableObject {
       } catch {}
     }
     this.sendActiveVcSnapshotsToUser(key, server);
+    this.sendActiveActivitiesToUser(key, server);
     if (wasOffline) {
       this.notifyRelatedPeers(key, false);
     }
@@ -3260,6 +3411,223 @@ export class RedshiftHub extends DurableObject {
           this.sendWsEventToUser(toKey, sigPayload);
         }
       }
+      return;
+    }
+
+    if (msg.type === 'activity:list') {
+      this.sendActiveActivitiesToUser(ownerKey, ws);
+      return;
+    }
+
+    if (msg.type === 'activity:create') {
+      const validGames = new Set([
+        'chess',
+        'checkers',
+        'minesweeper',
+        'vexilloguessr',
+        'pool',
+        'quoridor',
+      ]);
+      const gameId = typeof msg.gameId === 'string' ? msg.gameId.trim().toLowerCase() : '';
+      if (!validGames.has(gameId)) return;
+      const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';
+      const rawMax = Number(msg.maxPlayers) || 2;
+      const maxPlayers =
+        gameId === 'quoridor'
+          ? Math.max(2, Math.min(4, Math.round(rawMax)))
+          : gameId === 'minesweeper'
+            ? Math.max(2, Math.min(6, Math.round(rawMax)))
+            : 2;
+      const isPublic = msg.isPublic !== false;
+      const hostProfile = this.buildActivityUserProfile(ownerKey);
+      const nowTs = Date.now();
+      const lobby = {
+        id: crypto.randomUUID(),
+        gameId,
+        threadKey,
+        isPublic,
+        title:
+          typeof msg.title === 'string' && msg.title.trim()
+            ? msg.title.trim().slice(0, 60)
+            : `${hostProfile.displayName}'s Lobby`,
+        hostUsername: hostProfile.username,
+        maxPlayers,
+        status: 'waiting',
+        players: [{ username: hostProfile.username, seat: 0, wins: 0 }],
+        spectators: [],
+        gameState: msg.initialGameState ?? null,
+        version: 1,
+        createdAt: nowTs,
+        updatedAt: nowTs,
+      };
+      this.activeActivityLobbies.set(lobby.id, lobby);
+      this.persistActiveActivityLobbies();
+      this.broadcastActivityLobby(lobby);
+      return;
+    }
+
+    if (msg.type === 'activity:join') {
+      const lobbyId = typeof msg.lobbyId === 'string' ? msg.lobbyId.trim() : '';
+      const lobby = lobbyId ? this.activeActivityLobbies.get(lobbyId) : undefined;
+      if (!lobby) return;
+      const asSpectator = Boolean(msg.asSpectator);
+      const userProf = this.buildActivityUserProfile(ownerKey);
+      const existingPlayer = lobby.players.find((p) => p.username.toLowerCase() === ownerKey);
+      const existingSpecIdx = lobby.spectators.findIndex(
+        (s) => s.username.toLowerCase() === ownerKey,
+      );
+      if (
+        !asSpectator &&
+        !existingPlayer &&
+        lobby.players.length < lobby.maxPlayers &&
+        (lobby.status === 'waiting' || Boolean(msg.allowMidJoin))
+      ) {
+        if (existingSpecIdx >= 0) {
+          lobby.spectators.splice(existingSpecIdx, 1);
+        }
+        const usedSeats = new Set(lobby.players.map((p) => p.seat));
+        let seat = 0;
+        while (usedSeats.has(seat) && seat < lobby.maxPlayers) {
+          seat += 1;
+        }
+        lobby.players.push({ username: userProf.username, seat, wins: 0 });
+        lobby.players.sort((a, b) => a.seat - b.seat);
+      } else if (!existingPlayer && existingSpecIdx === -1) {
+        lobby.spectators.push({ username: userProf.username });
+      }
+      if (msg.gameState !== undefined) {
+        lobby.gameState = msg.gameState;
+      }
+      lobby.version = (lobby.version || 1) + 1;
+      lobby.updatedAt = Date.now();
+      this.persistActiveActivityLobbies();
+      this.broadcastActivityLobby(lobby);
+      return;
+    }
+
+    if (msg.type === 'activity:config') {
+      const lobbyId = typeof msg.lobbyId === 'string' ? msg.lobbyId.trim() : '';
+      const lobby = lobbyId ? this.activeActivityLobbies.get(lobbyId) : undefined;
+      if (!lobby || lobby.hostUsername.toLowerCase() !== ownerKey || lobby.status !== 'waiting') {
+        return;
+      }
+      if (typeof msg.maxPlayers === 'number') {
+        const nextMax =
+          lobby.gameId === 'quoridor'
+            ? Math.max(2, Math.min(4, Math.round(msg.maxPlayers)))
+            : lobby.gameId === 'minesweeper'
+              ? Math.max(2, Math.min(6, Math.round(msg.maxPlayers)))
+              : 2;
+        lobby.maxPlayers = Math.max(lobby.players.length, nextMax);
+      }
+      if (typeof msg.isPublic === 'boolean') {
+        lobby.isPublic = msg.isPublic;
+      }
+      lobby.version = (lobby.version || 1) + 1;
+      lobby.updatedAt = Date.now();
+      this.persistActiveActivityLobbies();
+      this.broadcastActivityLobby(lobby);
+      return;
+    }
+
+    if (msg.type === 'activity:leave') {
+      const lobbyId = typeof msg.lobbyId === 'string' ? msg.lobbyId.trim() : '';
+      const lobby = lobbyId ? this.activeActivityLobbies.get(lobbyId) : undefined;
+      if (!lobby) return;
+      const recipientsBefore = this.getActivityLobbyRecipients(lobby);
+      const wasPlayer = lobby.players.some((p) => p.username.toLowerCase() === ownerKey);
+      lobby.players = lobby.players.filter((p) => p.username.toLowerCase() !== ownerKey);
+      lobby.spectators = lobby.spectators.filter((s) => s.username.toLowerCase() !== ownerKey);
+      if (lobby.players.length === 0) {
+        this.activeActivityLobbies.delete(lobby.id);
+        this.persistActiveActivityLobbies();
+        const removePayload = {
+          type: 'activity:lobby-removed',
+          lobbyId: lobby.id,
+          threadKey: lobby.threadKey,
+        };
+        for (const targetKey of recipientsBefore) {
+          this.sendWsEventToUser(targetKey, removePayload);
+        }
+        return;
+      }
+      if (lobby.hostUsername.toLowerCase() === ownerKey) {
+        lobby.hostUsername = lobby.players[0].username;
+      }
+      if (wasPlayer && lobby.status === 'playing' && lobby.players.length < 2) {
+        lobby.status = 'finished';
+        const survivor = lobby.players[0];
+        if (survivor) {
+          survivor.wins = (survivor.wins || 0) + 1;
+          if (lobby.gameState && typeof lobby.gameState === 'object') {
+            lobby.gameState = {
+              ...lobby.gameState,
+              winnerUsername: survivor.username,
+              winReason: 'Opponent left the lobby',
+            };
+          }
+        }
+      }
+      lobby.version = (lobby.version || 1) + 1;
+      lobby.updatedAt = Date.now();
+      this.persistActiveActivityLobbies();
+      this.broadcastActivityLobby(lobby);
+      return;
+    }
+
+    if (msg.type === 'activity:start' || msg.type === 'activity:rematch') {
+      const lobbyId = typeof msg.lobbyId === 'string' ? msg.lobbyId.trim() : '';
+      const lobby = lobbyId ? this.activeActivityLobbies.get(lobbyId) : undefined;
+      if (!lobby) return;
+      const isPlayer = lobby.players.some((p) => p.username.toLowerCase() === ownerKey);
+      if (!isPlayer) return;
+      lobby.status = 'playing';
+      if (msg.gameState !== undefined) {
+        lobby.gameState = msg.gameState;
+      }
+      lobby.version = (lobby.version || 1) + 1;
+      lobby.updatedAt = Date.now();
+      this.persistActiveActivityLobbies();
+      this.broadcastActivityLobby(lobby);
+      return;
+    }
+
+    if (msg.type === 'activity:action') {
+      const lobbyId = typeof msg.lobbyId === 'string' ? msg.lobbyId.trim() : '';
+      const lobby = lobbyId ? this.activeActivityLobbies.get(lobbyId) : undefined;
+      if (!lobby) return;
+      const isPlayer = lobby.players.some((p) => p.username.toLowerCase() === ownerKey);
+      if (!isPlayer) return;
+      if (msg.playerBoardPatch && lobby.gameState && typeof lobby.gameState === 'object') {
+        lobby.gameState.playerBoards = {
+          ...(lobby.gameState.playerBoards || {}),
+          [ownerKey]: msg.playerBoardPatch,
+        };
+        if (msg.gameStatePatch && typeof msg.gameStatePatch === 'object') {
+          Object.assign(lobby.gameState, msg.gameStatePatch);
+        }
+      } else if (msg.gameState !== undefined) {
+        lobby.gameState = msg.gameState;
+      }
+      if (msg.status === 'finished' && lobby.status !== 'finished') {
+        lobby.status = 'finished';
+        if (typeof msg.winnerUsername === 'string' && msg.winnerUsername.trim()) {
+          const winKey = msg.winnerUsername.trim().toLowerCase();
+          const winner = lobby.players.find((p) => p.username.toLowerCase() === winKey);
+          if (winner) {
+            winner.wins = (winner.wins || 0) + 1;
+          }
+        }
+      } else if (
+        typeof msg.status === 'string' &&
+        ['waiting', 'playing', 'finished'].includes(msg.status)
+      ) {
+        lobby.status = msg.status;
+      }
+      lobby.version = (lobby.version || 1) + 1;
+      lobby.updatedAt = Date.now();
+      this.persistActiveActivityLobbies();
+      this.broadcastActivityLobby(lobby);
     }
   }
 

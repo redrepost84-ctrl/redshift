@@ -21,6 +21,9 @@ import {
   updateUserPreferences,
 } from './settingsStore';
 import type {
+  ActivityListEventPayload,
+  ActivityLobbyRemovedEventPayload,
+  ActivityLobbyUpdateEventPayload,
   PublicProfile,
   SocialSnapshot,
   VcIncomingCallPayload,
@@ -29,6 +32,10 @@ import type {
   VcStateEventPayload,
   VcTransferredEventPayload,
 } from './types';
+import {
+  createActivitiesControlIconSvg,
+  createVcActivitiesController,
+} from './vcActivities';
 import {
   applyAudioOutputDevice,
   applyLiveScreenShareOptions,
@@ -106,6 +113,9 @@ export interface VoiceManagerHandle {
   handleVcSignal: (payload: VcSignalEventPayload) => void;
   handleVcSpeaking: (payload: VcSpeakingEventPayload) => void;
   handleVcTransferred: (payload: VcTransferredEventPayload) => void;
+  handleActivityList: (payload: ActivityListEventPayload) => void;
+  handleActivityLobbyUpdate: (payload: ActivityLobbyUpdateEventPayload) => void;
+  handleActivityLobbyRemoved: (payload: ActivityLobbyRemovedEventPayload) => void;
   destroy: () => void;
 }
 
@@ -3535,6 +3545,17 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     return tile;
   };
 
+  const activitiesCtrl = createVcActivitiesController({
+    getSelfProfile: () => options.getSnapshot()?.user ?? null,
+    resolveAvatar: options.resolveAvatar,
+    sendActivityFrame: (payload) => {
+      options.getSocket()?.sendActivityFrame(payload);
+    },
+    onStateChanged: () => {
+      emitStateChanged();
+    },
+  });
+
   const renderCallTopBar = (host: HTMLElement, threadKey: string) => {
     const call = callsByThread.get(threadKey);
     if (!call || !call.active) {
@@ -3731,6 +3752,10 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
         })
         .join(','),
       sortedRinging.map((r) => `${r.username.toLowerCase()}:${r.displayName}`).join(','),
+      `ACT:${activitiesCtrl.getRenderRevision()}:${activitiesCtrl.getExpandedStageKey() ?? ''}:${activitiesCtrl
+        .getCallLobbies(threadKey)
+        .map((l) => `${l.id}:${l.version}:${l.status}:${activitiesCtrl.isLobbyWatched(l.id) ? 'W' : 'U'}`)
+        .join(',')}`,
     ].join('|');
 
     const now = Date.now();
@@ -3985,6 +4010,11 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       }
     }
 
+    const expandedActivityEl = activitiesCtrl.renderExpandedActivityStage(threadKey);
+    if (expandedActivityEl) {
+      bar.appendChild(expandedActivityEl);
+    }
+
     const stage = document.createElement('div');
     stage.className = 'vc-top-stage';
 
@@ -4154,6 +4184,21 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       stage.appendChild(tile);
     }
 
+    const activityTiles = activitiesCtrl.renderActivityStageTiles(
+      threadKey,
+      inThisCall,
+      () => {
+        const target: ThreadTarget =
+          call.kind === 'group' && call.groupId
+            ? { groupId: call.groupId }
+            : { peerUsername: sortedParticipants[0]?.user.username };
+        startOrJoinCall(target, threadKey);
+      },
+    );
+    for (const actTile of activityTiles) {
+      stage.appendChild(actTile);
+    }
+
     bar.appendChild(stage);
 
     const controls = document.createElement('div');
@@ -4246,6 +4291,26 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
         openScreenSharePopover(screenBtn);
       });
 
+      const activitiesBtn = document.createElement('button');
+      activitiesBtn.type = 'button';
+      const hasActiveCallLobbies = activitiesCtrl.getCallLobbies(threadKey).length > 0;
+      activitiesBtn.className = hasActiveCallLobbies
+        ? 'vc-ctrl-btn vc-ctrl-btn--activities vc-ctrl-btn--has-live'
+        : 'vc-ctrl-btn vc-ctrl-btn--activities';
+      activitiesBtn.dataset.vcRole = 'activities';
+      activitiesBtn.title = 'Activities — Play Games in Call';
+      activitiesBtn.setAttribute('aria-label', 'Activities');
+      activitiesBtn.appendChild(createActivitiesControlIconSvg(18));
+      if (hasActiveCallLobbies) {
+        const dot = document.createElement('span');
+        dot.className = 'vc-ctrl-live-dot';
+        activitiesBtn.appendChild(dot);
+      }
+      activitiesBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        activitiesCtrl.toggleActivitiesBubble(activitiesBtn, threadKey);
+      });
+
       const leaveBtn = document.createElement('button');
       leaveBtn.type = 'button';
       leaveBtn.dataset.vcRole = 'leave';
@@ -4265,6 +4330,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
         controls.appendChild(flipCamBtn);
       }
       controls.appendChild(screenBtn);
+      controls.appendChild(activitiesBtn);
       controls.appendChild(leaveBtn);
     } else {
       const joinBtn = document.createElement('button');
@@ -4981,9 +5047,19 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     },
     handleVcSpeaking,
     handleVcTransferred,
+    handleActivityList: (p) => {
+      activitiesCtrl.handleLobbyList(p.lobbies);
+    },
+    handleActivityLobbyUpdate: (p) => {
+      activitiesCtrl.handleLobbyUpdate(p.lobby);
+    },
+    handleActivityLobbyRemoved: (p) => {
+      activitiesCtrl.handleLobbyRemoved(p.lobbyId);
+    },
     destroy: () => {
       destroyed = true;
       closeActivePopover();
+      activitiesCtrl.closeActivitiesBubble();
       miniPipDragCleanup?.();
       window.removeEventListener('resize', handleMiniPipWindowResize);
       unsubPrefs();
