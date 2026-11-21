@@ -1,11 +1,11 @@
 {
-  "version": "0.1.14",
-  "releasedAt": "2026-11-21T02:48:47.161Z",
-  "changelog": "Fixed sent messages jumping above a friend's message due to PC-vs-server clock skew, fixed leaving a group call still showing you in the VC topbar, and enabled 24/7 Gmail password reset emails on Cloudflare.",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.14/Redshift-patch.asar",
-  "sha256": "091cc4c792663d7cce7b6d82a54f076cce1034d97af003d236091cd0887442f0",
-  "size": 6280942,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.14/RedshiftSetup.exe",
+  "version": "0.1.15",
+  "releasedAt": "2026-11-21T03:08:23.718Z",
+  "changelog": "Click-to-watch blurred grey stream previews with toggleable big screen & Stop Watching, hover-to-reply top-right button on custom statuses in profile panels & inspection popups, and sound effects for starting/ending streams and joining/rejoining/leaving calls for everyone in the call.",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.15/Redshift-patch.asar",
+  "sha256": "6560edee6b9af5b3ce7c0e03c0d37eb2f061866d64c5e4829e5befb1db4a0730",
+  "size": 6295724,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.15/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

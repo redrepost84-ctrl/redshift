@@ -4,6 +4,7 @@ import {
   createEditPencilSvg,
   createEmojiIconSvg,
   createPlusIconSvg,
+  createReplyArrowSvg,
   createTrashSvg,
 } from './chatUi';
 import { replaceEmojiShortcodeBeforeCursor } from './emojiCatalog';
@@ -76,6 +77,7 @@ export interface ThoughtBubbleOptions {
   previewEmptyPlaceholder?: string;
   onEdit?: () => void;
   onClear?: () => void;
+  onReply?: (status: CustomStatusData) => void;
 }
 
 export function createThoughtBubbleElement(opts: ThoughtBubbleOptions): HTMLDivElement | null {
@@ -87,9 +89,12 @@ export function createThoughtBubbleElement(opts: ThoughtBubbleOptions): HTMLDivE
     return null;
   }
 
+  const hasSelfActions = Boolean(opts.interactiveSelf && active);
+  const hasReplyAction = Boolean(!opts.interactiveSelf && active && opts.onReply);
+
   const wrap = document.createElement('div');
   wrap.className = 'thought-bubble-wrap';
-  if (opts.interactiveSelf && active) {
+  if (hasSelfActions || hasReplyAction) {
     wrap.classList.add('thought-bubble-wrap--has-actions');
   }
 
@@ -172,6 +177,24 @@ export function createThoughtBubbleElement(opts: ThoughtBubbleOptions): HTMLDivE
 
     actions.appendChild(editBtn);
     actions.appendChild(trashBtn);
+    wrap.appendChild(actions);
+  } else if (hasReplyAction && active) {
+    const actions = document.createElement('div');
+    actions.className = 'thought-hover-actions';
+
+    const replyBtn = document.createElement('button');
+    replyBtn.type = 'button';
+    replyBtn.className = 'thought-action-btn thought-action-btn--reply';
+    replyBtn.dataset.action = 'reply-status';
+    replyBtn.title = 'Reply to status';
+    replyBtn.setAttribute('aria-label', 'Reply to custom status');
+    replyBtn.appendChild(createReplyArrowSvg(13));
+    replyBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      opts.onReply?.(active);
+    });
+
+    actions.appendChild(replyBtn);
     wrap.appendChild(actions);
   }
 

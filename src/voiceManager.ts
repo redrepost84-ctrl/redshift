@@ -47,12 +47,17 @@ import {
   createScreenShareIconSvg,
   createStopStreamIconSvg,
   createVolumeIconSvg,
+  createWatchStreamIconSvg,
   disposeScreenShareStream,
   getScreenShareStreamSettings,
   getSharedVoiceAudioContext,
   getSharedVoiceSilentSink,
+  playStreamEndSound,
+  playStreamStartSound,
   playVcJoinSound,
   playVcLeaveSound,
+  playVcPeerJoinSound,
+  playVcPeerLeaveSound,
   playVoiceToggleCue,
   startIncomingRingLoop,
   startOutgoingRingLoop,
@@ -166,6 +171,8 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
   const incomingCalls = new Map<string, VcIncomingCallPayload>();
   const recentlyLeftCalls = new Map<string, number>();
   const lastAutoLeaveResendAt = new Map<string, number>();
+  const watchedStreamKeys = new Set<string>();
+  const knownPeersByCall = new Map<string, Map<string, { screenSharing: boolean }>>();
   const peers = new Map<string, PeerAudioPipeline>();
   const peerSignalQueue = new Map<string, Promise<void>>();
   const speakingHoldUntil = new Map<string, number>();
@@ -196,9 +203,34 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       cachedIceServers = servers;
     });
   };
+  const isWatchingRemoteScreen = (peerKey: string): boolean =>
+    watchedStreamKeys.has(`scr:${peerKey.toLowerCase()}`);
+
+  const watchStreamKey = (key: string) => {
+    watchedStreamKeys.add(key);
+    expandedStageKey = key;
+    syncTrackAndSinkStates();
+    emitStateChanged();
+  };
+
+  const stopWatchingStreamKey = (key: string) => {
+    watchedStreamKeys.delete(key);
+    if (expandedStageKey === key) {
+      expandedStageKey = null;
+    }
+    syncTrackAndSinkStates();
+    emitStateChanged();
+  };
+
   const toggleExpandKey = (key: string) => {
+    const selfKey = options.getSnapshot()?.user.username.toLowerCase();
+    const isRemoteScreen = key.startsWith('scr:') && key !== `scr:${selfKey ?? ''}`;
+    if (isRemoteScreen && !watchedStreamKeys.has(key)) {
+      watchStreamKey(key);
+      return;
+    }
     expandedStageKey = expandedStageKey === key ? null : key;
-    options.onStateChanged();
+    emitStateChanged();
   };
   let activePopoverCleanup: (() => void) | null = null;
   let activeScreenModalCleanup: (() => void) | null = null;
@@ -410,7 +442,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
 
   const applyPeerGain = (peerKey: string, pipeline: PeerAudioPipeline) => {
     const micGain = resolvePeerLinearGain(peerKey);
-    const screenGain = resolvePeerScreenLinearGain(peerKey);
+    const screenGain = isWatchingRemoteScreen(peerKey) ? resolvePeerScreenLinearGain(peerKey) : 0;
     const ctx = getSharedVoiceAudioContext();
     const pairs: Array<{ branch: AudioBranchState | null; gain: number }> = [
       { branch: pipeline.micBranch, gain: micGain },
@@ -447,7 +479,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       pipeline.audioEl.muted = deaf;
       applyAudioOutputDevice(pipeline.audioEl, prefs.voiceOutputDeviceId);
       if (pipeline.screenAudioBranch) {
-        pipeline.screenAudioBranch.outputEl.muted = deaf;
+        pipeline.screenAudioBranch.outputEl.muted = deaf || !isWatchingRemoteScreen(peerKey);
         applyAudioOutputDevice(pipeline.screenAudioBranch.outputEl, prefs.voiceOutputDeviceId);
       }
       applyPeerGain(peerKey, pipeline);
@@ -565,7 +597,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     options.onStateChanged();
   };
 
-  const stopLocalScreenCapture = (notifyPeers = true) => {
+  const stopLocalScreenCapture = (notifyPeers = true, playSound = true) => {
     cleanupLocalScreenListeners?.();
     cleanupLocalScreenListeners = null;
     localScreenPaused = false;
@@ -578,6 +610,9 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       track.stop();
     }
     localScreenStream = null;
+    if (playSound && !destroyed) {
+      playStreamEndSound();
+    }
     const selfKey = options.getSnapshot()?.user.username.toLowerCase();
     if (selfKey && expandedStageKey === `scr:${selfKey}`) {
       expandedStageKey = null;
@@ -1249,6 +1284,8 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     }
     recentlyLeftCalls.set(leavingThread, Date.now());
     lastAutoLeaveResendAt.delete(leavingThread);
+    watchedStreamKeys.clear();
+    knownPeersByCall.delete(leavingThread);
     closeActivePopover();
     expandedStageKey = null;
     activeCallThreadKey = null;
@@ -1257,7 +1294,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     stopCallStatsPolling();
     stopVadPolling();
     stopLocalCameraCapture(false);
-    stopLocalScreenCapture(false);
+    stopLocalScreenCapture(false, false);
     stopLocalMicCapture();
     closeAllPeers();
 
@@ -1481,9 +1518,13 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
         return { ok: false, error: 'Selected capture source ended immediately' };
       }
       screenSharePrefs = nextPrefs;
-      stopLocalScreenCapture(false);
+      const wasAlreadyStreaming = Boolean(localScreenStream);
+      stopLocalScreenCapture(false, false);
       localScreenStream = stream;
       attachScreenShareEndHandlers(stream);
+      if (!wasAlreadyStreaming) {
+        playStreamStartSound();
+      }
       const selfKey = options.getSnapshot()?.user.username.toLowerCase();
       if (selfKey) {
         expandedStageKey = `scr:${selfKey}`;
@@ -2392,13 +2433,31 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
 
     if (stageMeta?.stageKey) {
       const sKey = stageMeta.stageKey;
-      const expanded = expandedStageKey === sKey;
-      items.push({
-        label: expanded ? 'Shrink Video' : 'Expand Video',
-        icon: expanded ? 'shrink' : 'expand',
-        dividerBefore: true,
-        onSelect: () => toggleExpandKey(sKey),
-      });
+      const isRemoteScreenKey = sKey.startsWith('scr:');
+      const isWatched = !isRemoteScreenKey || watchedStreamKeys.has(sKey);
+      if (isRemoteScreenKey && !isWatched) {
+        items.push({
+          label: 'Watch Stream',
+          icon: 'expand',
+          dividerBefore: true,
+          onSelect: () => watchStreamKey(sKey),
+        });
+      } else {
+        const expanded = expandedStageKey === sKey;
+        items.push({
+          label: expanded ? 'Shrink Video' : 'Expand Video',
+          icon: expanded ? 'shrink' : 'expand',
+          dividerBefore: true,
+          onSelect: () => toggleExpandKey(sKey),
+        });
+        if (isRemoteScreenKey) {
+          items.push({
+            label: 'Stop Watching Stream',
+            icon: createStopStreamIconSvg(14),
+            onSelect: () => stopWatchingStreamKey(sKey),
+          });
+        }
+      }
     }
     if (
       stageMeta?.videoEl &&
@@ -2710,9 +2769,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       .getSocket()
       ?.sendVcJoin(target, getEffectiveMuted(), getEffectiveDeafened(), !isJoiningExisting);
 
-    if (isJoiningExisting) {
-      playVcJoinSound();
-    }
+    playVcJoinSound();
     startVadPolling();
     syncRingAudio();
     options.onStateChanged();
@@ -2983,7 +3040,9 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
 
     if (!effectivePayload.active) {
       callsByThread.delete(effectivePayload.threadKey);
+      knownPeersByCall.delete(effectivePayload.threadKey);
       if (activeCallThreadKey === effectivePayload.threadKey) {
+        watchedStreamKeys.clear();
         closeActivePopover();
         expandedStageKey = null;
         activeCallThreadKey = null;
@@ -2991,16 +3050,80 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
         stopCallStatsPolling();
         stopVadPolling();
         stopLocalCameraCapture(false);
-        stopLocalScreenCapture(false);
+        stopLocalScreenCapture(false, false);
         stopLocalMicCapture();
         closeAllPeers();
       }
     } else {
       callsByThread.set(effectivePayload.threadKey, effectivePayload);
       if (activeCallThreadKey === effectivePayload.threadKey) {
+        if (selfJoined && selfKey) {
+          const nextPeers = new Map<string, { screenSharing: boolean }>();
+          for (const p of effectivePayload.participants) {
+            const uKey = p.user.username.toLowerCase();
+            if (uKey === selfKey) continue;
+            nextPeers.set(uKey, { screenSharing: Boolean(p.screenSharing) });
+          }
+
+          // Clean up watched remote streams when a peer leaves or ends their stream.
+          for (const watchedKey of Array.from(watchedStreamKeys)) {
+            if (!watchedKey.startsWith('scr:')) continue;
+            const ownerKey = watchedKey.slice(4);
+            if (ownerKey === selfKey) continue;
+            const peerState = nextPeers.get(ownerKey);
+            if (!peerState || !peerState.screenSharing) {
+              watchedStreamKeys.delete(watchedKey);
+              if (expandedStageKey === watchedKey) {
+                expandedStageKey = null;
+              }
+            }
+          }
+
+          const prevPeers = knownPeersByCall.get(effectivePayload.threadKey);
+          if (!prevPeers) {
+            knownPeersByCall.set(effectivePayload.threadKey, nextPeers);
+          } else {
+            let anyPeerJoined = false;
+            let anyPeerLeft = false;
+            let anyStreamStarted = false;
+            let anyStreamEnded = false;
+
+            for (const [uKey, nextMeta] of nextPeers.entries()) {
+              const prevMeta = prevPeers.get(uKey);
+              if (!prevMeta) {
+                anyPeerJoined = true;
+              } else if (!prevMeta.screenSharing && nextMeta.screenSharing) {
+                anyStreamStarted = true;
+              } else if (prevMeta.screenSharing && !nextMeta.screenSharing) {
+                anyStreamEnded = true;
+              }
+            }
+            for (const uKey of prevPeers.keys()) {
+              if (!nextPeers.has(uKey)) {
+                anyPeerLeft = true;
+              }
+            }
+
+            knownPeersByCall.set(effectivePayload.threadKey, nextPeers);
+
+            if (!destroyed && !getEffectiveDeafened()) {
+              if (anyPeerJoined) {
+                playVcPeerJoinSound();
+              } else if (anyPeerLeft) {
+                playVcPeerLeaveSound();
+              }
+              if (anyStreamStarted) {
+                playStreamStartSound();
+              } else if (anyStreamEnded) {
+                playStreamEndSound();
+              }
+            }
+          }
+        }
         void reconcilePeerConnections(effectivePayload);
       }
     }
+    syncTrackAndSinkStates();
     syncRingAudio();
     emitStateChanged();
   };
@@ -3303,10 +3426,11 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     interface StageStreamItem {
       key: string;
       owner: PublicProfile;
-      stream: MediaStream;
+      stream: MediaStream | null;
       isSelf: boolean;
       isScreen: boolean;
       paused: boolean;
+      watched: boolean;
     }
     const streamItems = new Map<string, StageStreamItem>();
     for (const p of sortedParticipants) {
@@ -3331,22 +3455,28 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
           isSelf,
           isScreen: false,
           paused: false,
+          watched: true,
         });
       }
-      if (scrStream) {
-        streamItems.set(`scr:${uKey}`, {
-          key: `scr:${uKey}`,
+      if (scrStream || (!isSelf && p.screenSharing)) {
+        const scrKey = `scr:${uKey}`;
+        streamItems.set(scrKey, {
+          key: scrKey,
           owner: p.user,
           stream: scrStream,
           isSelf,
           isScreen: true,
           paused: isSelf ? localScreenPaused : Boolean(p.screenPaused),
+          watched: isSelf || watchedStreamKeys.has(scrKey),
         });
       }
     }
 
-    if (expandedStageKey && !streamItems.has(expandedStageKey)) {
-      expandedStageKey = null;
+    if (expandedStageKey) {
+      const expItem = streamItems.get(expandedStageKey);
+      if (!expItem || !expItem.watched) {
+        expandedStageKey = null;
+      }
     }
 
     const syncTileVoiceBadge = (
@@ -3445,8 +3575,10 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       sortedParticipants
         .map((p) => {
           const uKey = p.user.username.toLowerCase();
-          const camId = streamItems.get(`cam:${uKey}`)?.stream.id ?? '';
-          const scrId = streamItems.get(`scr:${uKey}`)?.stream.id ?? '';
+          const camItem = streamItems.get(`cam:${uKey}`);
+          const scrItem = streamItems.get(`scr:${uKey}`);
+          const camId = camItem?.stream?.id ?? '';
+          const scrId = scrItem ? `${scrItem.stream?.id ?? 'pending'}:${scrItem.watched ? 'W' : 'U'}` : '';
           return `${uKey}:${p.user.displayName}:${camId}:${scrId}`;
         })
         .join(','),
@@ -3598,9 +3730,17 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
 
         const heroVideoWrap = document.createElement('div');
         heroVideoWrap.className = 'vc-expanded-video-wrap';
-        const heroVideo = createStageVideoEl(hero.stream, hero.isSelf && !hero.isScreen);
-        heroVideo.classList.add('vc-expanded-video');
-        heroVideoWrap.appendChild(heroVideo);
+        let heroVideo: HTMLVideoElement | null = null;
+        if (hero.stream) {
+          heroVideo = createStageVideoEl(hero.stream, hero.isSelf && !hero.isScreen);
+          heroVideo.classList.add('vc-expanded-video');
+          heroVideoWrap.appendChild(heroVideo);
+        } else {
+          const connectingMsg = document.createElement('div');
+          connectingMsg.className = 'vc-stream-connecting-state';
+          connectingMsg.textContent = `Connecting to ${hero.owner.displayName}'s stream...`;
+          heroVideoWrap.appendChild(connectingMsg);
+        }
 
         if (hero.isScreen) {
           const pausedOverlay = document.createElement('div');
@@ -3635,7 +3775,22 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
           expActions.appendChild(expQualBtn);
         }
 
-        if (document.pictureInPictureEnabled) {
+        if (!hero.isSelf && hero.isScreen) {
+          const stopWatchBtn = document.createElement('button');
+          stopWatchBtn.type = 'button';
+          stopWatchBtn.className = 'vc-stage-tool-btn vc-stage-tool-btn--stop-watch';
+          stopWatchBtn.dataset.vcRole = 'stop-watching-stream';
+          stopWatchBtn.title = 'Stop Watching Stream';
+          stopWatchBtn.textContent = 'Stop Watching';
+          stopWatchBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            stopWatchingStreamKey(hero.key);
+          });
+          expActions.appendChild(stopWatchBtn);
+        }
+
+        if (heroVideo && document.pictureInPictureEnabled) {
+          const pipTargetVideo = heroVideo;
           const pipBtn = document.createElement('button');
           pipBtn.type = 'button';
           pipBtn.className = 'vc-stage-tool-btn';
@@ -3643,7 +3798,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
           pipBtn.setAttribute('aria-label', 'Picture in Picture');
           pipBtn.appendChild(createPipIconSvg(15));
           pipBtn.addEventListener('click', () => {
-            void heroVideo.requestPictureInPicture?.().catch(() => {});
+            void pipTargetVideo.requestPictureInPicture?.().catch(() => {});
           });
           expActions.appendChild(pipBtn);
         }
@@ -3697,12 +3852,23 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
           ? 'vc-screen-share-tile vc-screen-share-tile--paused'
           : 'vc-screen-share-tile';
         scrTile.dataset.vcScreenTile = scrItem.key;
+        if (!scrItem.watched) {
+          scrTile.classList.add('vc-screen-share-tile--unwatched');
+        }
         if (expandedStageKey === scrItem.key) {
           scrTile.classList.add('vc-screen-share-tile--expanded');
         }
         const vidBox = document.createElement('div');
-        vidBox.className = 'vc-screen-thumb-box';
-        vidBox.appendChild(createStageVideoEl(scrItem.stream, false));
+        vidBox.className = scrItem.watched
+          ? 'vc-screen-thumb-box'
+          : 'vc-screen-thumb-box vc-screen-thumb-box--unwatched';
+        if (scrItem.stream) {
+          const thumbVideo = createStageVideoEl(scrItem.stream, false);
+          if (!scrItem.watched) {
+            thumbVideo.classList.add('vc-stage-video--blurred-preview');
+          }
+          vidBox.appendChild(thumbVideo);
+        }
 
         const livePill = document.createElement('span');
         livePill.className = scrItem.paused
@@ -3711,42 +3877,82 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
         livePill.textContent = scrItem.paused ? 'PAUSED' : 'LIVE';
         vidBox.appendChild(livePill);
 
-        const tilePaused = document.createElement('div');
-        tilePaused.className = 'vc-tile-paused-overlay';
-        tilePaused.hidden = !scrItem.paused;
-        tilePaused.textContent = 'Stream paused';
-        vidBox.appendChild(tilePaused);
+        const triggerWatch = () => {
+          if (!inThisCall) {
+            const joinTarget: ThreadTarget =
+              call.kind === 'group' && call.groupId
+                ? { groupId: call.groupId }
+                : { peerUsername: p.user.username };
+            watchedStreamKeys.add(scrItem.key);
+            expandedStageKey = scrItem.key;
+            startOrJoinCall(joinTarget, threadKey);
+            return;
+          }
+          watchStreamKey(scrItem.key);
+        };
 
-        if (isSelf && expandedStageKey !== scrItem.key && localScreenStream) {
-          const tileQualBtn = document.createElement('button');
-          tileQualBtn.type = 'button';
-          tileQualBtn.className = 'vc-tile-quality-btn';
-          tileQualBtn.dataset.vcRole = 'tile-screen-quality';
-          tileQualBtn.title = 'Adjust Live Screen Resolution & Frame Rate';
-          tileQualBtn.textContent = `${formatScreenQualityLabel(true)} ▾`;
-          tileQualBtn.addEventListener('click', (e) => {
+        if (!scrItem.watched) {
+          const watchOverlay = document.createElement('div');
+          watchOverlay.className = 'vc-screen-watch-overlay';
+          const watchBtn = document.createElement('button');
+          watchBtn.type = 'button';
+          watchBtn.className = 'vc-screen-watch-btn';
+          watchBtn.dataset.vcRole = 'watch-stream';
+          watchBtn.title = `Watch ${p.user.displayName}'s Stream`;
+          watchBtn.appendChild(createWatchStreamIconSvg(12));
+          const watchTxt = document.createElement('span');
+          watchTxt.textContent = 'Watch';
+          watchBtn.appendChild(watchTxt);
+          watchBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            openScreenSharePopover(tileQualBtn, 'live');
+            triggerWatch();
           });
-          vidBox.appendChild(tileQualBtn);
+          watchOverlay.appendChild(watchBtn);
+          vidBox.appendChild(watchOverlay);
+        } else {
+          const tilePaused = document.createElement('div');
+          tilePaused.className = 'vc-tile-paused-overlay';
+          tilePaused.hidden = !scrItem.paused;
+          tilePaused.textContent = 'Stream paused';
+          vidBox.appendChild(tilePaused);
+
+          if (isSelf && expandedStageKey !== scrItem.key && localScreenStream) {
+            const tileQualBtn = document.createElement('button');
+            tileQualBtn.type = 'button';
+            tileQualBtn.className = 'vc-tile-quality-btn';
+            tileQualBtn.dataset.vcRole = 'tile-screen-quality';
+            tileQualBtn.title = 'Adjust Live Screen Resolution & Frame Rate';
+            tileQualBtn.textContent = `${formatScreenQualityLabel(true)} ▾`;
+            tileQualBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              openScreenSharePopover(tileQualBtn, 'live');
+            });
+            vidBox.appendChild(tileQualBtn);
+          }
+
+          const expBtn = document.createElement('button');
+          expBtn.type = 'button';
+          expBtn.className = 'vc-tile-expand-btn';
+          expBtn.title = expandedStageKey === scrItem.key ? 'Shrink Screen' : 'Expand Screen';
+          expBtn.appendChild(createExpandIconSvg(expandedStageKey === scrItem.key, 13));
+          expBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleExpandKey(scrItem.key);
+          });
+          vidBox.appendChild(expBtn);
         }
 
-        const expBtn = document.createElement('button');
-        expBtn.type = 'button';
-        expBtn.className = 'vc-tile-expand-btn';
-        expBtn.title = expandedStageKey === scrItem.key ? 'Shrink Screen' : 'Expand Screen';
-        expBtn.appendChild(createExpandIconSvg(expandedStageKey === scrItem.key, 13));
-        expBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          toggleExpandKey(scrItem.key);
+        vidBox.addEventListener('click', () => {
+          if (!scrItem.watched) {
+            triggerWatch();
+          } else {
+            toggleExpandKey(scrItem.key);
+          }
         });
-        vidBox.appendChild(expBtn);
-
-        vidBox.addEventListener('click', () => toggleExpandKey(scrItem.key));
         scrTile.addEventListener('contextmenu', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          const videoEl = scrTile.querySelector('video');
+          const videoEl = scrItem.watched ? scrTile.querySelector('video') : null;
           if (isSelf) {
             openSelfVoiceMenu(e.clientX, e.clientY, {
               stageKey: scrItem.key,
@@ -4391,7 +4597,11 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     for (const p of call.participants) {
       const uKey = p.user.username.toLowerCase();
       const isSelf = uKey === selfKey;
-      const scr = isSelf ? localScreenStream : peers.get(uKey)?.remoteScreenStream ?? null;
+      const scr = isSelf
+        ? localScreenStream
+        : watchedStreamKeys.has(`scr:${uKey}`)
+          ? peers.get(uKey)?.remoteScreenStream ?? null
+          : null;
       const cam = isSelf ? localCameraStream : peers.get(uKey)?.remoteCameraStream ?? null;
       if (scr) {
         screenFeeds.push({

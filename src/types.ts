@@ -226,6 +226,13 @@ export interface MessageReplyRef {
   missing?: boolean;
 }
 
+export interface StatusReplyRef {
+  authorUsername: string;
+  authorName: string;
+  emoji?: string;
+  text?: string;
+}
+
 export type CallLogStatus = 'ringing' | 'active' | 'missed' | 'ended';
 
 export interface CallLogData {
@@ -298,6 +305,7 @@ export interface ChatMessage {
   attachments?: DmAttachment[];
   gif?: GifItem;
   replyTo?: MessageReplyRef;
+  statusReply?: StatusReplyRef;
   forwarded?: ForwardedMeta;
   callLog?: CallLogData;
   systemEvent?: SystemMessageEvent;

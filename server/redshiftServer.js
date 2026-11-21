@@ -945,6 +945,20 @@ function hydrateMessage(msg, threadList) {
     attachments: attachments.length > 0 ? attachments : undefined,
     gif: msg.gif,
     replyTo: hydratedReply,
+    statusReply:
+      msg.statusReply && typeof msg.statusReply === 'object'
+        ? {
+            authorUsername:
+              findAccountByUsername(msg.statusReply.authorUsername)?.username ??
+              msg.statusReply.authorUsername,
+            authorName:
+              findAccountByUsername(msg.statusReply.authorUsername)?.displayName ??
+              msg.statusReply.authorName ??
+              msg.statusReply.authorUsername,
+            emoji: msg.statusReply.emoji || undefined,
+            text: msg.statusReply.text || undefined,
+          }
+        : undefined,
     forwarded: hydratedForwarded,
     callLog: hydratedCallLog,
     systemEvent: hydratedSystemEvent,
@@ -5711,6 +5725,32 @@ export function createRedshiftServerMiddleware() {
         }
       }
 
+      let storedStatusReply;
+      if (body.statusReply && typeof body.statusReply === 'object') {
+        const srUserRaw =
+          typeof body.statusReply.authorUsername === 'string'
+            ? body.statusReply.authorUsername.trim()
+            : '';
+        const srAcc = srUserRaw ? findAccountByUsername(srUserRaw) : undefined;
+        const srEmoji = sanitizeSingleEmoji(body.statusReply.emoji);
+        const srText =
+          typeof body.statusReply.text === 'string'
+            ? body.statusReply.text.replace(/\s+/g, ' ').trim().slice(0, 128)
+            : '';
+        if ((srAcc || srUserRaw) && (srEmoji || srText)) {
+          storedStatusReply = {
+            authorUsername: srAcc?.username ?? srUserRaw.slice(0, 40),
+            authorName:
+              srAcc?.displayName ??
+              (typeof body.statusReply.authorName === 'string' && body.statusReply.authorName.trim()
+                ? body.statusReply.authorName.trim().slice(0, 40)
+                : srUserRaw.slice(0, 40)),
+            emoji: srEmoji || undefined,
+            text: srText || undefined,
+          };
+        }
+      }
+
       let voiceNote;
       if (body.voiceNote && typeof body.voiceNote === 'object') {
         const dur = Number(body.voiceNote.durationSec);
@@ -5759,6 +5799,7 @@ export function createRedshiftServerMiddleware() {
         spoilerAttachmentIds: validSpoilerIds.length > 0 ? validSpoilerIds : undefined,
         gif: finalGif,
         replyTo: storedReply,
+        statusReply: storedStatusReply,
         voiceNote,
         timestamp: msgNow,
         reactions: {},

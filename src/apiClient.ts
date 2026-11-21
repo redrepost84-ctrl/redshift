@@ -18,6 +18,7 @@ import type {
   PublicProfile,
   SocialNotifyEventPayload,
   SocialSnapshot,
+  StatusReplyRef,
   TypingEventPayload,
   UserStatus,
   ValidationResult,
@@ -1174,6 +1175,7 @@ export async function apiSendDmMessage(
     spoilerAttachmentIds?: string[];
     gif?: GifItem;
     replyToMessageId?: string;
+    statusReply?: StatusReplyRef;
     voiceNote?: VoiceNoteMeta;
   },
 ): Promise<{
@@ -1194,6 +1196,7 @@ export async function apiSendDmMessage(
       spoilerAttachmentIds: options?.spoilerAttachmentIds,
       gif: options?.gif,
       replyToMessageId: options?.replyToMessageId,
+      statusReply: options?.statusReply,
       voiceNote: options?.voiceNote,
     },
     true,

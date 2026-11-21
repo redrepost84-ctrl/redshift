@@ -24,7 +24,14 @@ import {
   STATUS_LABELS,
 } from './profileDrawer';
 import { applyBannerBackground } from './profileModals';
-import type { PublicProfile, SocialSnapshot } from './types';
+import type { CustomStatusData, PublicProfile, SocialSnapshot } from './types';
+
+export type ReplyToStatusHandler = (
+  user: PublicProfile,
+  status: CustomStatusData,
+  replyText: string,
+  fromModal: boolean,
+) => void;
 
 export type ProfileRelationState =
   | 'friend'
@@ -40,6 +47,7 @@ export interface DmProfilePanelOptions {
   getSnapshot?: () => SocialSnapshot;
   onOpenDm?: (username: string) => void;
   onOpenGroup?: (groupId: string) => void;
+  onReplyToStatus?: ReplyToStatusHandler;
 }
 
 export interface DmProfilePanelHandle {
@@ -71,6 +79,140 @@ export function resolveProfileRelation(
     return 'outgoing';
   }
   return 'none';
+}
+
+function canReplyToUserCustomStatus(
+  user: PublicProfile,
+  relation: ProfileRelationState,
+  snap?: SocialSnapshot,
+): boolean {
+  if (user.isProfilePrivate || user.isBlockedRelation || relation === 'blocked') {
+    return false;
+  }
+  const selfKey = snap?.user.username.toLowerCase();
+  if (selfKey && user.username.toLowerCase() === selfKey) {
+    return false;
+  }
+  if (relation !== 'friend' && user.acceptsNonFriendDms === false) {
+    return false;
+  }
+  return true;
+}
+
+interface InlineStatusReplyController {
+  open: (user: PublicProfile, status: CustomStatusData) => void;
+  close: () => void;
+  syncAvailability: (stillAvailable: boolean) => void;
+}
+
+function createInlineStatusReplyController(
+  host: HTMLElement,
+  onSubmit: (user: PublicProfile, status: CustomStatusData, text: string) => void,
+): InlineStatusReplyController {
+  let activeUser: PublicProfile | null = null;
+  let activeStatus: CustomStatusData | null = null;
+  let inputEl: HTMLInputElement | null = null;
+
+  const close = () => {
+    activeUser = null;
+    activeStatus = null;
+    inputEl = null;
+    host.hidden = true;
+    host.replaceChildren();
+  };
+
+  const open = (user: PublicProfile, status: CustomStatusData) => {
+    activeUser = user;
+    activeStatus = status;
+    host.hidden = false;
+
+    if (inputEl && host.contains(inputEl)) {
+      inputEl.placeholder = `Reply to @${user.username}'s status...`;
+      inputEl.focus();
+      return;
+    }
+
+    host.replaceChildren();
+    const box = document.createElement('form');
+    box.className = 'dm-status-reply-box';
+
+    const topRow = document.createElement('div');
+    topRow.className = 'dm-status-reply-top';
+
+    const label = document.createElement('span');
+    label.className = 'dm-status-reply-label';
+    label.textContent = `Reply to ${user.displayName}'s status`;
+    topRow.appendChild(label);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'dm-status-reply-close';
+    cancelBtn.title = 'Cancel reply';
+    cancelBtn.setAttribute('aria-label', 'Cancel status reply');
+    cancelBtn.appendChild(createCloseIconSvg(12));
+    cancelBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      close();
+    });
+    topRow.appendChild(cancelBtn);
+    box.appendChild(topRow);
+
+    const inputRow = document.createElement('div');
+    inputRow.className = 'dm-status-reply-input-row';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'dm-status-reply-input';
+    input.maxLength = 2000;
+    input.placeholder = `Reply to @${user.username}'s status...`;
+    input.setAttribute('aria-label', `Reply to ${user.displayName}'s custom status`);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+      }
+    });
+    inputEl = input;
+
+    const sendBtn = document.createElement('button');
+    sendBtn.type = 'submit';
+    sendBtn.className = 'dm-status-reply-send';
+    sendBtn.textContent = 'Send';
+    sendBtn.disabled = true;
+
+    input.addEventListener('input', () => {
+      sendBtn.disabled = !input.value.trim();
+    });
+
+    box.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const trimmed = input.value.trim();
+      if (!trimmed || !activeUser || !activeStatus) {
+        return;
+      }
+      const targetUser = activeUser;
+      const targetStatus = activeStatus;
+      close();
+      onSubmit(targetUser, targetStatus, trimmed);
+    });
+
+    inputRow.appendChild(input);
+    inputRow.appendChild(sendBtn);
+    box.appendChild(inputRow);
+    host.appendChild(box);
+    window.setTimeout(() => input.focus(), 0);
+  };
+
+  return {
+    open,
+    close,
+    syncAvailability: (stillAvailable: boolean) => {
+      if (!stillAvailable && activeUser) {
+        close();
+      }
+    },
+  };
 }
 
 export function createProfilePanelToggleIconSvg(size = 18): SVGSVGElement {
@@ -891,6 +1033,7 @@ export function openPublicProfileModal(options: {
   getSnapshot?: () => SocialSnapshot;
   onOpenDm?: (username: string) => void;
   onOpenGroup?: (groupId: string) => void;
+  onReplyToStatus?: ReplyToStatusHandler;
   onClose?: () => void;
 }): { sync: (nextUser: PublicProfile) => void; close: () => void } {
   let currentUser = options.initialUser;
@@ -996,6 +1139,11 @@ export function openPublicProfileModal(options: {
   const modalBody = document.createElement('div');
   modalBody.className = 'dm-full-body';
 
+  const modalStatusReplyHost = document.createElement('div');
+  modalStatusReplyHost.className = 'dm-status-reply-host dm-status-reply-host--modal';
+  modalStatusReplyHost.hidden = true;
+  modalBody.appendChild(modalStatusReplyHost);
+
   const modalDisplay = document.createElement('h3');
   modalDisplay.className = 'dm-full-display';
   modalBody.appendChild(modalDisplay);
@@ -1018,6 +1166,14 @@ export function openPublicProfileModal(options: {
   const modalTabsController = createProfileTabsController(
     () => syncModal(currentUser),
     () => !isClosed,
+  );
+
+  const modalStatusReplyCtrl = createInlineStatusReplyController(
+    modalStatusReplyHost,
+    (targetUser, targetStatus, text) => {
+      closeModal();
+      options.onReplyToStatus?.(targetUser, targetStatus, text, true);
+    },
   );
 
   const syncModal = (friend: PublicProfile) => {
@@ -1056,12 +1212,25 @@ export function openPublicProfileModal(options: {
     }
 
     modalBubbleHost.replaceChildren();
+    let hasModalReplyBubble = false;
     if (!isPrivate && !isBlocked) {
-      const modalBubble = createThoughtBubbleElement({ profile: friend });
+      const canReply =
+        Boolean(options.onReplyToStatus) &&
+        canReplyToUserCustomStatus(friend, relation, options.getSnapshot?.());
+      const modalBubble = createThoughtBubbleElement({
+        profile: friend,
+        onReply: canReply
+          ? (status) => {
+              modalStatusReplyCtrl.open(friend, status);
+            }
+          : undefined,
+      });
       if (modalBubble) {
+        hasModalReplyBubble = canReply;
         modalBubbleHost.appendChild(modalBubble);
       }
     }
+    modalStatusReplyCtrl.syncAvailability(hasModalReplyBubble);
 
     modalDisplay.textContent = friend.displayName;
     modalUsername.textContent = friend.username;
@@ -1172,6 +1341,7 @@ export function createDmProfilePanel(options: DmProfilePanelOptions): DmProfileP
       getSnapshot: options.getSnapshot,
       onOpenDm: options.onOpenDm,
       onOpenGroup: options.onOpenGroup,
+      onReplyToStatus: options.onReplyToStatus,
       onClose: () => {
         modalHandle = null;
       },
@@ -1257,6 +1427,11 @@ export function createDmProfilePanel(options: DmProfilePanelOptions): DmProfileP
 
   scrollWrap.appendChild(avatarRow);
 
+  const sideStatusReplyHost = document.createElement('div');
+  sideStatusReplyHost.className = 'dm-status-reply-host dm-status-reply-host--sidebar';
+  sideStatusReplyHost.hidden = true;
+  scrollWrap.appendChild(sideStatusReplyHost);
+
   const identity = document.createElement('div');
   identity.className = 'dm-profile-identity';
 
@@ -1297,6 +1472,13 @@ export function createDmProfilePanel(options: DmProfilePanelOptions): DmProfileP
     () => !destroyed,
   );
 
+  const sideStatusReplyCtrl = createInlineStatusReplyController(
+    sideStatusReplyHost,
+    (targetUser, targetStatus, text) => {
+      options.onReplyToStatus?.(targetUser, targetStatus, text, false);
+    },
+  );
+
   const syncSideContents = () => {
     const isPrivate = Boolean(currentFriend.isProfilePrivate);
     const relation = options.getSnapshot
@@ -1328,12 +1510,25 @@ export function createDmProfilePanel(options: DmProfilePanelOptions): DmProfileP
     }
 
     sideBubbleHost.replaceChildren();
+    let hasSideReplyBubble = false;
     if (!isPrivate && !isBlocked) {
-      const sideBubble = createThoughtBubbleElement({ profile: currentFriend });
+      const canReply =
+        Boolean(options.onReplyToStatus) &&
+        canReplyToUserCustomStatus(currentFriend, relation, options.getSnapshot?.());
+      const sideBubble = createThoughtBubbleElement({
+        profile: currentFriend,
+        onReply: canReply
+          ? (status) => {
+              sideStatusReplyCtrl.open(currentFriend, status);
+            }
+          : undefined,
+      });
       if (sideBubble) {
+        hasSideReplyBubble = canReply;
         sideBubbleHost.appendChild(sideBubble);
       }
     }
+    sideStatusReplyCtrl.syncAvailability(hasSideReplyBubble);
 
     displayNameEl.textContent = currentFriend.displayName;
     usernameEl.textContent = currentFriend.username;

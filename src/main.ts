@@ -203,6 +203,7 @@ import type {
   ResetSession,
   SignUpDraft,
   SocialSnapshot,
+  StatusReplyRef,
   UserStatus,
   VcStateEventPayload,
   VoiceNoteMeta,
@@ -1785,6 +1786,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     gif?: GifItem;
     voiceNote?: VoiceNoteMeta;
     replyToMessageId?: string;
+    statusReply?: StatusReplyRef;
     localMessage: ChatMessage;
     bufferingTimerId: number | null;
   }
@@ -2009,6 +2011,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
           gif: head.gif,
           voiceNote: head.voiceNote,
           replyToMessageId: head.replyToMessageId,
+          statusReply: head.statusReply,
         });
 
         if (head.bufferingTimerId !== null) {
@@ -2053,6 +2056,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     gif?: GifItem;
     voiceNote?: VoiceNoteMeta;
     replyTo?: MessageReplyRef;
+    statusReply?: StatusReplyRef;
   }) => {
     const current = state.snapshot?.user;
     if (!current) {
@@ -2101,6 +2105,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       gif: opts.gif,
       voiceNote: opts.voiceNote,
       replyTo: opts.replyTo,
+      statusReply: opts.statusReply,
       timestamp: optimisticTimestamp,
       reactions: [],
       isPending: isOfflineOrQueued,
@@ -2117,6 +2122,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       gif: opts.gif,
       voiceNote: opts.voiceNote,
       replyToMessageId: opts.replyTo?.messageId,
+      statusReply: opts.statusReply,
       localMessage,
       bufferingTimerId: null,
     };
@@ -2516,6 +2522,35 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   let triggerVoiceSettingsModal: (() => void) | null = null;
   let triggerSelfProfileModal: ((initialEdit?: boolean) => void) | null = null;
 
+  const handleReplyToCustomStatus = (
+    targetUser: PublicProfile,
+    status: CustomStatusData,
+    replyText: string,
+    fromModal: boolean,
+  ) => {
+    const trimmed = replyText.trim();
+    if (!trimmed) {
+      return;
+    }
+    const peerKey = targetUser.username.toLowerCase();
+    const cacheKey = dmThreadCacheKey(peerKey);
+    const statusReply: StatusReplyRef = {
+      authorUsername: targetUser.username,
+      authorName: targetUser.displayName,
+      emoji: status.emoji?.trim() || undefined,
+      text: status.text?.trim() || undefined,
+    };
+    enqueueOutboundDm({
+      cacheKey,
+      target: { peerUsername: targetUser.username },
+      content: trimmed,
+      statusReply,
+    });
+    if (fromModal || !isThreadCurrentlyViewed(cacheKey)) {
+      openDirectMessageWithUser(targetUser.username);
+    }
+  };
+
   const openProfileModalForUser = (user: PublicProfile) => {
     if (!state.snapshot) {
       return;
@@ -2531,6 +2566,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       onSnapshotUpdated: (nextSnapshot) => applyLiveSnapshot(nextSnapshot),
       onOpenDm: openDirectMessageWithUser,
       onOpenGroup: openGroupChatById,
+      onReplyToStatus: handleReplyToCustomStatus,
     });
   };
 
@@ -3371,6 +3407,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
             getSnapshot: () => state.snapshot!,
             onOpenDm: openDirectMessageWithUser,
             onOpenGroup: openGroupChatById,
+            onReplyToStatus: handleReplyToCustomStatus,
             onSnapshotUpdated: (nextSnapshot) => {
               applyLiveSnapshot(nextSnapshot);
             },
@@ -4301,6 +4338,9 @@ function renderWorkspaceScreen(root: HTMLElement): void {
           msg.forwarded ? 'FWD1' : 'FWD0',
           msg.replyTo
             ? `${msg.replyTo.missing ? 'M' : 'R'}:${msg.replyTo.authorName}:${msg.replyTo.content}`
+            : '',
+          msg.statusReply
+            ? `SR:${msg.statusReply.authorName}:${msg.statusReply.emoji ?? ''}:${msg.statusReply.text ?? ''}`
             : '',
           (msg.reactions ?? []).map((r) => `${r.emoji}:${r.count}:${r.users.join(',')}`).join('|'),
         ].join('\x1f');

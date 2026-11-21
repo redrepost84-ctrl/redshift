@@ -1889,7 +1889,7 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
   } = opts;
 
   const isPending = Boolean(msg.isPending);
-  const hasReply = Boolean(msg.replyTo);
+  const hasReply = Boolean(msg.replyTo || msg.statusReply);
   const effectiveGrouped = isGrouped && !hasReply;
   const legacyImages =
     msg.imageDataUrls && msg.imageDataUrls.length > 0
@@ -2020,6 +2020,32 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
     }
 
     replyContext.appendChild(snippetBtn);
+    row.appendChild(replyContext);
+  } else if (msg.statusReply) {
+    const statusRef = msg.statusReply;
+    const replyContext = document.createElement('div');
+    replyContext.className = 'msg-reply-context msg-reply-context--status';
+
+    const spine = document.createElement('span');
+    spine.className = 'msg-reply-spine';
+    spine.setAttribute('aria-hidden', 'true');
+    replyContext.appendChild(spine);
+
+    const statusTag = document.createElement('span');
+    statusTag.className = 'msg-status-reply-label';
+    statusTag.textContent = `Replied to ${statusRef.authorName}'s status`;
+    replyContext.appendChild(statusTag);
+
+    const statusPill = document.createElement('span');
+    statusPill.className = 'msg-status-reply-pill';
+    const parts: string[] = [];
+    if (statusRef.emoji) parts.push(statusRef.emoji);
+    if (statusRef.text) parts.push(formatReplySnippetText(statusRef.text.replace(/\s+/g, ' ').trim(), 90));
+    const displayStatus = parts.join(' ') || 'Custom status';
+    setTwemojiText(statusPill, displayStatus);
+    statusPill.title = [statusRef.emoji, statusRef.text].filter(Boolean).join(' ');
+    replyContext.appendChild(statusPill);
+
     row.appendChild(replyContext);
   }
 

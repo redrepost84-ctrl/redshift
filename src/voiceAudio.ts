@@ -371,6 +371,62 @@ export function playVcLeaveSound(): void {
   scheduleSynthNote(ctx, ctx.destination, t + 0.075, 440.0, 0.22, 0.14, 'sine');
 }
 
+export function playVcPeerJoinSound(): void {
+  const ctx = getSharedVoiceAudioContext();
+  if (!ctx) {
+    return;
+  }
+  const t = ctx.currentTime + 0.01;
+  scheduleSynthNote(ctx, ctx.destination, t, 659.25, 0.11, 0.11, 'sine');
+  scheduleSynthNote(ctx, ctx.destination, t + 0.07, 880.0, 0.18, 0.13, 'sine');
+}
+
+export function playVcPeerLeaveSound(): void {
+  const ctx = getSharedVoiceAudioContext();
+  if (!ctx) {
+    return;
+  }
+  const t = ctx.currentTime + 0.01;
+  scheduleSynthNote(ctx, ctx.destination, t, 587.33, 0.11, 0.11, 'sine');
+  scheduleSynthNote(ctx, ctx.destination, t + 0.07, 392.0, 0.19, 0.12, 'sine');
+}
+
+export function playStreamStartSound(): void {
+  const ctx = getSharedVoiceAudioContext();
+  if (!ctx) {
+    return;
+  }
+  const t = ctx.currentTime + 0.01;
+  scheduleSynthNote(ctx, ctx.destination, t, 587.33, 0.1, 0.11, 'triangle');
+  scheduleSynthNote(ctx, ctx.destination, t + 0.065, 739.99, 0.11, 0.12, 'triangle');
+  scheduleSynthNote(ctx, ctx.destination, t + 0.13, 880.0, 0.22, 0.13, 'sine');
+}
+
+export function playStreamEndSound(): void {
+  const ctx = getSharedVoiceAudioContext();
+  if (!ctx) {
+    return;
+  }
+  const t = ctx.currentTime + 0.01;
+  scheduleSynthNote(ctx, ctx.destination, t, 783.99, 0.1, 0.11, 'triangle');
+  scheduleSynthNote(ctx, ctx.destination, t + 0.065, 587.33, 0.11, 0.11, 'triangle');
+  scheduleSynthNote(ctx, ctx.destination, t + 0.13, 440.0, 0.2, 0.12, 'sine');
+}
+
+export function createWatchStreamIconSvg(size = 15): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', String(size));
+  svg.setAttribute('height', String(size));
+  svg.setAttribute('fill', 'currentColor');
+  svg.setAttribute('aria-hidden', 'true');
+  const poly = document.createElementNS(ns, 'polygon');
+  poly.setAttribute('points', '7,4.5 20,12 7,19.5');
+  svg.appendChild(poly);
+  return svg;
+}
+
 export function playVoiceToggleCue(enabled: boolean): void {
   const ctx = getSharedVoiceAudioContext();
   if (!ctx) {

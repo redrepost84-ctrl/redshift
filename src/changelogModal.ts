@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.14';
+export const CURRENT_REDSHIFT_VERSION = '0.1.15';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,24 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.15',
+    date: 'November 20, 2026',
+    kicker: 'STREAMS, STATUS REPLIES & VOICE SOUNDS',
+    headline: 'Click-to-Watch Blurred Stream Previews, Custom Status Replies & Full Call/Stream Sound Cues',
+    lead:
+      'Remote screen shares now stay blurred and muted until you click Watch to pop open the toggleable big screen, hovering any user’s custom status lets you reply directly from the top-right Reply button, and voice/stream sound effects now play for everyone in the call.',
+    sections: [
+      {
+        heading: 'New Features',
+        items: [
+          'Click-to-Watch Screen Shares — Remote streams appear as a blurred dark-grey preview with a Watch button (with stream audio muted until you opt in). Clicking Watch pops open the big screen view that you can minimize/expand anytime or leave with Stop Watching.',
+          'Hover Custom Status to Reply — Hovering over another user’s custom status in either their right-hand profile panel or user inspection profile popup reveals a top-right Reply button that opens an inline reply composer and sends a DM with their quoted custom status.',
+          'Call & Stream Sound Effects for Everyone — Added synthesized audio cues for starting a stream, ending a stream, joining/rejoining a call, and leaving a call — heard by both you and everyone else in the call.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.14',
     date: 'November 20, 2026',

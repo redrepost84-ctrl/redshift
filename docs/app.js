@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.15',
+      published_at: '2026-11-21T03:10:00Z',
+      body: 'Click-to-watch blurred grey stream previews with toggleable big screen & Stop Watching, hover-to-reply top-right button on custom statuses in profile panels & inspection popups, and sound effects for starting/ending streams and joining/rejoining/leaving calls for everyone in the call.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.15`,
+    },
+    {
       tag_name: 'v0.1.14',
       published_at: '2026-11-21T02:45:00Z',
       body: 'Fixed sent messages jumping above a friend’s message due to PC-to-server clock skew, fixed leaving a group call still showing you in the VC topbar, and enabled 24/7 Gmail password reset emails on Cloudflare.',
