@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.26',
+      published_at: '2026-11-21T08:48:00Z',
+      body: 'Fixed "Importing a module script failed" when recording voice messages by bundling the voice note recorder directly into the main entry with chunk reload protection, tightened mobile chat message and grouped chain spacing, and made tapping anywhere outside the textbox on mobile stop typing and dismiss the keyboard.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.26`,
+    },
+    {
       tag_name: 'v0.1.25',
       published_at: '2026-11-21T08:40:00Z',
       body: 'Cross-device account settings sync (theme, density, font size, notifications, voice DSP & per-user volume overrides sync automatically across every signed-in device), mobile fit-to-screen activity scaling + scroll position preservation on every board tap, and removal of the floating top "Change Banner" overlay pill while keeping the standard profile edit banner button.',

@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.25';
+export const CURRENT_REDSHIFT_VERSION = '0.1.26';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,24 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.26',
+    date: 'November 21, 2026',
+    kicker: 'VOICE RECORDER FIX, TIGHTER MOBILE CHAT SPACING & TAP-TO-HIDE KEYBOARD',
+    headline: 'Reliable Instant Voice Note Recording, Compact Mobile Chat Chains & Tap-Outside Keyboard Dismissal',
+    lead:
+      'Fixed the "Importing a module script failed" error when recording voice messages by bundling the recorder directly with automatic chunk reload recovery, tightened mobile message and chain spacing so chats read cleanly on phone screens, and made tapping anywhere outside the textbox on mobile automatically stop typing and dismiss the keyboard.',
+    sections: [
+      {
+        heading: 'Mobile Messaging & Recorder Fixes',
+        items: [
+          'Instant Built-In Voice Note Recording — Bundled the voice message recorder and emoji picker directly into the main script so recording voice notes never fails on Safari/PWA/desktop with dynamic module import errors across updates.',
+          'Tighter Mobile Text & Chain Spacing — Reduced mobile horizontal gutter padding, grouped chain spacing, and line-heights so message threads fit cleanly on iPhone & Android screens.',
+          'Tap Outside Textbox Hides Mobile Keyboard — Tapping anywhere outside the textbox (chat messages, blank space, header, buttons) automatically stops focusing the textbox and closes the mobile keyboard cleanly.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.25',
     date: 'November 21, 2026',

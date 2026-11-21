@@ -13064,7 +13064,76 @@ body {
   }
 
   .chat-messages {
-    padding: 12px 10px;
+    padding: 6px 6px;
+  }
+
+  .chat-messages-list {
+    padding: 8px 0 6px;
+  }
+
+  .chat-message {
+    gap: 9px;
+    padding: 1px 8px;
+  }
+
+  .msg-main-line {
+    gap: 9px;
+  }
+
+  .chat-message-avatar {
+    width: 34px;
+    height: 34px;
+    margin-top: 1px;
+  }
+
+  .chat-message-gutter-time {
+    width: 34px;
+    margin-top: 1px;
+    font-size: 0.6rem;
+  }
+
+  .chat-message-group-start {
+    margin-top: 7px;
+  }
+
+  .chat-message--grouped {
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .chat-message--has-reply {
+    padding-top: 3px;
+    gap: 2px;
+  }
+
+  .chat-message-header {
+    gap: 6px;
+  }
+
+  .chat-message-author {
+    font-size: 0.9rem;
+    line-height: 1.16;
+  }
+
+  .chat-message-time {
+    font-size: 0.68rem;
+  }
+
+  .chat-message-text {
+    margin-top: 0;
+    line-height: 1.24;
+  }
+
+  .md-line {
+    line-height: 1.24;
+  }
+
+  .md-spacer {
+    height: 0.28em;
+  }
+
+  .dm-date-divider {
+    margin: 7px 6px 4px;
   }
 
   .chat-message-toolbar {

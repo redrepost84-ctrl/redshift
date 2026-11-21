@@ -1,11 +1,11 @@
 {
-  "version": "0.1.25",
-  "releasedAt": "2026-11-21T08:39:51.052Z",
-  "changelog": "Cross-device account settings sync, mobile fit-to-screen call activities with zero scroll reset, and removal of floating Change Banner overlay pill",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.25/Redshift-patch.asar",
-  "sha256": "dd3b76eab2b7dab8d7e3f783f3da6841ca71d2c4f5a7f08b4921717d7bba52e1",
-  "size": 6526391,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.25/RedshiftSetup.exe",
+  "version": "0.1.26",
+  "releasedAt": "2026-11-21T08:46:16.753Z",
+  "changelog": "Statically bundle voiceNoteRecorder and emojiPicker with vite:preloadError recovery, compact mobile chat message/chain spacing, and dismiss mobile keyboard on outside taps",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.26/Redshift-patch.asar",
+  "sha256": "44ffbd6e12238e447eb204a4d7c7c533ca575a990f6a3982d8ddf26fce75bc5a",
+  "size": 6529001,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.26/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

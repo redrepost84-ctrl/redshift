@@ -172,26 +172,19 @@ import {
 } from './muteUtils';
 import { containsSelfMention } from './markdownRenderer';
 import { attachMentionAutocomplete } from './mentionAutocomplete';
-import type { VoiceNoteRecorderSession } from './voiceNoteRecorder';
+import {
+  closeActiveEmojiPicker,
+  isEmojiPickerOpenFor,
+  openEmojiPicker,
+} from './emojiPicker';
+import {
+  startVoiceNoteRecorder,
+  type VoiceNoteRecorderSession,
+} from './voiceNoteRecorder';
 
 // Lazy-loaded heavy overlay & picker module caches for bundle code-splitting
-type EmojiPickerModule = typeof import('./emojiPicker');
 type GifPickerModule = typeof import('./gifPicker');
-let cachedEmojiPickerMod: EmojiPickerModule | null = null;
 let cachedGifPickerMod: GifPickerModule | null = null;
-
-function closeActiveEmojiPicker(): void {
-  cachedEmojiPickerMod?.closeActiveEmojiPicker();
-}
-function isEmojiPickerOpenFor(el: HTMLElement): boolean {
-  return cachedEmojiPickerMod ? cachedEmojiPickerMod.isEmojiPickerOpenFor(el) : false;
-}
-function openEmojiPickerLazy(opts: Parameters<EmojiPickerModule['openEmojiPicker']>[0]): void {
-  void import('./emojiPicker').then((mod) => {
-    cachedEmojiPickerMod = mod;
-    mod.openEmojiPicker(opts);
-  });
-}
 
 function closeActiveGifPicker(): void {
   cachedGifPickerMod?.closeActiveGifPicker();
@@ -5451,25 +5444,22 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       voiceRecBar.hidden = false;
       voiceRecTimer.textContent = '0:00';
 
-      void import('./voiceNoteRecorder')
-        .then(({ startVoiceNoteRecorder }) =>
-          startVoiceNoteRecorder({
-            onProgress: (elapsedSec, liveLevel) => {
-              const whole = Math.floor(elapsedSec);
-              const mins = Math.floor(whole / 60);
-              const secs = whole % 60;
-              voiceRecTimer.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-              meterBars.forEach((b, idx) => {
-                const wave = Math.sin(elapsedSec * 7 + idx * 0.55) * 0.14;
-                const amp = Math.min(
-                  1,
-                  Math.max(0.14, liveLevel * (0.65 + (idx % 4) * 0.15) + wave),
-                );
-                b.style.height = `${Math.round(amp * 100)}%`;
-              });
-            },
-          }),
-        )
+      startVoiceNoteRecorder({
+        onProgress: (elapsedSec, liveLevel) => {
+          const whole = Math.floor(elapsedSec);
+          const mins = Math.floor(whole / 60);
+          const secs = whole % 60;
+          voiceRecTimer.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+          meterBars.forEach((b, idx) => {
+            const wave = Math.sin(elapsedSec * 7 + idx * 0.55) * 0.14;
+            const amp = Math.min(
+              1,
+              Math.max(0.14, liveLevel * (0.65 + (idx % 4) * 0.15) + wave),
+            );
+            b.style.height = `${Math.round(amp * 100)}%`;
+          });
+        },
+      })
         .then((session) => {
           if (voiceRecBar.hidden) {
             session.cancel();
@@ -5487,7 +5477,9 @@ function renderWorkspaceScreen(root: HTMLElement): void {
 
     voiceRecCancelBtn.addEventListener('click', () => {
       cancelActiveVoiceRecording();
-      chatInput.focus();
+      if (window.innerWidth > 768) {
+        chatInput.focus();
+      }
     });
 
     voiceRecSendBtn.addEventListener('click', () => {
@@ -5512,7 +5504,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     };
 
     const openComposerEmojiPicker = () => {
-      openEmojiPickerLazy({
+      openEmojiPicker({
         anchorEl: emojiBtn,
         onSelect: (emoji) => {
           insertTextAtCursor(chatInput, emoji);
@@ -5705,7 +5697,9 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       });
       scrollToBottomPinned();
       syncJumpBar();
-      chatInput.focus();
+      if (window.innerWidth > 768) {
+        chatInput.focus();
+      }
     };
 
     const sendMessage = () => {
@@ -7631,9 +7625,116 @@ function attachMobileViewportSync(): void {
   window.addEventListener('focusout', () => window.setTimeout(syncViewportHeight, 120));
   window.visualViewport?.addEventListener('resize', syncViewportHeight);
   window.visualViewport?.addEventListener('scroll', syncViewportHeight);
+
+  // Mobile: tapping anywhere that is not a textbox/autocomplete immediately stops typing & hides keyboard.
+  const isTextEditableTarget = (el: HTMLElement | null): boolean => {
+    if (!el) return false;
+    if (
+      el.closest(
+        'textarea, [contenteditable="true"], .emoji-autocomplete-panel, .mention-autocomplete-panel',
+      )
+    ) {
+      return true;
+    }
+    const input = el.closest('input');
+    if (input) {
+      const t = (input.getAttribute('type') || 'text').toLowerCase();
+      return t !== 'checkbox' && t !== 'radio' && t !== 'range' && t !== 'file' && t !== 'button' && t !== 'submit';
+    }
+    return false;
+  };
+
+  const getActiveTextControl = (): HTMLElement | null => {
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement)) return null;
+    if (active instanceof HTMLTextAreaElement || active.isContentEditable) {
+      return active;
+    }
+    if (active instanceof HTMLInputElement) {
+      const t = active.type.toLowerCase();
+      if (t !== 'checkbox' && t !== 'radio' && t !== 'range' && t !== 'file' && t !== 'button' && t !== 'submit') {
+        return active;
+      }
+    }
+    return null;
+  };
+
+  let tapStartX = 0;
+  let tapStartY = 0;
+  let tapOrigin: HTMLElement | null = null;
+
+  document.addEventListener(
+    'touchstart',
+    (ev) => {
+      if (ev.touches.length !== 1) {
+        tapOrigin = null;
+        return;
+      }
+      tapStartX = ev.touches[0].clientX;
+      tapStartY = ev.touches[0].clientY;
+      tapOrigin = ev.target instanceof HTMLElement ? ev.target : null;
+    },
+    { passive: true, capture: true },
+  );
+
+  document.addEventListener(
+    'touchend',
+    (ev) => {
+      if (window.innerWidth > 768) return;
+      const activeInput = getActiveTextControl();
+      if (!activeInput) return;
+      const touch = ev.changedTouches[0];
+      if (touch && Math.hypot(touch.clientX - tapStartX, touch.clientY - tapStartY) > 14) {
+        return;
+      }
+      const targetEl = (ev.target instanceof HTMLElement ? ev.target : null) ?? tapOrigin;
+      if (isTextEditableTarget(targetEl)) {
+        return;
+      }
+      // If tapping a button/link, defer blur 0ms so its click event lands at the unshifted coordinates first.
+      if (targetEl?.closest('button, a, [role="button"], label')) {
+        window.setTimeout(() => {
+          getActiveTextControl()?.blur();
+          syncViewportHeight();
+        }, 0);
+      } else {
+        activeInput.blur();
+        syncViewportHeight();
+      }
+    },
+    { passive: true, capture: true },
+  );
+
+  document.addEventListener(
+    'click',
+    (ev) => {
+      if (window.innerWidth > 768) return;
+      const activeInput = getActiveTextControl();
+      if (!activeInput) return;
+      const targetEl = ev.target instanceof HTMLElement ? ev.target : null;
+      if (isTextEditableTarget(targetEl)) {
+        return;
+      }
+      window.setTimeout(() => {
+        const curActive = getActiveTextControl();
+        if (curActive === activeInput) {
+          curActive.blur();
+          syncViewportHeight();
+        }
+      }, 0);
+    },
+    true,
+  );
 }
 
 async function bootstrapApp(): Promise<void> {
+  window.addEventListener('vite:preloadError', (ev) => {
+    ev.preventDefault();
+    if (!sessionStorage.getItem('redshift.preload_reloaded')) {
+      sessionStorage.setItem('redshift.preload_reloaded', '1');
+      window.location.reload();
+    }
+  });
   attachGlobalEditableContextMenu();
   attachGlobalLongPressContextMenu();
   attachMobileViewportSync();
