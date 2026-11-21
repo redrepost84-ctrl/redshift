@@ -16488,6 +16488,52 @@ body {
   min-width: 170px;
 }
 
+.staff-privacy-banner {
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.34);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: #cfe3ff;
+}
+
+.staff-logs-error {
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  font-size: 0.82rem;
+  color: var(--error-text);
+}
+
+.staff-thread-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.staff-thread-badge {
+  flex-shrink: 0;
+  padding: 1.5px 6px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.staff-thread-badge--report {
+  background: rgba(235, 66, 72, 0.22);
+  color: #ff9fa3;
+}
+
+.staff-thread-badge--shared {
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+}
+
 .staff-selected-evidence-bar {
   display: flex;
   align-items: center;

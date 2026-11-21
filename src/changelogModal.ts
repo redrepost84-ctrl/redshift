@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.28';
+export const CURRENT_REDSHIFT_VERSION = '0.1.29';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,24 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.29',
+    date: 'November 21, 2026',
+    kicker: 'PRIVACY-SCOPED MODERATION CHAT LOGS',
+    headline: 'Privacy-First Staff Chat Log Controls: Report-Only Access & Shared Thread Scoping',
+    lead:
+      'Reworked Staff Panel Chat Logs and log search to strictly protect everyday user privacy—staff can no longer browse private conversations of non-reported users or unrelated third-party DMs.',
+    sections: [
+      {
+        heading: 'Chat Log Privacy Boundaries',
+        items: [
+          'Report-Only Eligibility — Chat logs can only be opened or searched for users who have been reported or submitted a report. All other accounts are strictly blocked at both the API and Staff Panel UI.',
+          'Scoped Conversation Access — For eligible users, staff can inspect conversations between the reporter and the reported user (their DM and shared group chats, even if the staff member is not in them) plus any DM or group chat the staff member already shares with them—while unrelated private DMs remain completely hidden.',
+          'Clear Privacy Indicators — Staff Panel Chat Logs now display a Privacy Scope banner, label eligible accounts as Reported / Reporter, tag each thread as Report vs Shared, and restrict the moderation evidence picker to report threads and shared conversations only.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.28',
     date: 'November 21, 2026',

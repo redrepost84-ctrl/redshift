@@ -632,7 +632,9 @@ export function openModerationActionScreen(options: {
     if (filtered.length === 0 && selectedEvidenceMap.size === 0) {
       const empty = document.createElement('div');
       empty.className = 'mod-evidence-empty';
-      empty.textContent = 'No messages found from this user yet. You can still add manual evidence below.';
+      empty.textContent = q
+        ? 'No messages matched your filter.'
+        : 'No messages available from your shared chats or report threads with this user. You can still add manual evidence below.';
       evList.appendChild(empty);
       return;
     }
@@ -699,7 +701,11 @@ export function openModerationActionScreen(options: {
 
   evSearchInput.addEventListener('input', renderEvidenceList);
 
-  void apiModFetchUserMessages({ username: options.target.username, limit: 150 }).then((res) => {
+  void apiModFetchUserMessages({
+    username: options.target.username,
+    limit: 150,
+    purpose: 'evidence',
+  }).then((res) => {
     if (res.ok && res.items) {
       loadedItems = res.items;
     }

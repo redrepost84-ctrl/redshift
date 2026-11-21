@@ -1,11 +1,11 @@
 {
-  "version": "0.1.28",
-  "releasedAt": "2026-11-21T20:55:58.345Z",
-  "changelog": "Staff Role Badges (Red crossed double hammers for Owner, white hammer for Moderators leyvora & lumpofsoil), built-in Official Redshift Bot with atomic Take Request dibs cards, full-screen Reporting (keeps ongoing calls active while hiding mini-call preview), right-click Suspend & Delete Account moderation with doubling durations up to 365d + Custom, multi-select evidence, moderator notes & 5s safety timer, Roblox-style Account Suspended/Terminated lockout modal with scrollable Appeal flow, and Staff Sandbox & Admin Panel.",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.28/Redshift-patch.asar",
-  "sha256": "214dce27d308db53b8849a981e34f8c44756d491e04dc60c2996f10da77a725d",
-  "size": 6698408,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.28/RedshiftSetup.exe",
+  "version": "0.1.29",
+  "releasedAt": "2026-11-21T23:49:23.204Z",
+  "changelog": "Privacy-scoped Staff Panel Chat Logs: chat logs and log search are now strictly restricted to users who have been reported or made a report, allowing staff to review conversations between the reporter and reported user (even if staff is not in that DM or group chat) plus DMs/groups shared with the staff member, while blocking all unrelated private DMs and non-reported users.",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.29/Redshift-patch.asar",
+  "sha256": "04596ead85c5bc5e4906dfdabd563f5237ed529d6328830e328b61a69d8df0f8",
+  "size": 6710489,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.29/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

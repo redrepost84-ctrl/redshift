@@ -590,10 +590,143 @@ function countOnlineUsers() {
   return count;
 }
 
-function buildStaffUserSummary(acc) {
+function getReportLogInvolvement() {
+  const reportedSet = new Set();
+  const reporterSet = new Set();
+  const reportPairs = [];
+  for (const ticket of Object.values(db.modTickets ?? {})) {
+    if (!ticket || ticket.kind !== 'report') continue;
+    const reportedKey = String(ticket.targetUsername || '').trim().toLowerCase();
+    const reporterKey = String(ticket.reporterUsername || '').trim().toLowerCase();
+    if (reportedKey) reportedSet.add(reportedKey);
+    if (reporterKey) reporterSet.add(reporterKey);
+    if (reportedKey && reporterKey) {
+      reportPairs.push({
+        reporterKey,
+        reportedKey,
+        explicitThreadKey:
+          typeof ticket.reportedMessage?.threadKey === 'string' && ticket.reportedMessage.threadKey.trim()
+            ? ticket.reportedMessage.threadKey.trim()
+            : undefined,
+      });
+    }
+  }
+  const eligibleUsers = new Set([...reportedSet, ...reporterSet]);
+  return { reportedSet, reporterSet, eligibleUsers, reportPairs };
+}
+
+function getUserLogAccessRole(uKey, involvement = getReportLogInvolvement()) {
+  const inReported = involvement.reportedSet.has(uKey);
+  const inReporter = involvement.reporterSet.has(uKey);
+  if (inReported && inReporter) return 'both';
+  if (inReported) return 'reported';
+  if (inReporter) return 'reporter';
+  return undefined;
+}
+
+function pairSharesThread(uA, uB, tKey, list, isReportPair) {
+  if (!uA || !uB || uA === uB) return false;
+  if (tKey.includes('::')) {
+    const parts = tKey.split('::');
+    return (
+      parts.length === 2 &&
+      ((parts[0] === uA && parts[1] === uB) || (parts[0] === uB && parts[1] === uA))
+    );
+  }
+  if (tKey.startsWith('group:')) {
+    const gid = tKey.slice('group:'.length);
+    const grp = db.groupDms[gid];
+    if (!grp || !Array.isArray(grp.members)) return false;
+    const members = new Set(grp.members.map((m) => String(m || '').toLowerCase()));
+    if (members.has(uA) && members.has(uB)) return true;
+    if (isReportPair && Array.isArray(list)) {
+      const aAuthored = list.some((m) => String(m?.authorUsername || '').toLowerCase() === uA);
+      const bAuthored = list.some((m) => String(m?.authorUsername || '').toLowerCase() === uB);
+      if ((members.has(uA) && bAuthored) || (members.has(uB) && aAuthored)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function getAuthorizedLogThreads(viewerKey, isDeveloper, targetKey = null, options = {}) {
+  const allowViewerSharedFallback = Boolean(options.allowViewerSharedFallback);
+  const involvement = getReportLogInvolvement();
+  const cleanTarget = targetKey ? String(targetKey).trim().toLowerCase() : null;
+  const threads = new Map();
+
+  if (cleanTarget) {
+    const isTargetInvolved = involvement.eligibleUsers.has(cleanTarget);
+    if (!isTargetInvolved && !allowViewerSharedFallback) {
+      return { allowed: false, threads, involvement };
+    }
+    const relevantPairs = involvement.reportPairs.filter(
+      (p) => p.reportedKey === cleanTarget || p.reporterKey === cleanTarget,
+    );
+    for (const [tKey, list] of Object.entries(db.dms)) {
+      if (!Array.isArray(list)) continue;
+      if (tKey.includes('::')) {
+        const parts = tKey.split('::');
+        if (parts.includes(SYSTEM_BOT_USERNAME)) continue;
+        if (!isDeveloper && parts.some((p) => DEVELOPER_USERNAMES.has(p))) continue;
+      }
+      let matchedReport = false;
+      for (const pair of relevantPairs) {
+        if (
+          (pair.explicitThreadKey && pair.explicitThreadKey === tKey) ||
+          pairSharesThread(pair.reporterKey, pair.reportedKey, tKey, list, true)
+        ) {
+          threads.set(tKey, 'report-thread');
+          matchedReport = true;
+          break;
+        }
+      }
+      if (!matchedReport && viewerKey !== cleanTarget) {
+        if (pairSharesThread(viewerKey, cleanTarget, tKey, list, false)) {
+          threads.set(tKey, 'shared-with-you');
+        }
+      }
+    }
+    return { allowed: true, threads, involvement };
+  }
+
+  for (const [tKey, list] of Object.entries(db.dms)) {
+    if (!Array.isArray(list)) continue;
+    if (tKey.includes('::')) {
+      const parts = tKey.split('::');
+      if (parts.includes(SYSTEM_BOT_USERNAME)) continue;
+      if (!isDeveloper && parts.some((p) => DEVELOPER_USERNAMES.has(p))) continue;
+    }
+    let matchedReport = false;
+    for (const pair of involvement.reportPairs) {
+      if (
+        (pair.explicitThreadKey && pair.explicitThreadKey === tKey) ||
+        pairSharesThread(pair.reporterKey, pair.reportedKey, tKey, list, true)
+      ) {
+        threads.set(tKey, 'report-thread');
+        matchedReport = true;
+        break;
+      }
+    }
+    if (!matchedReport) {
+      for (const uKey of involvement.eligibleUsers) {
+        if (uKey === viewerKey) continue;
+        if (pairSharesThread(viewerKey, uKey, tKey, list, false)) {
+          threads.set(tKey, 'shared-with-you');
+          break;
+        }
+      }
+    }
+  }
+  return { allowed: true, threads, involvement };
+}
+
+function buildStaffUserSummary(acc, involvement = getReportLogInvolvement()) {
   const uKey = acc.username.toLowerCase();
   const mod = checkAndRefreshModeration(acc);
   const activeSessions = Object.values(db.sessions).filter((v) => v === uKey).length;
+  const logAccessRole = getUserLogAccessRole(uKey, involvement);
   return {
     username: acc.username,
     displayName: acc.displayName,
@@ -609,6 +742,8 @@ function buildStaffUserSummary(acc) {
     createdAt: acc.createdAt,
     activeSessions,
     friendCount: (db.friendships[uKey] ?? []).length,
+    canInspectLogs: Boolean(logAccessRole) && !acc.systemBot,
+    logAccessRole,
     moderation: mod ? sanitizeModerationForClient(mod) : null,
     moderationHistory: Array.isArray(acc.moderationHistory) ? acc.moderationHistory : [],
   };
@@ -4765,8 +4900,26 @@ export function createRedshiftServerMiddleware() {
 
       let reportedMessage;
       if (body.reportedMessage && typeof body.reportedMessage === 'object') {
+        const rawMsgId =
+          typeof body.reportedMessage.messageId === 'string'
+            ? body.reportedMessage.messageId.slice(0, 80)
+            : undefined;
+        let verifiedThreadKey;
+        if (rawMsgId) {
+          for (const [tKey, list] of Object.entries(db.dms)) {
+            if (!Array.isArray(list)) continue;
+            const found = list.find(
+              (m) => m && m.id === rawMsgId && String(m.authorUsername || '').toLowerCase() === targetKey,
+            );
+            if (found && pairSharesThread(selfKey, targetKey, tKey, list, true)) {
+              verifiedThreadKey = tKey;
+              break;
+            }
+          }
+        }
         reportedMessage = {
-          messageId: typeof body.reportedMessage.messageId === 'string' ? body.reportedMessage.messageId.slice(0, 80) : undefined,
+          messageId: rawMsgId,
+          threadKey: verifiedThreadKey,
           threadLabel: typeof body.reportedMessage.threadLabel === 'string' ? body.reportedMessage.threadLabel.slice(0, 120) : undefined,
           authorUsername: targetAcc.username,
           content: typeof body.reportedMessage.content === 'string' ? body.reportedMessage.content.slice(0, 1500) : '',
@@ -4861,8 +5014,9 @@ export function createRedshiftServerMiddleware() {
       if (req.method === 'GET' && reqPath === '/api/mod/users') {
         const q = (parsedModUrl.searchParams.get('q') ?? '').trim().toLowerCase();
         const filter = (parsedModUrl.searchParams.get('filter') ?? 'all').trim().toLowerCase();
+        const involvement = getReportLogInvolvement();
         const users = db.accounts
-          .map((acc) => buildStaffUserSummary(acc))
+          .map((acc) => buildStaffUserSummary(acc, involvement))
           .filter((u) => {
             if (filter === 'suspended' && u.moderation?.status !== 'suspended') return false;
             if (filter === 'terminated' && u.moderation?.status !== 'terminated') return false;
@@ -4890,14 +5044,25 @@ export function createRedshiftServerMiddleware() {
           sendJson(res, 403, { ok: false, error: 'Error: Cannot inspect Developer private conversations' });
           return;
         }
+        const auth = getAuthorizedLogThreads(selfKey, isDeveloper, targetKey, {
+          allowViewerSharedFallback: false,
+        });
+        if (!auth.allowed) {
+          sendJson(res, 403, {
+            ok: false,
+            error:
+              'Privacy Policy: Chat logs can only be viewed for users who have been reported or submitted a report.',
+          });
+          return;
+        }
         const threads = [];
-        for (const [tKey, list] of Object.entries(db.dms)) {
+        for (const [tKey, accessReason] of auth.threads.entries()) {
+          const list = db.dms[tKey];
           if (!Array.isArray(list)) continue;
           if (tKey.startsWith('group:')) {
             const gid = tKey.slice('group:'.length);
             const grp = db.groupDms[gid];
             if (!grp || !Array.isArray(grp.members)) continue;
-            if (!grp.members.some((m) => m.toLowerCase() === targetKey)) continue;
             const last = list[list.length - 1];
             threads.push({
               threadKey: tKey,
@@ -4907,11 +5072,10 @@ export function createRedshiftServerMiddleware() {
               messageCount: list.length,
               lastTimestamp: last?.timestamp ?? grp.createdAt ?? 0,
               lastPreview: last ? String(last.content || (last.gif ? '[GIF]' : '[Attachment]')).slice(0, 90) : '',
+              accessReason,
             });
           } else if (tKey.includes('::')) {
             const parts = tKey.split('::');
-            if (!parts.includes(targetKey)) continue;
-            if (!isDeveloper && parts.some((p) => DEVELOPER_USERNAMES.has(p))) continue;
             const otherKey = parts[0] === targetKey ? parts[1] : parts[0];
             const otherAcc = findAccountByUsername(otherKey);
             const last = list[list.length - 1];
@@ -4923,11 +5087,12 @@ export function createRedshiftServerMiddleware() {
               messageCount: list.length,
               lastTimestamp: last?.timestamp ?? 0,
               lastPreview: last ? String(last.content || (last.gif ? '[GIF]' : '[Attachment]')).slice(0, 90) : '',
+              accessReason,
             });
           }
         }
         threads.sort((a, b) => b.lastTimestamp - a.lastTimestamp);
-        appendModAudit(activeUser, 'logs:threads', targetKey, `Listed ${threads.length} conversation threads for @${targetKey}`);
+        appendModAudit(activeUser, 'logs:threads', targetKey, `Listed ${threads.length} report-scoped conversation threads for @${targetKey}`);
         saveDb(db);
         sendJson(res, 200, { ok: true, threads });
         return;
@@ -4936,6 +5101,7 @@ export function createRedshiftServerMiddleware() {
       if (req.method === 'GET' && reqPath === '/api/mod/users/messages') {
         const targetKey = (parsedModUrl.searchParams.get('username') ?? '').trim().toLowerCase();
         const specificThreadKey = (parsedModUrl.searchParams.get('threadKey') ?? '').trim();
+        const purpose = (parsedModUrl.searchParams.get('purpose') ?? '').trim().toLowerCase();
         const q = (parsedModUrl.searchParams.get('q') ?? '').trim().toLowerCase();
         const rawLimit = Number(parsedModUrl.searchParams.get('limit'));
         const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(250, Math.floor(rawLimit)) : 120;
@@ -4947,6 +5113,25 @@ export function createRedshiftServerMiddleware() {
             specificThreadKey.split('::').some((p) => DEVELOPER_USERNAMES.has(p))
           ) {
             sendJson(res, 403, { ok: false, error: 'Error: Cannot inspect Developer private DMs' });
+            return;
+          }
+          const auth = getAuthorizedLogThreads(selfKey, isDeveloper, targetKey || null, {
+            allowViewerSharedFallback: purpose === 'evidence',
+          });
+          if (targetKey && !auth.allowed) {
+            sendJson(res, 403, {
+              ok: false,
+              error:
+                'Privacy Policy: Chat logs can only be viewed for users who have been reported or submitted a report.',
+            });
+            return;
+          }
+          if (!auth.threads.has(specificThreadKey)) {
+            sendJson(res, 403, {
+              ok: false,
+              error:
+                'Privacy Policy: You can only view conversations between a reporter and reported user, or DMs and group chats you share with them.',
+            });
             return;
           }
           const list = db.dms[specificThreadKey] ?? [];
@@ -4977,12 +5162,21 @@ export function createRedshiftServerMiddleware() {
           sendJson(res, 403, { ok: false, error: 'Error: Cannot inspect Developer messages' });
           return;
         }
+        const auth = getAuthorizedLogThreads(selfKey, isDeveloper, targetKey, {
+          allowViewerSharedFallback: purpose === 'evidence',
+        });
+        if (!auth.allowed) {
+          sendJson(res, 403, {
+            ok: false,
+            error:
+              'Privacy Policy: Chat logs can only be viewed for users who have been reported or submitted a report.',
+          });
+          return;
+        }
         const results = [];
-        for (const [tKey, list] of Object.entries(db.dms)) {
+        for (const tKey of auth.threads.keys()) {
+          const list = db.dms[tKey];
           if (!Array.isArray(list)) continue;
-          if (!isDeveloper && !tKey.startsWith('group:') && tKey.split('::').some((p) => DEVELOPER_USERNAMES.has(p))) {
-            continue;
-          }
           let threadLabel = tKey;
           if (tKey.startsWith('group:')) {
             const grp = db.groupDms[tKey.slice('group:'.length)];
@@ -5016,13 +5210,26 @@ export function createRedshiftServerMiddleware() {
           sendJson(res, 200, { ok: true, results: [] });
           return;
         }
+        if (fromUser && DEVELOPER_USERNAMES.has(fromUser) && !isDeveloper) {
+          sendJson(res, 403, { ok: false, error: 'Error: Cannot search Developer private messages' });
+          return;
+        }
+        const auth = getAuthorizedLogThreads(selfKey, isDeveloper, fromUser || null, {
+          allowViewerSharedFallback: false,
+        });
+        if (fromUser && !auth.allowed) {
+          sendJson(res, 403, {
+            ok: false,
+            error:
+              'Privacy Policy: You can only search logs for users who have been reported or submitted a report.',
+          });
+          return;
+        }
 
         const results = [];
-        for (const [tKey, list] of Object.entries(db.dms)) {
+        for (const tKey of auth.threads.keys()) {
+          const list = db.dms[tKey];
           if (!Array.isArray(list)) continue;
-          if (!isDeveloper && !tKey.startsWith('group:') && tKey.split('::').some((p) => DEVELOPER_USERNAMES.has(p))) {
-            continue;
-          }
           let threadLabel = tKey;
           if (tKey.startsWith('group:')) {
             const grp = db.groupDms[tKey.slice('group:'.length)];
@@ -5043,7 +5250,7 @@ export function createRedshiftServerMiddleware() {
           }
         }
         results.sort((a, b) => (b.message.timestamp || 0) - (a.message.timestamp || 0));
-        appendModAudit(activeUser, 'logs:search', fromUser || undefined, `Searched global chat logs q="${q}" from="${fromUser}"`);
+        appendModAudit(activeUser, 'logs:search', fromUser || undefined, `Searched report-scoped chat logs q="${q}" from="${fromUser}"`);
         saveDb(db);
         sendJson(res, 200, { ok: true, results: results.slice(0, limit) });
         return;

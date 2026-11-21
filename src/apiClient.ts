@@ -2380,6 +2380,7 @@ export async function apiModFetchUserMessages(params: {
   threadKey?: string;
   q?: string;
   limit?: number;
+  purpose?: 'logs' | 'evidence';
 }): Promise<{
   ok: boolean;
   messages?: ChatMessage[];
@@ -2391,6 +2392,7 @@ export async function apiModFetchUserMessages(params: {
   if (params.threadKey) qs.set('threadKey', params.threadKey);
   if (params.q) qs.set('q', params.q);
   if (params.limit) qs.set('limit', String(params.limit));
+  if (params.purpose) qs.set('purpose', params.purpose);
   const res = await getAuthedJson<{
     ok?: boolean;
     messages?: ChatMessage[];

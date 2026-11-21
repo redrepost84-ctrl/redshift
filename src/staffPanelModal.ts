@@ -98,6 +98,7 @@ export function openStaffPanelModal(options: OpenStaffPanelOptions): StaffPanelH
   let logsThreads: StaffThreadSummary[] = [];
   let logsSelectedThread: StaffThreadSummary | null = null;
   let logsMessages: ChatMessage[] = [];
+  let logsError: string | null = null;
   let logsGlobalQuery = '';
   let logsGlobalFrom = '';
   let logsGlobalResults: Array<{ threadKey: string; threadLabel: string; message: ChatMessage }> = [];
@@ -234,12 +235,22 @@ export function openStaffPanelModal(options: OpenStaffPanelOptions): StaffPanelH
     activeTab = 'logs';
     logsSelectedThread = null;
     logsMessages = [];
+    logsGlobalResults = [];
+    logsError = null;
     selectedLogEvidence.clear();
     syncTabButtons();
     renderBody();
     const res = await apiModFetchUserThreads(logsTargetUser);
     if (closed) return;
-    logsThreads = res.ok && res.threads ? res.threads : [];
+    if (!res.ok) {
+      logsThreads = [];
+      logsError =
+        res.error ??
+        'Privacy Policy: Chat logs can only be viewed for users who have been reported or submitted a report.';
+    } else {
+      logsThreads = res.threads ?? [];
+      logsError = null;
+    }
     renderBody();
   };
 
@@ -392,11 +403,22 @@ export function openStaffPanelModal(options: OpenStaffPanelOptions): StaffPanelH
     const viewLogsBtn = document.createElement('button');
     viewLogsBtn.type = 'button';
     viewLogsBtn.className = 'btn-secondary staff-sm-btn';
-    viewLogsBtn.textContent = 'Chat Logs';
+    viewLogsBtn.textContent = ticket.kind === 'report' ? `Logs (@${ticket.targetUsername})` : 'Chat Logs';
     viewLogsBtn.addEventListener('click', () => {
       void openLogsForUser(ticket.targetUsername);
     });
     actions.appendChild(viewLogsBtn);
+
+    if (ticket.kind === 'report' && ticket.reporterUsername) {
+      const reporterLogsBtn = document.createElement('button');
+      reporterLogsBtn.type = 'button';
+      reporterLogsBtn.className = 'btn-secondary staff-sm-btn';
+      reporterLogsBtn.textContent = `Reporter Logs (@${ticket.reporterUsername})`;
+      reporterLogsBtn.addEventListener('click', () => {
+        void openLogsForUser(ticket.reporterUsername!);
+      });
+      actions.appendChild(reporterLogsBtn);
+    }
 
     if (ticket.kind === 'report' && (isOpen || canAct)) {
       const resolveBtn = document.createElement('button');
@@ -647,7 +669,12 @@ export function openStaffPanelModal(options: OpenStaffPanelOptions): StaffPanelH
       logsBtn.type = 'button';
       logsBtn.className = 'btn-secondary staff-sm-btn';
       logsBtn.textContent = 'Read Chat Logs';
-      logsBtn.disabled = isProtectedDev;
+      const logsBlocked = isProtectedDev || !target.canInspectLogs;
+      logsBtn.disabled = logsBlocked;
+      if (!target.canInspectLogs && !isProtectedDev) {
+        logsBtn.title =
+          'Privacy: Chat logs are only accessible for users who have been reported or submitted a report.';
+      }
       logsBtn.addEventListener('click', () => {
         void openLogsForUser(target.username);
       });
@@ -906,40 +933,65 @@ export function openStaffPanelModal(options: OpenStaffPanelOptions): StaffPanelH
     const wrap = document.createElement('div');
     wrap.className = 'staff-logs-wrap';
 
-    // Top bar: Inspect user threads OR Global search
+    const privacyBanner = document.createElement('div');
+    privacyBanner.className = 'staff-privacy-banner';
+    privacyBanner.textContent =
+      'Privacy Scope: Chat logs are only accessible for users who have been reported or submitted a report, and only show conversations between the reporter & reported user or DMs/group chats you share with them.';
+    wrap.appendChild(privacyBanner);
+
+    // Top bar: Inspect eligible report user threads OR Scoped log search
     const topBar = document.createElement('div');
     topBar.className = 'staff-logs-controls';
+
+    const eligibleUsers = allUsers.filter(
+      (u) => Boolean(u.canInspectLogs) && !(u.role === 'developer' && !isDeveloper),
+    );
 
     const userSel = document.createElement('select');
     userSel.className = 'auth-input mod-select';
     const defOpt = document.createElement('option');
     defOpt.value = '';
-    defOpt.textContent = 'Inspect a user\'s conversations...';
+    defOpt.textContent =
+      eligibleUsers.length > 0
+        ? 'Inspect a reported or reporting user...'
+        : 'No reported or reporting users yet';
     userSel.appendChild(defOpt);
-    for (const u of allUsers) {
-      if (u.role === 'developer' && !isDeveloper) continue;
+    for (const u of eligibleUsers) {
       const o = document.createElement('option');
       o.value = u.username.toLowerCase();
-      o.textContent = `${u.displayName} (@${u.username})`;
+      const roleTag =
+        u.logAccessRole === 'both'
+          ? 'Reported & Reporter'
+          : u.logAccessRole === 'reported'
+            ? 'Reported'
+            : 'Reporter';
+      o.textContent = `${u.displayName} (@${u.username}) · ${roleTag}`;
       if (o.value === logsTargetUser) o.selected = true;
       userSel.appendChild(o);
     }
     userSel.addEventListener('change', () => {
       if (userSel.value) {
         void openLogsForUser(userSel.value);
+      } else {
+        logsTargetUser = '';
+        logsThreads = [];
+        logsSelectedThread = null;
+        logsMessages = [];
+        logsError = null;
+        renderBody();
       }
     });
 
     const qInput = document.createElement('input');
     qInput.type = 'search';
     qInput.className = 'auth-input';
-    qInput.placeholder = 'Global search message text...';
+    qInput.placeholder = 'Search within accessible report logs...';
     qInput.value = logsGlobalQuery;
 
     const fromInput = document.createElement('input');
     fromInput.type = 'text';
     fromInput.className = 'auth-input';
-    fromInput.placeholder = 'from:username (optional)';
+    fromInput.placeholder = 'from:reported_user (optional)';
     fromInput.value = logsGlobalFrom;
 
     const searchBtn = document.createElement('button');
@@ -950,13 +1002,22 @@ export function openStaffPanelModal(options: OpenStaffPanelOptions): StaffPanelH
       logsGlobalQuery = qInput.value.trim();
       logsGlobalFrom = fromInput.value.trim();
       logsSelectedThread = null;
+      logsError = null;
       const res = await apiModSearchMessages({
         q: logsGlobalQuery,
         from: logsGlobalFrom,
         limit: 120,
       });
       if (closed) return;
-      logsGlobalResults = res.ok && res.results ? res.results : [];
+      if (!res.ok) {
+        logsGlobalResults = [];
+        logsError =
+          res.error ??
+          'Privacy Policy: You can only search logs for users who have been reported or submitted a report.';
+      } else {
+        logsGlobalResults = res.results ?? [];
+        logsError = null;
+      }
       renderBody();
     });
 
@@ -965,6 +1026,13 @@ export function openStaffPanelModal(options: OpenStaffPanelOptions): StaffPanelH
     topBar.appendChild(fromInput);
     topBar.appendChild(searchBtn);
     wrap.appendChild(topBar);
+
+    if (logsError) {
+      const errBanner = document.createElement('div');
+      errBanner.className = 'staff-logs-error';
+      errBanner.textContent = logsError;
+      wrap.appendChild(errBanner);
+    }
 
     // Action bar for selected evidence checkboxes
     if (selectedLogEvidence.size > 0) {
@@ -1030,8 +1098,8 @@ export function openStaffPanelModal(options: OpenStaffPanelOptions): StaffPanelH
       const empty = document.createElement('div');
       empty.className = 'staff-empty-state';
       empty.textContent = logsTargetUser
-        ? `No conversations found for @${logsTargetUser}.`
-        : 'Choose a user above to list their DMs and Group Chats.';
+        ? `No report-related or shared conversations found for @${logsTargetUser}.`
+        : 'Choose a reported or reporting user above to view their report conversations and shared chats.';
       threadCol.appendChild(empty);
     } else {
       for (const th of logsThreads) {
@@ -1041,24 +1109,42 @@ export function openStaffPanelModal(options: OpenStaffPanelOptions): StaffPanelH
           logsSelectedThread?.threadKey === th.threadKey
             ? 'staff-thread-row staff-thread-row--active'
             : 'staff-thread-row';
+        const rowTop = document.createElement('div');
+        rowTop.className = 'staff-thread-row-top';
         const l1 = document.createElement('div');
         l1.className = 'staff-thread-row-title';
         l1.textContent = th.label;
+        rowTop.appendChild(l1);
+        if (th.accessReason) {
+          const badge = document.createElement('span');
+          badge.className =
+            th.accessReason === 'report-thread'
+              ? 'staff-thread-badge staff-thread-badge--report'
+              : 'staff-thread-badge staff-thread-badge--shared';
+          badge.textContent = th.accessReason === 'report-thread' ? 'Report' : 'Shared';
+          rowTop.appendChild(badge);
+        }
         const l2 = document.createElement('div');
         l2.className = 'staff-thread-row-sub';
         l2.textContent = `${th.messageCount} msgs · ${th.lastPreview || 'No preview'}`;
-        btn.appendChild(l1);
+        btn.appendChild(rowTop);
         btn.appendChild(l2);
         btn.addEventListener('click', async () => {
           logsSelectedThread = th;
           logsGlobalResults = [];
+          logsError = null;
           const res = await apiModFetchUserMessages({
             username: logsTargetUser,
             threadKey: th.threadKey,
             limit: 200,
           });
           if (closed) return;
-          logsMessages = res.ok && res.messages ? res.messages : [];
+          if (!res.ok) {
+            logsMessages = [];
+            logsError = res.error ?? 'Privacy Policy: Could not read this conversation.';
+          } else {
+            logsMessages = res.messages ?? [];
+          }
           renderBody();
         });
         threadCol.appendChild(btn);
@@ -1151,7 +1237,7 @@ export function openStaffPanelModal(options: OpenStaffPanelOptions): StaffPanelH
     } else {
       const empty = document.createElement('div');
       empty.className = 'staff-empty-state';
-      empty.textContent = 'Select a conversation on the left or run a global log search above.';
+      empty.textContent = 'Select a report or shared conversation on the left, or search accessible report logs above.';
       msgCol.appendChild(empty);
     }
 

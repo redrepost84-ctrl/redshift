@@ -2115,7 +2115,110 @@ async function run() {
 
     const bobThreads = await api(baseUrl, '/api/mod/users/threads?username=bob_t', { token: tokenDev });
     assert.equal(bobThreads.status, 200);
-    assert.ok(bobThreads.data.threads.length >= 1, 'Expected staff to inspect user threads');
+    assert.ok(
+      bobThreads.data.threads.some((t) => t.threadKey === 'alice_t::bob_t' && t.accessReason === 'report-thread'),
+      'Expected staff to inspect reporter <-> reported DM even if not in it',
+    );
+
+    // Privacy-Scoped Chat Logs enforcement:
+    // 1) Create an unrelated non-reported user dave_priv who shares a DM with bob_t AND with Redrepost95
+    const daveSignUp = await api(baseUrl, '/api/auth/signup', {
+      method: 'POST',
+      body: {
+        username: 'dave_priv',
+        email: 'dave_priv@test.local',
+        confirmEmail: 'dave_priv@test.local',
+        password: 'Password123!',
+        confirmPassword: 'Password123!',
+        avatarPreset: 3,
+      },
+    });
+    assert.equal(daveSignUp.status, 200);
+    const tokenDave = daveSignUp.data.token;
+    await api(baseUrl, '/api/dms/send', {
+      method: 'POST',
+      token: bobFreshToken,
+      body: { toUsername: 'dave_priv', content: 'PRIVATE_UNRELATED_SECRET_XYZ' },
+    });
+    await api(baseUrl, '/api/dms/send', {
+      method: 'POST',
+      token: tokenDave,
+      body: { toUsername: 'Redrepost95', content: 'INNOCENT_DM_WITH_OWNER_ONLY' },
+    });
+    await api(baseUrl, '/api/dms/send', {
+      method: 'POST',
+      token: bobFreshToken,
+      body: { toUsername: 'Redrepost95', content: 'REPORTED_USER_DM_WITH_OWNER' },
+    });
+
+    // Staff user summaries expose canInspectLogs & logAccessRole accurately
+    const usersPrivacyList = await api(baseUrl, '/api/mod/users', { token: tokenDev });
+    const daveSummary = usersPrivacyList.data.users.find((u) => u.username === 'dave_priv');
+    const bobSummaryPriv = usersPrivacyList.data.users.find((u) => u.username === 'bob_t');
+    const aliceSummaryPriv = usersPrivacyList.data.users.find((u) => u.username === 'alice_t');
+    assert.equal(daveSummary?.canInspectLogs, false, 'Non-reported user must not be inspectable in Chat Logs');
+    assert.equal(bobSummaryPriv?.canInspectLogs, true);
+    assert.equal(bobSummaryPriv?.logAccessRole, 'reported');
+    assert.equal(aliceSummaryPriv?.canInspectLogs, true);
+    assert.equal(aliceSummaryPriv?.logAccessRole, 'reporter');
+
+    // Non-reported user (even in owner's DM!) is strictly 403 blocked from Chat Logs & scoped search
+    const daveThreadsDenied = await api(baseUrl, '/api/mod/users/threads?username=dave_priv', { token: tokenDev });
+    assert.equal(daveThreadsDenied.status, 403);
+    const daveSearchDenied = await api(baseUrl, '/api/mod/messages/search?from=dave_priv', { token: tokenDev });
+    assert.equal(daveSearchDenied.status, 403);
+    const unrelatedSearch = await api(baseUrl, '/api/mod/messages/search?q=PRIVATE_UNRELATED_SECRET_XYZ', { token: tokenDev });
+    assert.equal(unrelatedSearch.status, 200);
+    assert.equal(unrelatedSearch.data.results.length, 0, 'Unrelated private DM between bob_t and dave_priv must never leak in search');
+    const innocentSearch = await api(baseUrl, '/api/mod/messages/search?q=INNOCENT_DM_WITH_OWNER_ONLY', { token: tokenDev });
+    assert.equal(innocentSearch.status, 200);
+    assert.equal(innocentSearch.data.results.length, 0, 'Non-reported user DM must not leak in report log search');
+
+    // For reported user bob_t: owner sees alice_t::bob_t (report-thread) + bob_t::redrepost95 (shared-with-you), NEVER bob_t::dave_priv!
+    const bobThreadsScoped = await api(baseUrl, '/api/mod/users/threads?username=bob_t', { token: tokenDev });
+    assert.equal(bobThreadsScoped.status, 200);
+    const bobThreadKeys = bobThreadsScoped.data.threads.map((t) => t.threadKey);
+    assert.ok(bobThreadKeys.includes('alice_t::bob_t'), 'Report pair DM must be visible');
+    assert.ok(bobThreadKeys.includes('bob_t::redrepost95'), 'Shared DM with staff must be visible for reported user');
+    assert.ok(!bobThreadKeys.includes('bob_t::dave_priv'), 'Unrelated private DM must be strictly hidden');
+
+    // Direct threadKey fetch of bob_t::dave_priv is strictly 403 forbidden
+    const bobUnrelatedRead = await api(
+      baseUrl,
+      '/api/mod/users/messages?username=bob_t&threadKey=bob_t::dave_priv',
+      { token: tokenDev },
+    );
+    assert.equal(bobUnrelatedRead.status, 403);
+
+    // Moderator lumpofsoil (NOT in alice_t <-> bob_t DM) CAN still read alice_t::bob_t because alice_t reported bob_t!
+    const modReadReportDm = await api(
+      baseUrl,
+      '/api/mod/users/messages?username=bob_t&threadKey=alice_t::bob_t',
+      { token: tokenMod2 },
+    );
+    assert.equal(modReadReportDm.status, 200);
+    assert.ok(modReadReportDm.data.messages.length >= 1);
+
+    // Reporter alice_t's threads are also inspectable by staff (scoped to report thread)
+    const aliceThreadsScoped = await api(baseUrl, '/api/mod/users/threads?username=alice_t', { token: tokenMod2 });
+    assert.equal(aliceThreadsScoped.status, 200);
+    assert.ok(aliceThreadsScoped.data.threads.some((t) => t.threadKey === 'alice_t::bob_t'));
+
+    // Evidence picker fallback (purpose=evidence) for non-reported dave_priv ONLY returns messages from viewer's shared DM
+    const daveEvidenceRes = await api(
+      baseUrl,
+      '/api/mod/users/messages?username=dave_priv&purpose=evidence',
+      { token: tokenDev },
+    );
+    assert.equal(daveEvidenceRes.status, 200);
+    assert.ok(
+      daveEvidenceRes.data.items.some((i) => i.message.content === 'INNOCENT_DM_WITH_OWNER_ONLY'),
+      'Expected own shared DM message to be available in evidence picker',
+    );
+    assert.ok(
+      !daveEvidenceRes.data.items.some((i) => i.threadKey === 'bob_t::dave_priv'),
+      'Must never include unrelated private DMs in evidence picker',
+    );
 
     // Suspend bob_t with multi-evidence + duration + moderator note
     const suspendRes = await api(baseUrl, '/api/mod/users/moderate', {

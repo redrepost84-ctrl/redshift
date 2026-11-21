@@ -430,6 +430,8 @@ export interface StaffUserSummary {
   createdAt: number;
   activeSessions: number;
   friendCount: number;
+  canInspectLogs?: boolean;
+  logAccessRole?: 'reported' | 'reporter' | 'both';
   moderation?: AccountModerationRecord | null;
   moderationHistory: AccountModerationHistoryEntry[];
 }
@@ -442,6 +444,7 @@ export interface StaffThreadSummary {
   messageCount: number;
   lastTimestamp: number;
   lastPreview: string;
+  accessReason?: 'report-thread' | 'shared-with-you';
 }
 
 export interface ChatMessage {

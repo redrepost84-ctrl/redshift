@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.29',
+      published_at: '2026-11-21T23:50:00Z',
+      body: 'Reworked Staff Panel Chat Logs for strict user privacy: chat logs and log search are now exclusively limited to users who have been reported or submitted a report, allowing staff to review conversations between the reporter and reported user (even if staff is not in that DM or group chat) plus DMs/groups shared with that staff member, while blocking all unrelated private DMs and all non-reported users at the server level.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.29`,
+    },
+    {
       tag_name: 'v0.1.28',
       published_at: '2026-11-21T20:50:00Z',
       body: 'Added immutable Developer (crossed red hammers), Moderator (white hammer for leyvora & lumpofsoil), and Official Redshift Bot (blue BOT) profile badges with tooltips everywhere names appear; launched the built-in Redshift bot delivering interactive report & appeal cards with atomic "Take Request" dibs; added full-screen user Reporting (keeping voice calls connected while hiding the mini-call preview); added right-click Suspend & Delete Account moderation with doubling durations up to 365d + Custom, multi-select evidence, moderator notes & 5-second safety timer; added Roblox-style Account Suspended/Terminated lockout modal with scrollable Appeal flow; and built the Staff Sandbox & Admin Panel (Reports/Appeals, User Sandbox editor, Chat Logs inspector, Active Bans & Audit Log).',
