@@ -14862,3 +14862,163 @@ body {
     user-select: none;
   }
 }
+
+/* Mobile Responsive Scaling for Expanded Voice Call Activities (declared after desktop .vc-* rules) */
+@media (max-width: 768px) {
+  .vc-expanded-stage--activity {
+    margin: 0 auto 6px;
+  }
+
+  .vc-activity-stage-body {
+    padding: 8px 8px 10px;
+    max-height: min(64dvh, 490px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .vc-activity-seat-bar {
+    padding-bottom: 6px;
+    margin-bottom: 6px;
+    gap: 6px;
+  }
+
+  .vc-activity-player-pill {
+    padding: 3px 8px 3px 4px;
+    font-size: 0.72rem;
+  }
+
+  .vc-activity-win-banner {
+    margin-bottom: 6px;
+    padding: 6px 10px;
+    font-size: 0.78rem;
+  }
+
+  .vc-game-board-wrap {
+    gap: 6px;
+  }
+
+  .vc-game-status-banner {
+    font-size: 0.78rem;
+  }
+
+  /* Compact Chess & Checkers on phone screens so the entire board + captured strips fit without scrolling */
+  .vc-board-flank-layout {
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .vc-captured-side-tray {
+    flex: 0 0 auto;
+    width: min(304px, calc(100vw - 36px));
+    padding: 4px 8px;
+    border-radius: 8px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .vc-captured-tray-head {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    padding-bottom: 0;
+    border-bottom: none;
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+
+  .vc-captured-tray-side {
+    font-size: 0.62rem;
+  }
+
+  .vc-captured-tray-player {
+    font-size: 0.76rem;
+    max-width: 96px;
+  }
+
+  .vc-captured-tray-label {
+    display: none;
+  }
+
+  .vc-captured-pieces-grid {
+    min-height: 18px;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: 132px;
+  }
+
+  .vc-captured-piece-icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  .vc-chess-grid {
+    width: min(264px, calc(100vw - 44px), 34dvh);
+    height: min(264px, calc(100vw - 44px), 34dvh);
+  }
+
+  .vc-mine-race-bar {
+    gap: 4px;
+  }
+
+  .vc-mine-player-chip {
+    padding: 4px 8px;
+    font-size: 0.72rem;
+  }
+
+  .vc-mine-grid {
+    width: min(268px, calc(100vw - 40px), 35dvh);
+  }
+
+  .vc-mine-grid--compact {
+    width: min(206px, calc(100vw - 56px), 27dvh);
+  }
+
+  .vc-vexillo-player {
+    padding: 5px 10px;
+    gap: 7px;
+  }
+
+  .vc-vexillo-flag-box {
+    width: min(210px, 60vw);
+    height: min(122px, 16dvh);
+  }
+
+  .vc-vexillo-choice-btn {
+    min-height: 36px;
+    padding: 6px 8px;
+    font-size: 0.78rem;
+  }
+
+  .vc-pool-hud {
+    gap: 6px;
+  }
+
+  .vc-pool-player-card {
+    padding: 5px 8px;
+    flex: 1 1 135px;
+  }
+
+  .vc-pool-canvas {
+    width: min(350px, calc(100vw - 32px));
+    max-height: 35dvh;
+  }
+
+  .vc-quoridor-chip {
+    padding: 3px 7px;
+    font-size: 0.72rem;
+  }
+
+  .vc-quoridor-telegraph-bar {
+    padding: 4px 8px;
+  }
+
+  .vc-quoridor-board {
+    width: min(268px, calc(100vw - 36px), 34dvh);
+    height: min(268px, calc(100vw - 36px), 34dvh);
+    padding: 6px;
+  }
+}

@@ -1133,15 +1133,6 @@ export function openSelfProfileModal(options: SelfProfileModalOptions): SelfProf
     bannerActions.appendChild(closeBtn);
     banner.appendChild(bannerActions);
 
-    if (isEditing) {
-      const bannerEditPill = document.createElement('button');
-      bannerEditPill.type = 'button';
-      bannerEditPill.className = 'self-profile-banner-edit-pill';
-      bannerEditPill.textContent = 'Change Banner';
-      bannerEditPill.addEventListener('click', triggerBannerFlow);
-      banner.appendChild(bannerEditPill);
-    }
-
     modal.appendChild(banner);
 
     const topRow = document.createElement('div');

@@ -1720,6 +1720,18 @@ export async function apiUpdatePrivacy(payload: {
   return { ok: res.ok, snapshot: res.data?.snapshot, error: res.error };
 }
 
+export async function apiSaveAccountPreferences(payload: {
+  preferences?: Record<string, unknown>;
+  voiceUserVolumes?: Record<string, unknown>;
+}): Promise<{ ok: boolean; snapshot?: SocialSnapshot; error?: string }> {
+  const res = await postJson<{ ok?: boolean; snapshot?: SocialSnapshot; error?: string }>(
+    '/api/account/preferences',
+    payload,
+    true,
+  );
+  return { ok: res.ok, snapshot: res.data?.snapshot, error: res.error };
+}
+
 export async function apiFetchPushPublicKey(): Promise<{
   ok: boolean;
   configured: boolean;

@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.25',
+      published_at: '2026-11-21T08:40:00Z',
+      body: 'Cross-device account settings sync (theme, density, font size, notifications, voice DSP & per-user volume overrides sync automatically across every signed-in device), mobile fit-to-screen activity scaling + scroll position preservation on every board tap, and removal of the floating top "Change Banner" overlay pill while keeping the standard profile edit banner button.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.25`,
+    },
+    {
       tag_name: 'v0.1.24',
       published_at: '2026-11-21T08:20:00Z',
       body: 'Right-click "Start a Call" on in-call profiles with Are-You-Sure confirmation (opens DM & starts call), "Ring to Call" from DMs/Group Chats/Members to ring people into your ongoing call without resetting it, universal mobile touch long-press context menus across the app, and Web Push / notification sender profile picture icons.',

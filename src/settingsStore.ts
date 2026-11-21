@@ -1,4 +1,10 @@
-import type { UserPreferences, VoiceCustomAudioSettings } from './types';
+import type {
+  UserPreferences,
+  VoiceCustomAudioSettings,
+  VoiceUserVolumeSetting,
+} from './types';
+
+export type { VoiceUserVolumeSetting };
 
 const PREFS_STORAGE_KEY = 'redshift.preferences.v1';
 
@@ -205,6 +211,70 @@ function loadPreferences(): UserPreferences {
 let currentPreferences: UserPreferences = loadPreferences();
 const listeners = new Set<(prefs: UserPreferences) => void>();
 
+export type AccountPreferencesSyncPayload = {
+  preferences: Omit<UserPreferences, 'voiceInputDeviceId' | 'voiceOutputDeviceId'>;
+  voiceUserVolumes: Record<string, VoiceUserVolumeSetting>;
+};
+
+let remoteSyncHandler:
+  | ((payload: AccountPreferencesSyncPayload) => Promise<void> | void)
+  | null = null;
+let pendingRemoteSyncTimer: number | null = null;
+let suppressRemoteSync = false;
+let inFlightRemoteSaves = 0;
+
+function extractSyncedPreferences(
+  prefs: UserPreferences,
+): Omit<UserPreferences, 'voiceInputDeviceId' | 'voiceOutputDeviceId'> {
+  const { voiceInputDeviceId: _inDev, voiceOutputDeviceId: _outDev, ...synced } = prefs;
+  return synced;
+}
+
+function dispatchRemotePreferencesSync(): void {
+  if (!remoteSyncHandler) return;
+  const payload: AccountPreferencesSyncPayload = {
+    preferences: extractSyncedPreferences(currentPreferences),
+    voiceUserVolumes: { ...voiceUserVolumes },
+  };
+  inFlightRemoteSaves += 1;
+  void Promise.resolve(remoteSyncHandler(payload)).finally(() => {
+    inFlightRemoteSaves = Math.max(0, inFlightRemoteSaves - 1);
+  });
+}
+
+function scheduleRemotePreferencesSync(): void {
+  if (suppressRemoteSync || !remoteSyncHandler || typeof window === 'undefined') {
+    return;
+  }
+  if (pendingRemoteSyncTimer !== null) {
+    window.clearTimeout(pendingRemoteSyncTimer);
+  }
+  pendingRemoteSyncTimer = window.setTimeout(() => {
+    pendingRemoteSyncTimer = null;
+    dispatchRemotePreferencesSync();
+  }, 180);
+}
+
+/** Registers or clears the signed-in server persistence callback for cross-device settings sync. */
+export function registerAccountPreferencesSyncHandler(
+  handler: ((payload: AccountPreferencesSyncPayload) => Promise<void> | void) | null,
+): void {
+  remoteSyncHandler = handler;
+  if (!handler && pendingRemoteSyncTimer !== null && typeof window !== 'undefined') {
+    window.clearTimeout(pendingRemoteSyncTimer);
+    pendingRemoteSyncTimer = null;
+  }
+}
+
+/** Immediately flushes any queued local preference changes to the server before teardown/sign-out. */
+export function flushPendingAccountPreferencesSync(): void {
+  if (pendingRemoteSyncTimer !== null && typeof window !== 'undefined') {
+    window.clearTimeout(pendingRemoteSyncTimer);
+    pendingRemoteSyncTimer = null;
+    dispatchRemotePreferencesSync();
+  }
+}
+
 export function applyPreferencesToDocument(prefs: UserPreferences = currentPreferences): void {
   if (typeof document === 'undefined') {
     return;
@@ -233,6 +303,7 @@ export function updateUserPreferences(partial: Partial<UserPreferences>): UserPr
   for (const listener of listeners) {
     listener(currentPreferences);
   }
+  scheduleRemotePreferencesSync();
   return currentPreferences;
 }
 
@@ -249,14 +320,76 @@ export function subscribeUserPreferences(
   };
 }
 
-applyPreferencesToDocument(currentPreferences);
+/** Applies account-synced preferences from server snapshot/WebSocket without echoing back to server. */
+export function applyRemoteAccountPreferences(
+  remotePrefs?: Partial<UserPreferences> | null,
+  remoteVolumes?: Record<string, VoiceUserVolumeSetting> | null,
+): void {
+  if (pendingRemoteSyncTimer !== null || inFlightRemoteSaves > 0) {
+    return;
+  }
+  suppressRemoteSync = true;
+  try {
+    if (remotePrefs && typeof remotePrefs === 'object') {
+      const {
+        voiceInputDeviceId: _inDev,
+        voiceOutputDeviceId: _outDev,
+        ...safeRemote
+      } = remotePrefs;
+      const merged = sanitizePreferences({
+        ...currentPreferences,
+        ...safeRemote,
+        voiceInputDeviceId: currentPreferences.voiceInputDeviceId,
+        voiceOutputDeviceId: currentPreferences.voiceOutputDeviceId,
+      });
+      if (JSON.stringify(merged) !== JSON.stringify(currentPreferences)) {
+        currentPreferences = merged;
+        try {
+          window.localStorage.setItem(PREFS_STORAGE_KEY, JSON.stringify(currentPreferences));
+        } catch {}
+        applyPreferencesToDocument(currentPreferences);
+        for (const listener of listeners) {
+          listener(currentPreferences);
+        }
+      }
+    }
 
-export interface VoiceUserVolumeSetting {
-  volume: number; // 0..200
-  muted: boolean;
-  screenVolume?: number; // 0..200
-  screenMuted?: boolean;
+    if (remoteVolumes && typeof remoteVolumes === 'object') {
+      const sanitizedVols: Record<string, VoiceUserVolumeSetting> = {};
+      for (const [rawKey, rawVal] of Object.entries(remoteVolumes)) {
+        if (!rawVal || typeof rawVal !== 'object') continue;
+        const cleanKey = rawKey.trim().toLowerCase();
+        if (!cleanKey) continue;
+        const item = rawVal as unknown as Record<string, unknown>;
+        const vol = Math.round(clampFinite(item.volume, 0, 200, 100));
+        const muted = Boolean(item.muted);
+        const scrVol =
+          item.screenVolume !== undefined
+            ? Math.round(clampFinite(item.screenVolume, 0, 200, 100))
+            : 100;
+        const scrMuted = Boolean(item.screenMuted);
+        if (vol !== 100 || muted || scrVol !== 100 || scrMuted) {
+          sanitizedVols[cleanKey] = {
+            volume: vol,
+            muted,
+            screenVolume: scrVol,
+            screenMuted: scrMuted,
+          };
+        }
+      }
+      if (JSON.stringify(sanitizedVols) !== JSON.stringify(voiceUserVolumes)) {
+        voiceUserVolumes = sanitizedVols;
+        try {
+          window.localStorage.setItem(USER_VOLUMES_STORAGE_KEY, JSON.stringify(voiceUserVolumes));
+        } catch {}
+      }
+    }
+  } finally {
+    suppressRemoteSync = false;
+  }
 }
+
+applyPreferencesToDocument(currentPreferences);
 
 const USER_VOLUMES_STORAGE_KEY = 'redshift.voiceUserVolumes.v1';
 
@@ -329,6 +462,7 @@ function persistVoiceUserVolumeEntry(key: string, next: VoiceUserVolumeSetting):
   } catch {
     // Ignore storage quota errors cleanly.
   }
+  scheduleRemotePreferencesSync();
 }
 
 export function setVoiceUserVolume(

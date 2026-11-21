@@ -30,6 +30,13 @@ export interface VoiceCustomAudioSettings {
   autoGainControl: boolean;
 }
 
+export interface VoiceUserVolumeSetting {
+  volume: number; // 0..200
+  muted: boolean;
+  screenVolume?: number; // 0..200
+  screenMuted?: boolean;
+}
+
 export interface UserPreferences {
   theme: ThemeMode;
   messageDensity: MessageDensity;
@@ -102,6 +109,8 @@ export interface SelfProfile {
   bannerDataUrl?: string;
   customStatus?: CustomStatusData | null;
   privacy?: UserPrivacySettings;
+  clientPreferences?: Partial<UserPreferences>;
+  voiceUserVolumes?: Record<string, VoiceUserVolumeSetting>;
 }
 
 export interface PendingRequestItem {

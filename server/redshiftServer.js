@@ -1967,6 +1967,14 @@ function toSelfProfile(account) {
       privateProfile: Boolean(account.privacy?.privateProfile),
       showReadReceipts: Boolean(account.privacy?.showReadReceipts),
     },
+    clientPreferences:
+      account.clientPreferences && typeof account.clientPreferences === 'object'
+        ? { ...account.clientPreferences }
+        : undefined,
+    voiceUserVolumes:
+      account.voiceUserVolumes && typeof account.voiceUserVolumes === 'object'
+        ? { ...account.voiceUserVolumes }
+        : undefined,
   };
 }
 
@@ -4490,6 +4498,67 @@ export function createRedshiftServerMiddleware() {
       }
       saveDb(db);
       notifyRelatedPeers(activeUser.username, false);
+      sendJson(res, 200, {
+        ok: true,
+        snapshot: buildSocialSnapshot(activeUser.username),
+      });
+      return;
+    }
+
+    // Account Preferences: Sync cross-device client UI, notification, chat & voice settings
+    if (req.method === 'POST' && reqPath === '/api/account/preferences') {
+      const selfKey = activeUser.username.toLowerCase();
+      if (body.preferences && typeof body.preferences === 'object' && !Array.isArray(body.preferences)) {
+        const nextPrefs =
+          activeUser.clientPreferences && typeof activeUser.clientPreferences === 'object'
+            ? { ...activeUser.clientPreferences }
+            : {};
+        for (const [k, v] of Object.entries(body.preferences)) {
+          if (k === 'voiceInputDeviceId' || k === 'voiceOutputDeviceId') continue;
+          if (k === 'voiceCustom' && v && typeof v === 'object' && !Array.isArray(v)) {
+            nextPrefs.voiceCustom = { ...v };
+          } else if (
+            typeof v === 'boolean' ||
+            typeof v === 'number' ||
+            (typeof v === 'string' && v.length <= 64)
+          ) {
+            nextPrefs[k] = v;
+          }
+        }
+        activeUser.clientPreferences = nextPrefs;
+      }
+      if (
+        body.voiceUserVolumes &&
+        typeof body.voiceUserVolumes === 'object' &&
+        !Array.isArray(body.voiceUserVolumes)
+      ) {
+        const nextVols = {};
+        let count = 0;
+        for (const [rawUser, rawVol] of Object.entries(body.voiceUserVolumes)) {
+          if (count >= 250) break;
+          if (!rawVol || typeof rawVol !== 'object') continue;
+          const uKey = String(rawUser).trim().toLowerCase().slice(0, 48);
+          if (!uKey) continue;
+          const vol =
+            typeof rawVol.volume === 'number' && Number.isFinite(rawVol.volume)
+              ? Math.min(200, Math.max(0, Math.round(rawVol.volume)))
+              : 100;
+          const scrVol =
+            typeof rawVol.screenVolume === 'number' && Number.isFinite(rawVol.screenVolume)
+              ? Math.min(200, Math.max(0, Math.round(rawVol.screenVolume)))
+              : 100;
+          nextVols[uKey] = {
+            volume: vol,
+            muted: Boolean(rawVol.muted),
+            screenVolume: scrVol,
+            screenMuted: Boolean(rawVol.screenMuted),
+          };
+          count += 1;
+        }
+        activeUser.voiceUserVolumes = nextVols;
+      }
+      saveDb(db);
+      pushSnapshotToUser(selfKey);
       sendJson(res, 200, {
         ok: true,
         snapshot: buildSocialSnapshot(activeUser.username),

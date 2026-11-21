@@ -14,6 +14,7 @@ import {
   apiHideThread,
   apiLeaveGroupDm,
   apiResolveGifLink,
+  apiSaveAccountPreferences,
   apiSendFriendRequest,
   apiUnblockUser,
   extractGifShareCodeFromText,
@@ -140,7 +141,13 @@ import {
   openSelfProfileModal,
   type SelfProfileModalHandle,
 } from './profileDrawer';
-import { getUserPreferences, subscribeUserPreferences } from './settingsStore';
+import {
+  applyRemoteAccountPreferences,
+  flushPendingAccountPreferencesSync,
+  getUserPreferences,
+  registerAccountPreferencesSyncHandler,
+  subscribeUserPreferences,
+} from './settingsStore';
 import {
   createHeadphonesIconSvg,
   createMicIconSvg,
@@ -1497,6 +1504,14 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     navigate('login');
     return;
   }
+
+  applyRemoteAccountPreferences(
+    state.snapshot.user.clientPreferences,
+    state.snapshot.user.voiceUserVolumes,
+  );
+  registerAccountPreferencesSyncHandler(async (payload) => {
+    await apiSaveAccountPreferences(payload);
+  });
 
   const leftColumn = document.createElement('aside');
   leftColumn.className = 'workspace-left';
@@ -6287,6 +6302,10 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     }
 
     state.snapshot = nextSnapshot;
+    applyRemoteAccountPreferences(
+      nextSnapshot.user.clientPreferences,
+      nextSnapshot.user.voiceUserVolumes,
+    );
     if (autoMarkViewedTarget) {
       markThreadAsRead(autoMarkViewedTarget);
     }
@@ -6445,6 +6464,8 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   });
 
   const handleSignOutAction = () => {
+    flushPendingAccountPreferencesSync();
+    registerAccountPreferencesSyncHandler(null);
     voiceManager.leaveCall();
     voiceManager.destroy();
     drawerController.close();
@@ -7336,6 +7357,8 @@ function renderWorkspaceScreen(root: HTMLElement): void {
 
   activeWorkspaceCleanup = () => {
     workspaceDestroyed = true;
+    flushPendingAccountPreferencesSync();
+    registerAccountPreferencesSyncHandler(null);
     window.clearInterval(liveSnapshotPollTimer);
     closeChangelogModal();
     unsubscribeDesktopUpdate?.();

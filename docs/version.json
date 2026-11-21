@@ -1,11 +1,11 @@
 {
-  "version": "0.1.24",
-  "releasedAt": "2026-11-21T08:28:00.298Z",
-  "changelog": "Right-click Start a Call confirmation + DM jump, non-resetting Ring to Call from DMs/Group Chats/Members, global mobile long-press context menus, and messenger profile picture notification icons",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.24/Redshift-patch.asar",
-  "sha256": "bc59331374eed4915a788f45e9265f05f54b993c2253b3ab5da6f5c0197a76f4",
-  "size": 6518154,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.24/RedshiftSetup.exe",
+  "version": "0.1.25",
+  "releasedAt": "2026-11-21T08:39:51.052Z",
+  "changelog": "Cross-device account settings sync, mobile fit-to-screen call activities with zero scroll reset, and removal of floating Change Banner overlay pill",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.25/Redshift-patch.asar",
+  "sha256": "dd3b76eab2b7dab8d7e3f783f3da6841ca71d2c4f5a7f08b4921717d7bba52e1",
+  "size": 6526391,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.25/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

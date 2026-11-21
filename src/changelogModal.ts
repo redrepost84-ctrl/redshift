@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.24';
+export const CURRENT_REDSHIFT_VERSION = '0.1.25';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,24 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.25',
+    date: 'November 21, 2026',
+    kicker: 'CROSS-DEVICE ACCOUNT SETTINGS SYNC, MOBILE GAME SCALING & CLEANER PROFILE EDITOR',
+    headline: 'Cross-Device Account Settings Sync, Fit-to-Screen Mobile Call Games (Zero Scroll Jumps) & Cleaner Profile Banner UI',
+    lead:
+      'Settings now save directly to your Redshift account and sync automatically across every phone and desktop you sign into, built-in voice call activities scale cleanly to mobile screens while preserving scroll positions on every tap, and the extra top "Change Banner" pill on the profile banner was removed.',
+    sections: [
+      {
+        heading: 'Account Sync, Mobile Activities & Profile UI',
+        items: [
+          'Cross-Device Account Settings Sync — Theme, message density, font size, time format, reduced motion, notification preferences, chat behavior, Push-to-Talk/DSP/mic settings, and per-user volume overrides now sync to your Redshift account across all signed-in devices.',
+          'Fit-to-Screen Mobile Activities + Zero Scroll Reset — Compacted Chess/Checkers captured trays and scaled Chess, Checkers, Minesweeper, VexilloGuessr, Pool, and Quoridor boards to phone viewports while preserving expanded stage scroll positions across every click.',
+          'Cleaner Profile Banner Editor — Removed the floating top-left "Change Banner" pill overlay from the profile banner while keeping the standard "Change Banner" button inside the profile edit form.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.24',
     date: 'November 21, 2026',

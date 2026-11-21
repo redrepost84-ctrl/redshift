@@ -4057,6 +4057,10 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       return;
     }
 
+    const prevTopStageScroll = host.querySelector<HTMLElement>('.vc-top-stage')?.scrollTop ?? 0;
+    const prevActivityBodyScroll =
+      host.querySelector<HTMLElement>('.vc-activity-stage-body')?.scrollTop ?? 0;
+
     host.dataset.vcLayoutSig = layoutSig;
     host.replaceChildren();
 
@@ -4550,6 +4554,22 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
 
     bar.appendChild(controls);
     host.appendChild(bar);
+
+    if (prevTopStageScroll > 0) {
+      const nextTopStage = bar.querySelector<HTMLElement>('.vc-top-stage');
+      if (nextTopStage) nextTopStage.scrollTop = prevTopStageScroll;
+    }
+    if (prevActivityBodyScroll > 0) {
+      const nextActivityBody = bar.querySelector<HTMLElement>('.vc-activity-stage-body');
+      if (nextActivityBody) {
+        nextActivityBody.scrollTop = prevActivityBodyScroll;
+        requestAnimationFrame(() => {
+          if (nextActivityBody.isConnected) {
+            nextActivityBody.scrollTop = prevActivityBodyScroll;
+          }
+        });
+      }
+    }
   };
 
   const renderSidebarStatusBar = (host: HTMLElement) => {
