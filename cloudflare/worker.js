@@ -1354,7 +1354,7 @@ export class RedshiftHub extends DurableObject {
         allowFriendRequests: account.privacy?.allowFriendRequests !== false,
         allowNonFriendDms: account.privacy?.allowNonFriendDms !== false,
         privateProfile: Boolean(account.privacy?.privateProfile),
-        showReadReceipts: Boolean(account.privacy?.showReadReceipts),
+        showReadReceipts: account.privacy?.showReadReceipts !== false,
       },
       clientPreferences:
         account.clientPreferences && typeof account.clientPreferences === 'object'
@@ -4868,6 +4868,7 @@ export class RedshiftHub extends DurableObject {
 
     if (method === 'POST' && reqPath === '/api/account/privacy') {
       if (!activeUser.privacy || typeof activeUser.privacy !== 'object') activeUser.privacy = {};
+      const wasReadReceiptsEnabled = activeUser.privacy.showReadReceipts !== false;
       if (typeof body.allowFriendRequests === 'boolean') {
         activeUser.privacy.allowFriendRequests = body.allowFriendRequests;
       }
@@ -4882,6 +4883,30 @@ export class RedshiftHub extends DurableObject {
       }
       this.saveDb();
       this.notifyRelatedPeers(activeUser.username, false);
+      if (!wasReadReceiptsEnabled && activeUser.privacy.showReadReceipts !== false) {
+        const prefix = `${selfKey}::`;
+        const suffix = `::${selfKey}`;
+        for (const [tKey, receiptsMap] of Object.entries(this.db.dmReadReceipts ?? {})) {
+          if (!receiptsMap || typeof receiptsMap !== 'object') continue;
+          const ownReceipt = receiptsMap[selfKey];
+          if (!ownReceipt) continue;
+          let otherKey = '';
+          if (tKey.startsWith(prefix)) {
+            otherKey = tKey.slice(prefix.length);
+          } else if (tKey.endsWith(suffix)) {
+            otherKey = tKey.slice(0, tKey.length - suffix.length);
+          }
+          if (!otherKey || otherKey.includes(':')) continue;
+          const peerAcc = this.findAccountByUsername(otherKey);
+          if (peerAcc?.privacy?.showReadReceipts !== false) {
+            this.sendWsEventToUser(otherKey, {
+              type: 'dm:read',
+              threadUsers: [selfKey, otherKey],
+              receipt: ownReceipt,
+            });
+          }
+        }
+      }
       return jsonResponse(request, 200, {
         ok: true,
         snapshot: this.buildSocialSnapshot(activeUser.username),
@@ -5601,8 +5626,8 @@ export class RedshiftHub extends DurableObject {
       if (ctx.kind === 'dm') {
         const peerAcc = this.findAccountByUsername(ctx.peerKey);
         if (
-          activeUser.privacy?.showReadReceipts === true &&
-          peerAcc?.privacy?.showReadReceipts === true
+          activeUser.privacy?.showReadReceipts !== false &&
+          peerAcc?.privacy?.showReadReceipts !== false
         ) {
           peerReceipt = this.db.dmReadReceipts[ctx.threadKey]?.[ctx.peerKey];
         }
@@ -5756,7 +5781,7 @@ export class RedshiftHub extends DurableObject {
         changed = true;
       }
 
-      if (peerKey && activeUser.privacy?.showReadReceipts === true) {
+      if (peerKey && activeUser.privacy?.showReadReceipts !== false) {
         const peerAcc = this.findAccountByUsername(peerKey);
         const threadKey = dmThreadKey(selfKey, peerKey);
         const threadList = this.db.dms[threadKey] ?? [];
@@ -5774,7 +5799,7 @@ export class RedshiftHub extends DurableObject {
             };
             this.db.dmReadReceipts[threadKey][selfKey] = receipt;
             changed = true;
-            if (peerAcc?.privacy?.showReadReceipts === true) {
+            if (peerAcc?.privacy?.showReadReceipts !== false) {
               this.sendWsEventToUser(peerKey, {
                 type: 'dm:read',
                 threadUsers: [selfKey, peerKey],
@@ -6233,7 +6258,14 @@ export class RedshiftHub extends DurableObject {
         this.db.groupUnreadMentions = {};
       }
 
+      let sendReceiptEvent = null;
       if (ctx.kind === 'group') {
+        if (this.db.unreadGroups[selfKey]?.[ctx.groupId]) {
+          delete this.db.unreadGroups[selfKey][ctx.groupId];
+        }
+        if (this.db.groupUnreadMentions?.[selfKey]?.[ctx.groupId]) {
+          delete this.db.groupUnreadMentions[selfKey][ctx.groupId];
+        }
         for (const member of ctx.participants) {
           const memberKey = member.toLowerCase();
           this.touchThreadActivityForUser(memberKey, `group:${ctx.groupId}`, msgNow, { unhide: true });
@@ -6256,6 +6288,31 @@ export class RedshiftHub extends DurableObject {
           }
         }
       } else {
+        if (this.db.unreadDms[selfKey]?.[ctx.peerKey]) {
+          delete this.db.unreadDms[selfKey][ctx.peerKey];
+        }
+        if (this.db.unreadMentions?.[selfKey]?.[ctx.peerKey]) {
+          delete this.db.unreadMentions[selfKey][ctx.peerKey];
+        }
+        if (activeUser.privacy?.showReadReceipts !== false) {
+          const peerAcc = this.findAccountByUsername(ctx.peerKey);
+          if (!this.db.dmReadReceipts[ctx.threadKey] || typeof this.db.dmReadReceipts[ctx.threadKey] !== 'object') {
+            this.db.dmReadReceipts[ctx.threadKey] = {};
+          }
+          const sendReceipt = {
+            readerUsername: selfKey,
+            lastReadMessageId: stored.id,
+            readAt: msgNow,
+          };
+          this.db.dmReadReceipts[ctx.threadKey][selfKey] = sendReceipt;
+          if (peerAcc?.privacy?.showReadReceipts !== false) {
+            sendReceiptEvent = {
+              type: 'dm:read',
+              threadUsers: [selfKey, ctx.peerKey],
+              receipt: sendReceipt,
+            };
+          }
+        }
         if (!this.db.unreadDms[ctx.peerKey] || typeof this.db.unreadDms[ctx.peerKey] !== 'object') {
           this.db.unreadDms[ctx.peerKey] = {};
         }
@@ -6285,6 +6342,9 @@ export class RedshiftHub extends DurableObject {
       // Push real-time DM event FIRST so recipients receive it & badge updates in <10ms.
       for (const participant of ctx.participants) {
         this.sendWsEventToUser(participant, wsEvent);
+      }
+      if (sendReceiptEvent) {
+        this.sendWsEventToUser(ctx.peerKey, sendReceiptEvent);
       }
 
       if (ctx.kind === 'group') {

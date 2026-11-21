@@ -397,7 +397,8 @@ async function run() {
         chromeBin,
         [
           '--headless=new',
-          '--disable-gpu',
+          '--use-gl=angle',
+          '--use-angle=swiftshader',
           '--no-first-run',
           '--no-default-browser-check',
           '--disable-extensions',
@@ -1646,6 +1647,96 @@ async function run() {
             ),
           5000,
         );
+
+        // 5.5) Read Receipts E2E: bob_t sends message -> shows Delivered -> alice_t sends reply -> updates to Seen; respects opt-out
+        await cdp.evalJson(`(() => {
+          const dmRow = Array.from(document.querySelectorAll('.sidebar-dm-item:not(.sidebar-dm-item--group)')).find((el) => el.textContent.toLowerCase().includes('alice_t'));
+          dmRow?.click();
+          return true;
+        })()`);
+        await waitFor(
+          async () =>
+            await cdp.evalJson(
+              `document.querySelector('.dm-header-name')?.textContent === 'alice_t' && Boolean(document.querySelector('.chat-input'))`,
+            ),
+          5000,
+        );
+        await cdp.evalJson(`(() => {
+          const input = document.querySelector('.chat-input');
+          input.value = 'Receipt check ping';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+          return true;
+        })()`);
+        await waitFor(
+          async () =>
+            await cdp.evalJson(
+              `document.querySelector('.msg-receipt-row--delivered')?.textContent?.trim() === 'Delivered'`,
+            ),
+          5000,
+        );
+        const receiptReplyRes = await api(baseUrl, '/api/dms/send', {
+          method: 'POST',
+          token: tokenA,
+          body: { toUsername: 'bob_t', content: 'Receipt check pong' },
+        });
+        assert.equal(receiptReplyRes.status, 200);
+        await waitFor(
+          async () =>
+            await cdp.evalJson(
+              `Boolean(document.querySelector('.msg-receipt-row--seen')) && document.querySelector('.msg-receipt-row--seen').textContent.includes('Seen ·') && !document.querySelector('.msg-receipt-row--delivered')`,
+            ),
+          5000,
+        );
+        // Verify opt-out hides Seen even when peer replies or calls /api/dms/read
+        const optOutRes = await api(baseUrl, '/api/account/privacy', {
+          method: 'POST',
+          token: tokenA,
+          body: { showReadReceipts: false },
+        });
+        assert.equal(optOutRes.status, 200);
+        await cdp.evalJson(`(() => {
+          const input = document.querySelector('.chat-input');
+          input.value = 'Receipt opt-out ping';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+          return true;
+        })()`);
+        await waitFor(
+          async () =>
+            await cdp.evalJson(
+              `document.querySelector('.msg-receipt-row--delivered')?.textContent?.trim() === 'Delivered'`,
+            ),
+          5000,
+        );
+        await api(baseUrl, '/api/dms/send', {
+          method: 'POST',
+          token: tokenA,
+          body: { toUsername: 'bob_t', content: 'Receipt opt-out pong' },
+        });
+        await api(baseUrl, '/api/dms/read', {
+          method: 'POST',
+          token: tokenA,
+          body: { peerUsername: 'bob_t' },
+        });
+        await new Promise((r) => setTimeout(r, 300));
+        const optOutState = await cdp.evalJson(`({
+          delivered: document.querySelector('.msg-receipt-row--delivered')?.textContent?.trim() ?? null,
+          seen: document.querySelector('.msg-receipt-row--seen')?.textContent?.trim() ?? null,
+        })`);
+        assert.equal(optOutState.delivered, 'Delivered');
+        assert.equal(optOutState.seen, null);
+        await api(baseUrl, '/api/account/privacy', {
+          method: 'POST',
+          token: tokenA,
+          body: { showReadReceipts: true },
+        });
+        await cdp.evalJson(`(() => {
+          document.querySelector('.sidebar-friends-btn')?.click();
+          return true;
+        })()`);
+        await new Promise((r) => setTimeout(r, 150));
+        console.log('[PASS] Browser E2E: Read Receipts Delivered -> Seen on friend reply & privacy opt-out respected');
 
         // 6) Blocked by alice_t -> danger Blocked toast (since opt-in setting is ON)
         const blockOnRes = await api(baseUrl, '/api/friends/block', {

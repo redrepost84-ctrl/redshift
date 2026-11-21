@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.27',
+      published_at: '2026-11-21T09:00:00Z',
+      body: 'Fixed 1-on-1 DM read receipts staying stuck on "Delivered" even when friends read or reply (sending a reply records read receipts and pushes dm:read live, active visible threads ack cleanly, WS reconnect reconciles missed receipts, and Read Receipts default on unless disabled in Privacy & Safety), plus adjusted mobile chat compactness to match PC spacing comfortably.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.27`,
+    },
+    {
       tag_name: 'v0.1.26',
       published_at: '2026-11-21T08:48:00Z',
       body: 'Fixed "Importing a module script failed" when recording voice messages by bundling the voice note recorder directly into the main entry with chunk reload protection, tightened mobile chat message and grouped chain spacing, and made tapping anywhere outside the textbox on mobile stop typing and dismiss the keyboard.',

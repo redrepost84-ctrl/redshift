@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.26';
+export const CURRENT_REDSHIFT_VERSION = '0.1.27';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,23 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.27',
+    date: 'November 21, 2026',
+    kicker: 'READ RECEIPTS FIX & BALANCED MOBILE CHAT SPACING',
+    headline: 'Reliable Delivered -> Seen Read Receipts & PC-Matched Mobile Chat Comfort',
+    lead:
+      'Fixed 1-on-1 DM read receipts staying stuck on "Delivered" even after friends read or reply back, enabled Read Receipts by default (still opt-out in Privacy & Safety), and tuned mobile chat message & chain spacing to match desktop breathing room.',
+    sections: [
+      {
+        heading: 'Messaging & Mobile Comfort',
+        items: [
+          'Instant Delivered -> Seen Updates on Replies & Reads — Sending a reply in a DM now marks prior messages seen and emits real-time read receipts, active visible DMs sync read state reliably even when unread counters were 0, WebSocket reconnects reconcile missed receipts, and Read Receipts default ON for mutual 1-on-1 DMs (while still respecting anyone who disables them).',
+          'Balanced Mobile Chat Spacing — Restored comfortable vertical spacing, grouped chain gaps, and line heights on mobile phones to match generic PC density without feeling cramped.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.26',
     date: 'November 21, 2026',

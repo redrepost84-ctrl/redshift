@@ -621,12 +621,12 @@ export function openUserSettingsOverlay(options: UserSettingsOverlayOptions): ()
       }),
     );
 
-    const showReadReceipts = Boolean(snap.user.privacy?.showReadReceipts);
+    const showReadReceipts = snap.user.privacy?.showReadReceipts !== false;
     dmCard.appendChild(
       createToggleSwitch({
         label: 'Read Receipts (Delivered & Seen)',
         description:
-          'Show Delivered / Seen indicators on your latest 1-on-1 DM message and share when you read DMs. Both users must enable this to share Seen status.',
+          'Show Delivered / Seen indicators on your latest 1-on-1 DM message and share when you read DMs. Both users must keep this enabled to share Seen status.',
         checked: showReadReceipts,
         onChange: async (next) => {
           const res = await apiUpdatePrivacy({ showReadReceipts: next });

@@ -1702,6 +1702,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   let mobileInChat = state.mainView === 'dm' || state.mainView === 'group';
   let mobileBackBadgeSyncer: (() => void) | null = null;
   let syncMobileChromeRef: (() => void) | null = null;
+  const isMobileChatHiddenOnPhone = () => window.innerWidth <= 768 && !mobileInChat;
   const syncMobileChrome = () => {
     root.dataset.mobileView = mobileInChat ? 'chat' : 'hub';
     root.dataset.mobileTab = mobileHubTab;
@@ -1898,6 +1899,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   let workspaceDestroyed = false;
   let pendingGlobalJump: { cacheKey: string; messageId: string } | null = null;
   const dmReceiptsByThread = new Map<string, DmReadReceipt>();
+  const ackedDmReadMsgIdByThread = new Map<string, string>();
   const typingByThread = new Map<
     string,
     Map<string, { displayName: string; timerId: number }>
@@ -2279,8 +2281,12 @@ function renderWorkspaceScreen(root: HTMLElement): void {
           if (res.hasMore !== undefined) {
             dmHasMoreByThread.set(cacheKey, Boolean(res.hasMore));
           }
-          if (!cacheKey.startsWith('group:') && res.peerReceipt) {
-            dmReceiptsByThread.set(cacheKey, res.peerReceipt);
+          if (!cacheKey.startsWith('group:')) {
+            if (res.peerReceipt) {
+              dmReceiptsByThread.set(cacheKey, res.peerReceipt);
+            } else {
+              dmReceiptsByThread.delete(cacheKey);
+            }
           }
           if (isThreadCurrentlyViewed(cacheKey)) {
             activeDmSyncer?.();
@@ -2474,8 +2480,22 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       if (clearedAny) {
         syncSidebarNavAndDms();
       }
+      const threadMsgs = dmMessagesByThread.get(cacheKey) ?? [];
+      let latestConfirmedId: string | undefined;
+      for (let i = threadMsgs.length - 1; i >= 0; i -= 1) {
+        if (!threadMsgs[i].isPending) {
+          latestConfirmedId = threadMsgs[i].id;
+          break;
+        }
+      }
+      if (latestConfirmedId) {
+        ackedDmReadMsgIdByThread.set(cacheKey, latestConfirmedId);
+      }
       void apiMarkDmRead({ peerUsername: cleanId }).then((res) => {
         finalizeInFlight(res.ok);
+        if (!res.ok && latestConfirmedId && ackedDmReadMsgIdByThread.get(cacheKey) === latestConfirmedId) {
+          ackedDmReadMsgIdByThread.delete(cacheKey);
+        }
         if (res.ok && state.snapshot) {
           let changed = false;
           if (state.snapshot.unreadCounts?.[cleanId]) {
@@ -4332,6 +4352,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     const handleChatScroll = () => {
       syncJumpBar();
       if (initialScrollApplied && !loadingOlderMessages && Date.now() > programmaticScrollUntil) {
+        const wasPinned = pinnedToBottom;
         const distFromBottom =
           chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight;
         pinnedToBottom = distFromBottom <= 64;
@@ -4341,6 +4362,8 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         });
         if (pinnedToBottom && hasUnreadOnThisThread()) {
           markThreadAsRead(readTarget);
+        } else if (!wasPinned && pinnedToBottom && !isGroup) {
+          syncDmThread();
         }
       }
       if (chatMessages.scrollTop <= 96 && historyLoaded && dmHasMoreByThread.get(cacheKey)) {
@@ -4591,8 +4614,11 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       const prefsSig = `${prefs.use24HourTime ? '24' : '12'}:${prefs.inlineMedia ? 'M1' : 'M0'}`;
       const favUrlSet = new Set((snap.favoriteGifs ?? []).map((g) => g.url));
       const isJoinedToThisCall = voiceManager.getActiveCallThreadKey() === vcThreadKey;
-      const readReceiptsEnabled = !isGroup && Boolean(snap.user.privacy?.showReadReceipts);
+      const readReceiptsEnabled = !isGroup && snap.user.privacy?.showReadReceipts !== false;
       const threadReceipt = readReceiptsEnabled ? dmReceiptsByThread.get(cacheKey) : undefined;
+      const readMsgIdx = threadReceipt?.lastReadMessageId
+        ? msgs.findIndex((m) => m.id === threadReceipt.lastReadMessageId)
+        : -1;
       let latestOwnSentId: string | null = null;
       if (readReceiptsEnabled) {
         for (let i = msgs.length - 1; i >= 0; i -= 1) {
@@ -4678,8 +4704,10 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         if (readReceiptsEnabled && latestOwnSentId && msg.id === latestOwnSentId) {
           const isSeen = Boolean(
             threadReceipt &&
-              (threadReceipt.lastReadMessageId === msg.id ||
-                threadReceipt.readAt >= msg.timestamp),
+              (readMsgIdx !== -1
+                ? index <= readMsgIdx
+                : threadReceipt.lastReadMessageId === msg.id ||
+                  threadReceipt.readAt >= msg.timestamp),
           );
           receiptStatus = isSeen
             ? { kind: 'seen', label: `Seen · ${formatMessageTime(threadReceipt!.readAt)}` }
@@ -4989,6 +5017,35 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       skipBottomScrollOnce = false;
       syncHistoryBanner();
       syncJumpBar();
+
+      if (
+        !isGroup &&
+        readReceiptsEnabled &&
+        historyLoaded &&
+        initialScrollApplied &&
+        document.visibilityState !== 'hidden' &&
+        !isMobileChatHiddenOnPhone() &&
+        (pinnedToBottom || isAtBottomNow())
+      ) {
+        let latestPeerMsgId: string | null = null;
+        let latestConfirmedId: string | null = null;
+        for (let i = msgs.length - 1; i >= 0; i -= 1) {
+          const candidate = msgs[i];
+          if (candidate.isPending) continue;
+          if (!latestConfirmedId) latestConfirmedId = candidate.id;
+          if (candidate.authorUsername.toLowerCase() !== selfKey) {
+            latestPeerMsgId = candidate.id;
+            break;
+          }
+        }
+        if (
+          latestPeerMsgId &&
+          latestConfirmedId &&
+          ackedDmReadMsgIdByThread.get(cacheKey) !== latestConfirmedId
+        ) {
+          markThreadAsRead(readTarget);
+        }
+      }
     };
 
     activeDmSyncer = syncDmThread;
@@ -5970,8 +6027,16 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     }
 
     const hydratedAgeMs = Date.now() - (dmHistoryHydratedAt.get(cacheKey) ?? 0);
+    const missingPeerReceipt =
+      !isGroup &&
+      (state.snapshot?.user.privacy?.showReadReceipts !== false) &&
+      !dmReceiptsByThread.has(cacheKey);
     const shouldReconcileHistory =
-      Boolean(jumpForThisThread) || !preHydrated || !socketConnected || hydratedAgeMs > 45_000;
+      Boolean(jumpForThisThread) ||
+      !preHydrated ||
+      !socketConnected ||
+      hydratedAgeMs > 45_000 ||
+      missingPeerReceipt;
 
     if (shouldReconcileHistory) {
       void apiFetchDmHistory(
@@ -6176,8 +6241,10 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   };
 
   const applyLiveSnapshot = (nextSnapshot: SocialSnapshot, previousUsername?: string) => {
-    const prevReceiptsEnabled = Boolean(state.snapshot?.user.privacy?.showReadReceipts);
-    const nextReceiptsEnabled = Boolean(nextSnapshot.user.privacy?.showReadReceipts);
+    const prevReceiptsEnabled = state.snapshot
+      ? state.snapshot.user.privacy?.showReadReceipts !== false
+      : false;
+    const nextReceiptsEnabled = nextSnapshot.user.privacy?.showReadReceipts !== false;
     const prevIncomingUsernames = new Set(
       (state.snapshot?.incomingRequests ?? []).map((r) => r.user.username.toLowerCase()),
     );
@@ -6232,7 +6299,11 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     // If the user is actively viewing a thread at the bottom in a visible window, never allow
     // a hidden unread count to linger behind `!isSelected` and pop up when they switch chats.
     let autoMarkViewedTarget: { kind: 'dm'; id: string } | { kind: 'group'; id: string } | null = null;
-    if (document.visibilityState !== 'hidden' && (activeDmIsAtBottom?.() ?? true)) {
+    if (
+      document.visibilityState !== 'hidden' &&
+      !isMobileChatHiddenOnPhone() &&
+      (activeDmIsAtBottom?.() ?? true)
+    ) {
       if (state.mainView === 'dm' && state.activeDmUsername) {
         const activePeer = state.activeDmUsername.toLowerCase();
         const activeKey = dmThreadCacheKey(activePeer);
@@ -6373,18 +6444,24 @@ function renderWorkspaceScreen(root: HTMLElement): void {
 
     if (!nextReceiptsEnabled) {
       dmReceiptsByThread.clear();
-    } else if (!prevReceiptsEnabled && state.mainView === 'dm' && state.activeDmUsername) {
-      const targetPeer = state.activeDmUsername;
-      const targetCacheKey = dmThreadCacheKey(targetPeer);
-      void apiFetchDmHistory({ peerUsername: targetPeer }).then((res) => {
-        if (!res.ok || state.screen !== 'app' || !isThreadCurrentlyViewed(targetCacheKey)) {
-          return;
-        }
-        if (res.peerReceipt) {
-          dmReceiptsByThread.set(targetCacheKey, res.peerReceipt);
-        }
-        activeDmSyncer?.();
-      });
+      ackedDmReadMsgIdByThread.clear();
+    } else if (!prevReceiptsEnabled) {
+      ackedDmReadMsgIdByThread.clear();
+      if (state.mainView === 'dm' && state.activeDmUsername) {
+        const targetPeer = state.activeDmUsername;
+        const targetCacheKey = dmThreadCacheKey(targetPeer);
+        void apiFetchDmHistory({ peerUsername: targetPeer }).then((res) => {
+          if (!res.ok || state.screen !== 'app' || !isThreadCurrentlyViewed(targetCacheKey)) {
+            return;
+          }
+          if (res.peerReceipt) {
+            dmReceiptsByThread.set(targetCacheKey, res.peerReceipt);
+          } else {
+            dmReceiptsByThread.delete(targetCacheKey);
+          }
+          activeDmSyncer?.();
+        });
+      }
     }
 
     syncDock();
@@ -6841,7 +6918,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   }, 5000);
 
   const handleWindowActive = () => {
-    if (document.visibilityState === 'hidden') {
+    if (document.visibilityState === 'hidden' || isMobileChatHiddenOnPhone()) {
       return;
     }
     triggerBackgroundSnapshotSync(false);
@@ -6853,6 +6930,8 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       const peerKey = state.activeDmUsername.toLowerCase();
       if ((state.snapshot?.unreadCounts?.[peerKey] ?? 0) > 0) {
         markThreadAsRead({ kind: 'dm', id: peerKey });
+      } else {
+        activeDmSyncer?.();
       }
     }
   };
@@ -6899,6 +6978,14 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       voiceManager.handleSocketReconnected();
       void flushOutboundQueue();
       triggerBackgroundSnapshotSync(true);
+      if (state.mainView === 'dm' && state.activeDmUsername) {
+        const peer = state.activeDmUsername;
+        const activeKey = dmThreadCacheKey(peer);
+        void prefetchThreadHistory({ peerUsername: peer }, activeKey);
+      } else if (state.mainView === 'group' && state.activeGroupId) {
+        const grpId = state.activeGroupId;
+        void prefetchThreadHistory({ groupId: grpId }, groupThreadCacheKey(grpId));
+      }
     },
     onClose: () => {
       socketConnected = false;
@@ -7021,7 +7108,8 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         dmScrollStateByThread.set(cacheKey, { atBottom: true, scrollTop: 0 });
       }
       const isActivelyViewing = isThreadCurrentlyViewed(cacheKey);
-      const isVisibleHere = isActivelyViewing && document.visibilityState !== 'hidden';
+      const isVisibleHere =
+        isActivelyViewing && document.visibilityState !== 'hidden' && !isMobileChatHiddenOnPhone();
       const isFocusedOnThread = isActivelyViewing && isAppWindowFocused();
       const selfPinged =
         !isFromSelf &&
@@ -7219,6 +7307,10 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     onDmRead: ({ threadUsers, groupId, receipt }) => {
       const cacheKey = resolveEventCacheKey({ threadUsers, groupId });
       if (!cacheKey || groupId) {
+        return;
+      }
+      const selfKey = state.snapshot?.user.username.toLowerCase();
+      if (selfKey && receipt.readerUsername && receipt.readerUsername.toLowerCase() === selfKey) {
         return;
       }
       dmReceiptsByThread.set(cacheKey, receipt);

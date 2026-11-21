@@ -1965,7 +1965,7 @@ function toSelfProfile(account) {
       allowFriendRequests: account.privacy?.allowFriendRequests !== false,
       allowNonFriendDms: account.privacy?.allowNonFriendDms !== false,
       privateProfile: Boolean(account.privacy?.privateProfile),
-      showReadReceipts: Boolean(account.privacy?.showReadReceipts),
+      showReadReceipts: account.privacy?.showReadReceipts !== false,
     },
     clientPreferences:
       account.clientPreferences && typeof account.clientPreferences === 'object'
@@ -4484,6 +4484,8 @@ export function createRedshiftServerMiddleware() {
       if (!activeUser.privacy || typeof activeUser.privacy !== 'object') {
         activeUser.privacy = {};
       }
+      const selfKey = activeUser.username.toLowerCase();
+      const wasReadReceiptsEnabled = activeUser.privacy.showReadReceipts !== false;
       if (typeof body.allowFriendRequests === 'boolean') {
         activeUser.privacy.allowFriendRequests = body.allowFriendRequests;
       }
@@ -4498,6 +4500,30 @@ export function createRedshiftServerMiddleware() {
       }
       saveDb(db);
       notifyRelatedPeers(activeUser.username, false);
+      if (!wasReadReceiptsEnabled && activeUser.privacy.showReadReceipts !== false) {
+        const prefix = `${selfKey}::`;
+        const suffix = `::${selfKey}`;
+        for (const [tKey, receiptsMap] of Object.entries(db.dmReadReceipts ?? {})) {
+          if (!receiptsMap || typeof receiptsMap !== 'object') continue;
+          const ownReceipt = receiptsMap[selfKey];
+          if (!ownReceipt) continue;
+          let otherKey = '';
+          if (tKey.startsWith(prefix)) {
+            otherKey = tKey.slice(prefix.length);
+          } else if (tKey.endsWith(suffix)) {
+            otherKey = tKey.slice(0, tKey.length - suffix.length);
+          }
+          if (!otherKey || otherKey.includes(':')) continue;
+          const peerAcc = findAccountByUsername(otherKey);
+          if (peerAcc?.privacy?.showReadReceipts !== false) {
+            sendWsEventToUser(otherKey, {
+              type: 'dm:read',
+              threadUsers: [selfKey, otherKey],
+              receipt: ownReceipt,
+            });
+          }
+        }
+      }
       sendJson(res, 200, {
         ok: true,
         snapshot: buildSocialSnapshot(activeUser.username),
@@ -5473,8 +5499,8 @@ export function createRedshiftServerMiddleware() {
       if (ctx.kind === 'dm') {
         const peerAcc = findAccountByUsername(ctx.peerKey);
         if (
-          activeUser.privacy?.showReadReceipts === true &&
-          peerAcc?.privacy?.showReadReceipts === true
+          activeUser.privacy?.showReadReceipts !== false &&
+          peerAcc?.privacy?.showReadReceipts !== false
         ) {
           peerReceipt = db.dmReadReceipts[ctx.threadKey]?.[ctx.peerKey];
         }
@@ -5668,7 +5694,7 @@ export function createRedshiftServerMiddleware() {
         changed = true;
       }
 
-      if (peerKey && activeUser.privacy?.showReadReceipts === true) {
+      if (peerKey && activeUser.privacy?.showReadReceipts !== false) {
         const peerAcc = findAccountByUsername(peerKey);
         const threadKey = dmThreadKey(selfKey, peerKey);
         const threadList = db.dms[threadKey] ?? [];
@@ -5686,7 +5712,7 @@ export function createRedshiftServerMiddleware() {
             };
             db.dmReadReceipts[threadKey][selfKey] = receipt;
             changed = true;
-            if (peerAcc?.privacy?.showReadReceipts === true) {
+            if (peerAcc?.privacy?.showReadReceipts !== false) {
               sendWsEventToUser(peerKey, {
                 type: 'dm:read',
                 threadUsers: [selfKey, peerKey],
@@ -6298,7 +6324,14 @@ export function createRedshiftServerMiddleware() {
         db.groupUnreadMentions = {};
       }
 
+      let sendReceiptEvent = null;
       if (ctx.kind === 'group') {
+        if (db.unreadGroups[senderKey]?.[ctx.groupId]) {
+          delete db.unreadGroups[senderKey][ctx.groupId];
+        }
+        if (db.groupUnreadMentions?.[senderKey]?.[ctx.groupId]) {
+          delete db.groupUnreadMentions[senderKey][ctx.groupId];
+        }
         for (const member of ctx.participants) {
           const memberKey = member.toLowerCase();
           touchThreadActivityForUser(memberKey, `group:${ctx.groupId}`, msgNow, { unhide: true });
@@ -6320,6 +6353,31 @@ export function createRedshiftServerMiddleware() {
           }
         }
       } else {
+        if (db.unreadDms[senderKey]?.[ctx.peerKey]) {
+          delete db.unreadDms[senderKey][ctx.peerKey];
+        }
+        if (db.unreadMentions?.[senderKey]?.[ctx.peerKey]) {
+          delete db.unreadMentions[senderKey][ctx.peerKey];
+        }
+        if (activeUser.privacy?.showReadReceipts !== false) {
+          const peerAcc = findAccountByUsername(ctx.peerKey);
+          if (!db.dmReadReceipts[ctx.threadKey] || typeof db.dmReadReceipts[ctx.threadKey] !== 'object') {
+            db.dmReadReceipts[ctx.threadKey] = {};
+          }
+          const sendReceipt = {
+            readerUsername: senderKey,
+            lastReadMessageId: stored.id,
+            readAt: msgNow,
+          };
+          db.dmReadReceipts[ctx.threadKey][senderKey] = sendReceipt;
+          if (peerAcc?.privacy?.showReadReceipts !== false) {
+            sendReceiptEvent = {
+              type: 'dm:read',
+              threadUsers: [senderKey, ctx.peerKey],
+              receipt: sendReceipt,
+            };
+          }
+        }
         if (!db.unreadDms[ctx.peerKey] || typeof db.unreadDms[ctx.peerKey] !== 'object') {
           db.unreadDms[ctx.peerKey] = {};
         }
@@ -6346,6 +6404,9 @@ export function createRedshiftServerMiddleware() {
       // Push real-time DM event FIRST so recipients receive it & badge updates in <10ms.
       for (const participant of ctx.participants) {
         sendWsEventToUser(participant, wsEvent);
+      }
+      if (sendReceiptEvent) {
+        sendWsEventToUser(ctx.peerKey, sendReceiptEvent);
       }
 
       if (ctx.kind === 'group') {
