@@ -14,6 +14,11 @@ import {
   showInAppToast,
 } from './notifications';
 import {
+  disablePhonePushNotifications,
+  enablePhonePushNotifications,
+  getWebPushStatus,
+} from './pushNotifications';
+import {
   DEFAULT_VOICE_CUSTOM_SETTINGS,
   getUserPreferences,
   resetUserPreferences,
@@ -1634,6 +1639,66 @@ export function openUserSettingsOverlay(options: UserSettingsOverlayOptions): ()
     });
     permRow.appendChild(testBtn);
     card.appendChild(permRow);
+
+    if (!getDesktopBridge()) {
+      const pushRow = document.createElement('div');
+      pushRow.className = 'settings-perm-row';
+      const pushText = document.createElement('div');
+      pushText.className = 'settings-perm-text';
+      pushText.textContent = 'Phone Lock-Screen Push Notifications: Checking...';
+      pushRow.appendChild(pushText);
+
+      const pushBtn = document.createElement('button');
+      pushBtn.type = 'button';
+      pushBtn.className = 'settings-btn settings-btn--primary';
+      pushBtn.textContent = 'Enable';
+      pushBtn.hidden = true;
+      pushRow.appendChild(pushBtn);
+      card.appendChild(pushRow);
+
+      const syncPushRow = () => {
+        void getWebPushStatus().then((st) => {
+          if (st === 'enabled') {
+            pushText.textContent = 'Phone Lock-Screen Push Notifications: Enabled';
+            pushBtn.hidden = false;
+            pushBtn.className = 'settings-btn settings-btn--secondary';
+            pushBtn.textContent = 'Disable';
+            pushBtn.onclick = async () => {
+              pushBtn.disabled = true;
+              await disablePhonePushNotifications();
+              pushBtn.disabled = false;
+              syncPushRow();
+            };
+          } else if (st === 'available') {
+            pushText.textContent = 'Phone Lock-Screen Push Notifications: Off';
+            pushBtn.hidden = false;
+            pushBtn.className = 'settings-btn settings-btn--primary';
+            pushBtn.textContent = 'Enable Push';
+            pushBtn.onclick = async () => {
+              pushBtn.disabled = true;
+              const res = await enablePhonePushNotifications();
+              pushBtn.disabled = false;
+              if (!res.ok && res.error) {
+                pushText.textContent = res.error;
+              } else {
+                syncPushRow();
+              }
+            };
+          } else if (st === 'ios-needs-homescreen') {
+            pushText.textContent =
+              'iPhone Push: Tap Safari Share → Add to Home Screen, then open Redshift from your Home Screen to enable lock-screen alerts.';
+            pushBtn.hidden = true;
+          } else if (st === 'denied') {
+            pushText.textContent =
+              'Phone Push: Blocked by browser/OS — allow notifications for Redshift in your phone Settings.';
+            pushBtn.hidden = true;
+          } else {
+            pushRow.hidden = true;
+          }
+        });
+      };
+      syncPushRow();
+    }
 
     card.appendChild(
       createToggleSwitch({

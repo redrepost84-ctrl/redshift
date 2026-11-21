@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.15';
+export const CURRENT_REDSHIFT_VERSION = '0.1.16';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,31 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.16',
+    date: 'November 20, 2026',
+    kicker: 'MOBILE APP & REAL PHONE PUSH NOTIFICATIONS',
+    headline: 'Installable iPhone & Android Mobile App (PWA), Flippable Built-In Camera, Full-Screen Share & Lock-Screen Push Alerts',
+    lead:
+      'Redshift now runs on iPhone and Android as a free fullscreen installable app at redrepost84-ctrl.github.io/redshift/app/ — with a redesigned mobile UI, flippable front/back phone camera, direct full-screen mobile share, and real lock-screen push notifications straight from our 24/7 Cloudflare server.',
+    sections: [
+      {
+        heading: 'Mobile App Redesign',
+        items: [
+          'Discord-Mobile Layout — Bottom tab bar (Chats / Friends / You) with live unread & friend-request badges, full-screen keyboard-safe chat view (100dvh), left-edge swipe-back gesture, slide-over Profile & Member sheets, and long-press message action menus.',
+          'Install on iPhone & Android for Free — Add to Home Screen via Safari (iOS) or Chrome (Android) for a fullscreen native-feeling app icon with automatic updates and zero App Store fees.',
+        ],
+      },
+      {
+        heading: 'Mobile Calls, Camera & Lock-Screen Push',
+        items: [
+          'Built-In Flippable Camera — Uses your phone’s built-in front/back lenses with a live Flip Camera toggle (seamless mid-call track swap, auto-mirroring only the selfie camera).',
+          'Direct Full-Screen Mobile Share — Bypasses the desktop window chooser on mobile to share your full screen directly on Android (with a clear notice on iPhone Safari where Apple only permits watching streams).',
+          'Real iPhone & Android Lock-Screen Notifications — Zero-cost RFC 8291 Web Push notifications sent directly from Cloudflare Workers for DMs, @mentions, friend requests, group adds, and incoming calls.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.15',
     date: 'November 20, 2026',

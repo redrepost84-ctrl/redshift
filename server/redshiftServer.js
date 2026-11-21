@@ -230,6 +230,7 @@ function createSeedDb() {
     hiddenThreads: {},
     threadActivity: {},
     gifLinks: {},
+    pushSubscriptions: {},
   };
 }
 
@@ -3259,6 +3260,17 @@ export function createRedshiftServerMiddleware() {
       return;
     }
 
+    if (req.method === 'GET' && reqPath === '/api/push/public-key') {
+      const publicKey = String(process.env.VAPID_PUBLIC_KEY || '').trim();
+      const privateKey = String(process.env.VAPID_PRIVATE_KEY || '').trim();
+      sendJson(res, 200, {
+        ok: true,
+        configured: Boolean(publicKey && privateKey),
+        publicKey,
+      });
+      return;
+    }
+
     // Loopback-Only Real-Time Moderator / Admin Authority Endpoints (127.0.0.1 only)
     if (reqPath.startsWith('/api/admin/')) {
       if (!isLoopbackRequest(req)) {
@@ -3807,6 +3819,42 @@ export function createRedshiftServerMiddleware() {
         ok: true,
         snapshot: buildSocialSnapshot(activeUser.username),
       });
+      return;
+    }
+
+    if (req.method === 'POST' && reqPath === '/api/push/subscribe') {
+      const selfKey = activeUser.username.toLowerCase();
+      const sub = body.subscription;
+      const endpoint = typeof sub?.endpoint === 'string' ? sub.endpoint.trim() : '';
+      const p256dh = typeof sub?.keys?.p256dh === 'string' ? sub.keys.p256dh.trim() : '';
+      const auth = typeof sub?.keys?.auth === 'string' ? sub.keys.auth.trim() : '';
+      if (!endpoint || !/^https:\/\//i.test(endpoint) || endpoint.length > 2000 || !p256dh || !auth) {
+        sendJson(res, 400, { ok: false, error: 'Error: Invalid push subscription' });
+        return;
+      }
+      if (!db.pushSubscriptions || typeof db.pushSubscriptions !== 'object') {
+        db.pushSubscriptions = {};
+      }
+      const existing = Array.isArray(db.pushSubscriptions[selfKey])
+        ? db.pushSubscriptions[selfKey].filter((s) => s && s.endpoint !== endpoint)
+        : [];
+      existing.push({ endpoint, keys: { p256dh, auth }, createdAt: Date.now() });
+      db.pushSubscriptions[selfKey] = existing.slice(-8);
+      saveDb(db);
+      sendJson(res, 200, { ok: true, devices: db.pushSubscriptions[selfKey].length });
+      return;
+    }
+
+    if (req.method === 'POST' && reqPath === '/api/push/unsubscribe') {
+      const selfKey = activeUser.username.toLowerCase();
+      const endpoint = typeof body.endpoint === 'string' ? body.endpoint.trim() : '';
+      if (db.pushSubscriptions && Array.isArray(db.pushSubscriptions[selfKey])) {
+        db.pushSubscriptions[selfKey] = endpoint
+          ? db.pushSubscriptions[selfKey].filter((s) => s && s.endpoint !== endpoint)
+          : [];
+        saveDb(db);
+      }
+      sendJson(res, 200, { ok: true });
       return;
     }
 

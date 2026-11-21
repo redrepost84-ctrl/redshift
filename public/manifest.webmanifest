@@ -1,0 +1,26 @@
+{
+  "name": "Redshift",
+  "short_name": "Redshift",
+  "description": "Fast, free worldwide chat, group chats, voice & video calls, and screen sharing.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#15161a",
+  "theme_color": "#15161a",
+  "categories": ["social", "communication"],
+  "icons": [
+    {
+      "src": "./icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

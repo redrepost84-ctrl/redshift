@@ -235,6 +235,22 @@ if (fs.existsSync(docsDir)) {
   try {
     fs.writeFileSync(path.join(docsDir, 'version.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
   } catch (_) {}
+
+  // Also sync the built static Vite PWA bundle (dist/) into docs/app/ so mobile iPhone & Android users
+  // at https://redrepost84-ctrl.github.io/redshift/app/ always receive every release automatically.
+  const distDir = path.join(rootDir, 'dist');
+  const docsAppDir = path.join(docsDir, 'app');
+  if (fs.existsSync(distDir)) {
+    try {
+      if (fs.existsSync(docsAppDir)) {
+        fs.rmSync(docsAppDir, { recursive: true, force: true });
+      }
+      copyDirSafe(distDir, docsAppDir);
+      console.log('  [Mobile PWA] Synced dist/ -> docs/app/');
+    } catch (err) {
+      console.warn('  [Mobile PWA] Warning: could not sync docs/app/:', err.message);
+    }
+  }
 }
 
 const mb = (bytes) => `${(bytes / (1024 * 1024)).toFixed(2)} MB`;

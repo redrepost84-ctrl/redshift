@@ -1715,6 +1715,50 @@ export async function apiUpdatePrivacy(payload: {
   return { ok: res.ok, snapshot: res.data?.snapshot, error: res.error };
 }
 
+export async function apiFetchPushPublicKey(): Promise<{
+  ok: boolean;
+  configured: boolean;
+  publicKey: string;
+}> {
+  try {
+    const res = await fetchWithTunnelRecovery('/api/push/public-key', { method: 'GET' });
+    const data = (await res.json()) as {
+      ok?: boolean;
+      configured?: boolean;
+      publicKey?: string;
+    };
+    return {
+      ok: Boolean(res.ok && data?.ok),
+      configured: Boolean(data?.configured),
+      publicKey: typeof data?.publicKey === 'string' ? data.publicKey : '',
+    };
+  } catch {
+    return { ok: false, configured: false, publicKey: '' };
+  }
+}
+
+export async function apiSubscribeWebPush(
+  subscription: PushSubscriptionJSON,
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await postJson<{ ok?: boolean; error?: string }>(
+    '/api/push/subscribe',
+    { subscription },
+    true,
+  );
+  return { ok: res.ok, error: res.error };
+}
+
+export async function apiUnsubscribeWebPush(
+  endpoint?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await postJson<{ ok?: boolean; error?: string }>(
+    '/api/push/unsubscribe',
+    { endpoint: endpoint || '' },
+    true,
+  );
+  return { ok: res.ok, error: res.error };
+}
+
 export interface MutualGroupSummary {
   id: string;
   name: string;

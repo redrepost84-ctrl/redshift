@@ -25,6 +25,7 @@ export const SMALL_KV_KEYS = [
   'hiddenThreads',
   'threadActivity',
   'gifLinks',
+  'pushSubscriptions',
 ];
 
 function cleanCallStatuses(dmsMap) {

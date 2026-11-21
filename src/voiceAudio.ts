@@ -427,6 +427,51 @@ export function createWatchStreamIconSvg(size = 15): SVGSVGElement {
   return svg;
 }
 
+export function createFlipCameraIconSvg(size = 17): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', String(size));
+  svg.setAttribute('height', String(size));
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  const paths = [
+    'M20 7h-3.2l-1.5-2H8.7L7.2 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z',
+    'M9 13a3 3 0 0 1 5.2-2l.8.8',
+    'M15 10v2h-2',
+    'M15 14a3 3 0 0 1-5.2 2l-.8-.8',
+    'M9 17v-2h2',
+  ];
+  for (const d of paths) {
+    const p = document.createElementNS(ns, 'path');
+    p.setAttribute('d', d);
+    svg.appendChild(p);
+  }
+  return svg;
+}
+
+export function isIosBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  return (
+    /iPad|iPhone|iPod/i.test(ua) ||
+    (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints ?? 0) > 1)
+  );
+}
+
+export function isMobileTouchDevice(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) {
+    return true;
+  }
+  return Boolean(window.matchMedia?.('(pointer: coarse)').matches && window.innerWidth <= 920);
+}
+
 export function playVoiceToggleCue(enabled: boolean): void {
   const ctx = getSharedVoiceAudioContext();
   if (!ctx) {
@@ -597,16 +642,32 @@ export async function captureMicStream(
   }
 }
 
-export async function captureCameraStream(): Promise<MediaStream> {
+export async function captureCameraStream(
+  facingMode?: 'user' | 'environment',
+): Promise<MediaStream> {
   if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
     throw new Error('Error: Camera access is unavailable in this browser');
   }
+  const baseVideo: MediaTrackConstraints = {
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+    frameRate: { ideal: 30 },
+  };
+  if (facingMode) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        video: { ...baseVideo, facingMode: { exact: facingMode } },
+        audio: false,
+      });
+    } catch {
+      return await navigator.mediaDevices.getUserMedia({
+        video: { ...baseVideo, facingMode: { ideal: facingMode } },
+        audio: false,
+      });
+    }
+  }
   return await navigator.mediaDevices.getUserMedia({
-    video: {
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
-      frameRate: { ideal: 30 },
-    },
+    video: baseVideo,
     audio: false,
   });
 }

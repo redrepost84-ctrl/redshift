@@ -81,8 +81,19 @@ import {
   maybeShowPostUpdateChangelog,
   notifyHeaderUpdateAvailable,
 } from './changelogModal';
-import { formatCustomStatusLine } from './customStatusModal';
+import { formatCustomStatusLine, openSetCustomStatusModal } from './customStatusModal';
 import { getDesktopBridge } from './desktopBridge';
+import {
+  createMobileBackArrowSvg,
+  createMobileBottomNav,
+  createMobileYouView,
+  type MobileHubTab,
+} from './mobileNav';
+import {
+  attachPushNotificationNavigation,
+  registerRedshiftServiceWorker,
+  syncExistingPushSubscriptionIfPermitted,
+} from './pushNotifications';
 import {
   createDmProfilePanel,
   createProfilePanelToggleIconSvg,
@@ -1526,7 +1537,10 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         state.mainView = 'group';
         state.activeGroupId = group.id;
         state.activeDmUsername = null;
+        mobileInChat = true;
+        mobileHubTab = 'chats';
         renderMainArea();
+        syncMobileChrome();
       },
     });
   });
@@ -1626,6 +1640,18 @@ function renderWorkspaceScreen(root: HTMLElement): void {
 
   const chatArea = document.createElement('main');
   chatArea.className = 'workspace-chat';
+
+  let mobileHubTab: MobileHubTab = 'chats';
+  let mobileInChat = state.mainView === 'dm' || state.mainView === 'group';
+  let mobileBackBadgeSyncer: (() => void) | null = null;
+  let syncMobileChromeRef: (() => void) | null = null;
+  const syncMobileChrome = () => {
+    root.dataset.mobileView = mobileInChat ? 'chat' : 'hub';
+    root.dataset.mobileTab = mobileHubTab;
+    syncMobileChromeRef?.();
+    mobileBackBadgeSyncer?.();
+  };
+  syncMobileChrome();
 
   const SEEN_PINS_STORAGE_KEY = 'redshift.seenPins.v1';
   const seenPinsByThread = new Map<string, Set<string>>();
@@ -2309,6 +2335,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     const alertTotal = unreadDms + snap.incomingRequests.length;
     document.title = alertTotal > 0 ? `(${alertTotal}) Redshift` : 'Redshift';
     getDesktopBridge()?.setUnreadCount(alertTotal);
+    syncMobileChrome();
   };
 
   const markThreadAsRead = (
@@ -2438,7 +2465,10 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     state.mainView = 'group';
     state.activeGroupId = gid;
     state.activeDmUsername = null;
+    mobileInChat = true;
+    mobileHubTab = 'chats';
     renderMainArea();
+    syncMobileChrome();
   };
 
   const openDirectMessageWithUser = (username: string) => {
@@ -2472,7 +2502,10 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     state.mainView = 'dm';
     state.activeDmUsername = clean;
     state.activeGroupId = null;
+    mobileInChat = true;
+    mobileHubTab = 'chats';
     renderMainArea();
+    syncMobileChrome();
 
     void apiOpenDm(clean).then((res) => {
       if (res.ok && res.snapshot) {
@@ -3372,6 +3405,50 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     const dmHeader = document.createElement('header');
     dmHeader.className = 'dm-header';
 
+    const mobileBackBtn = document.createElement('button');
+    mobileBackBtn.type = 'button';
+    mobileBackBtn.className = 'dm-mobile-back-btn';
+    mobileBackBtn.title = 'Back to Chats';
+    mobileBackBtn.setAttribute('aria-label', 'Back to Chats');
+    mobileBackBtn.appendChild(createMobileBackArrowSvg(20));
+
+    const mobileBackBadge = document.createElement('span');
+    mobileBackBadge.className = 'dm-mobile-back-badge';
+    mobileBackBadge.hidden = true;
+    mobileBackBtn.appendChild(mobileBackBadge);
+
+    const syncMobileBackBadge = () => {
+      const snap = state.snapshot;
+      if (!snap) {
+        mobileBackBadge.hidden = true;
+        return;
+      }
+      let otherUnread = 0;
+      for (const [k, cnt] of Object.entries(snap.unreadCounts ?? {})) {
+        if (cnt > 0 && (isGroup || k.toLowerCase() !== peerKey)) {
+          otherUnread += cnt;
+        }
+      }
+      for (const [gid, cnt] of Object.entries(snap.groupUnreadCounts ?? {})) {
+        if (cnt > 0 && (!isGroup || gid !== groupId)) {
+          otherUnread += cnt;
+        }
+      }
+      mobileBackBadge.hidden = otherUnread <= 0;
+      if (otherUnread > 0) {
+        mobileBackBadge.textContent = otherUnread > 99 ? '99+' : String(otherUnread);
+      }
+    };
+    mobileBackBadgeSyncer = syncMobileBackBadge;
+    syncMobileBackBadge();
+
+    mobileBackBtn.addEventListener('click', () => {
+      mobileInChat = false;
+      mobileHubTab = 'chats';
+      syncMobileChrome();
+    });
+    dmHeader.appendChild(mobileBackBtn);
+
     const headerAvatarWrap = document.createElement('span');
     headerAvatarWrap.className = 'dm-header-avatar-wrap';
     const headerAvatar = document.createElement('img');
@@ -3615,8 +3692,24 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       isGroup ? createMembersIconSvg(18) : createProfilePanelToggleIconSvg(18),
     );
 
+    let mobileSideSheetOpen = false;
+    const isMobileViewport = () => window.innerWidth <= 768;
+
+    const mobileSheetBackdrop = document.createElement('div');
+    mobileSheetBackdrop.className = 'dm-mobile-sheet-backdrop';
+    mobileSheetBackdrop.hidden = true;
+    mobileSheetBackdrop.addEventListener('click', () => {
+      mobileSideSheetOpen = false;
+      syncSidePanelToggleState();
+    });
+
     const syncSidePanelToggleState = () => {
-      const shown = isGroup ? state.showGroupMembersPanel : state.showDmProfilePanel;
+      const mobile = isMobileViewport();
+      const shown = mobile
+        ? mobileSideSheetOpen
+        : isGroup
+          ? state.showGroupMembersPanel
+          : state.showDmProfilePanel;
       panelToggleBtn.classList.toggle('dm-header-icon-btn--active', shown);
       const label = isGroup
         ? shown
@@ -3628,6 +3721,8 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       panelToggleBtn.title = label;
       panelToggleBtn.setAttribute('aria-label', label);
       panelToggleBtn.setAttribute('aria-pressed', String(shown));
+      dmBodySplit.classList.toggle('dm-body-split--mobile-sheet-open', mobile && shown);
+      mobileSheetBackdrop.hidden = !(mobile && shown);
       if (dmProfilePanel) {
         dmProfilePanel.element.hidden = !shown;
       }
@@ -3637,7 +3732,9 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     };
 
     panelToggleBtn.addEventListener('click', () => {
-      if (isGroup) {
+      if (isMobileViewport()) {
+        mobileSideSheetOpen = !mobileSideSheetOpen;
+      } else if (isGroup) {
         state.showGroupMembersPanel = !state.showGroupMembersPanel;
       } else {
         state.showDmProfilePanel = !state.showDmProfilePanel;
@@ -5488,6 +5585,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     composerForm.appendChild(composerAnchor);
     dmThreadPane.appendChild(composerForm);
     dmBodySplit.appendChild(dmThreadPane);
+    dmBodySplit.appendChild(mobileSheetBackdrop);
     if (dmProfilePanel) {
       dmBodySplit.appendChild(dmProfilePanel.element);
     }
@@ -5568,6 +5666,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     activeVcBarSyncer = null;
     activeTypingSyncer = null;
     activeFriendsHandle = null;
+    mobileBackBadgeSyncer = null;
     syncSidebarNavAndDms();
 
     const snap = state.snapshot;
@@ -6881,10 +6980,122 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     voiceManager.destroy();
     socketHandle?.disconnect();
     drawerController.destroy();
+    detachPushNavigation?.();
+    chatArea.removeEventListener('touchstart', handleMobileEdgeTouchStart);
+    chatArea.removeEventListener('touchend', handleMobileEdgeTouchEnd);
+    delete root.dataset.mobileView;
+    delete root.dataset.mobileTab;
   };
+
+  const mobileYouView = createMobileYouView({
+    resolveAvatar: resolveProfileAvatar,
+    onOptimisticStatus: (nextSt) => {
+      applyOptimisticSelfPatch({ status: nextSt });
+    },
+    onSnapshotUpdated: (nextSnap) => {
+      applyLiveSnapshot(nextSnap);
+    },
+    onOpenEditProfile: () => triggerSelfProfileModal?.(true),
+    onOpenCustomStatus: () => {
+      const snap = state.snapshot;
+      if (!snap) return;
+      openSetCustomStatusModal({
+        user: snap.user,
+        resolveAvatar: resolveProfileAvatar,
+        onOptimisticCustomStatus: (nextCs) => {
+          applyOptimisticSelfPatch({ customStatus: nextCs });
+        },
+        onSnapshotUpdated: (nextSnap) => applyLiveSnapshot(nextSnap),
+      });
+    },
+    onOpenSettings: () => triggerVoiceSettingsModal?.(),
+    onSignOut: requestSignOutAction,
+  });
+
+  const mobileBottomNav = createMobileBottomNav((tab) => {
+    mobileInChat = false;
+    mobileHubTab = tab;
+    if (tab === 'friends') {
+      state.mainView = 'friends';
+      renderMainArea();
+    } else if (tab === 'you') {
+      mobileYouView.refreshPushStatus();
+    }
+    syncMobileChrome();
+  });
+
+  syncMobileChromeRef = () => {
+    const snap = state.snapshot;
+    if (!snap) return;
+    let unreadChats = 0;
+    for (const c of Object.values(snap.unreadCounts ?? {})) {
+      if (c > 0) unreadChats += c;
+    }
+    for (const c of Object.values(snap.groupUnreadCounts ?? {})) {
+      if (c > 0) unreadChats += c;
+    }
+    mobileBottomNav.sync({
+      activeTab: mobileHubTab,
+      unreadChatsCount: unreadChats,
+      pendingFriendsCount: snap.incomingRequests.length,
+      user: snap.user,
+      resolveAvatar: resolveProfileAvatar,
+    });
+    mobileYouView.sync(snap.user);
+  };
+
+  // Left-edge swipe-right gesture on mobile returns smoothly from a chat to the Chats list.
+  let edgeSwipeStartX = -1;
+  let edgeSwipeStartY = 0;
+  const handleMobileEdgeTouchStart = (ev: TouchEvent) => {
+    if (window.innerWidth > 768 || !mobileInChat || ev.touches.length !== 1) {
+      edgeSwipeStartX = -1;
+      return;
+    }
+    const t = ev.touches[0];
+    if (t.clientX <= 28) {
+      edgeSwipeStartX = t.clientX;
+      edgeSwipeStartY = t.clientY;
+    } else {
+      edgeSwipeStartX = -1;
+    }
+  };
+  const handleMobileEdgeTouchEnd = (ev: TouchEvent) => {
+    if (edgeSwipeStartX < 0 || ev.changedTouches.length !== 1) return;
+    const t = ev.changedTouches[0];
+    const dx = t.clientX - edgeSwipeStartX;
+    const dy = Math.abs(t.clientY - edgeSwipeStartY);
+    edgeSwipeStartX = -1;
+    if (dx >= 68 && dy < 52) {
+      mobileInChat = false;
+      mobileHubTab = 'chats';
+      syncMobileChrome();
+    }
+  };
+  chatArea.addEventListener('touchstart', handleMobileEdgeTouchStart, { passive: true });
+  chatArea.addEventListener('touchend', handleMobileEdgeTouchEnd, { passive: true });
+
+  const detachPushNavigation = attachPushNotificationNavigation((kind, id) => {
+    if (kind === 'group') {
+      openGroupChatById(id);
+    } else if (kind === 'dm') {
+      openDirectMessageWithUser(id);
+    } else if (kind === 'friends') {
+      state.mainView = 'friends';
+      state.friendsTab = id === 'pending' ? 'pending' : 'online';
+      mobileInChat = false;
+      mobileHubTab = 'friends';
+      renderMainArea();
+      syncMobileChrome();
+    }
+  });
+  void syncExistingPushSubscriptionIfPermitted();
 
   root.appendChild(leftColumn);
   root.appendChild(chatArea);
+  root.appendChild(mobileYouView.element);
+  root.appendChild(mobileBottomNav.element);
+  syncMobileChrome();
 }
 
 function render(): void {
@@ -6941,6 +7152,7 @@ function render(): void {
 
 async function bootstrapApp(): Promise<void> {
   attachGlobalEditableContextMenu();
+  void registerRedshiftServiceWorker();
   const desktopBridge = getDesktopBridge();
   let githubRepo = 'redrepost84-ctrl/redshift';
   if (desktopBridge) {

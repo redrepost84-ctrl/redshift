@@ -22,6 +22,7 @@ const KV_KEYS = [
   'hiddenThreads',
   'threadActivity',
   'gifLinks',
+  'pushSubscriptions',
 ];
 
 export function resolveDataPaths() {

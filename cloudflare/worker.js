@@ -5,6 +5,7 @@ import { Buffer } from 'node:buffer';
 import { createDoStore, SMALL_KV_KEYS, UPLOAD_CHUNK_SIZE } from './doStore.js';
 import { readGifDimensionsFromBytes, scaleGifBytesSpeed } from './gifSpeed.js';
 import { fetchSafeLinkPreview } from './linkPreview.js';
+import { sendWebPushMessage } from './webPush.js';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const USERNAME_REGEX = /^[a-zA-Z0-9_.-]+$/;
@@ -118,6 +119,7 @@ function createSeedDb() {
     hiddenThreads: {},
     threadActivity: {},
     gifLinks: {},
+    pushSubscriptions: {},
   };
 }
 
@@ -1763,12 +1765,101 @@ export class RedshiftHub extends DurableObject {
     return hydrated;
   }
 
+  isThreadMutedForPush(recipientKey, userThreadKey, isMentionOrReply = false) {
+    const cleanUser = recipientKey.toLowerCase();
+    const map = this.db.mutedThreads?.[cleanUser];
+    if (!map || typeof map !== 'object') return false;
+    const raw = map[userThreadKey];
+    if (!raw) return false;
+    const now = Date.now();
+    if (typeof raw === 'number') {
+      return raw === -1 || raw > now;
+    }
+    if (typeof raw === 'object') {
+      const until = typeof raw.until === 'number' ? raw.until : null;
+      if (until !== null && (until === -1 || until > now)) {
+        return true;
+      }
+      if (raw.mentionsOnly === true && !isMentionOrReply) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  sendPushToUser(recipientUsername, payload, options = {}) {
+    if (!recipientUsername) return;
+    const vapidPublicKey = String(this.env.VAPID_PUBLIC_KEY || '').trim();
+    const vapidPrivateKey = String(this.env.VAPID_PRIVATE_KEY || '').trim();
+    const vapidSubject = String(this.env.VAPID_SUBJECT || 'mailto:redrepost84@gmail.com').trim();
+    if (!vapidPublicKey || !vapidPrivateKey) return;
+
+    const cleanKey = recipientUsername.toLowerCase();
+    const subs = this.db.pushSubscriptions?.[cleanKey];
+    if (!Array.isArray(subs) || subs.length === 0) return;
+
+    const snapshotSubs = subs.slice();
+    const task = (async () => {
+      const expiredEndpoints = new Set();
+      for (const sub of snapshotSubs) {
+        try {
+          const res = await sendWebPushMessage({
+            subscription: sub,
+            payload,
+            vapidPublicKey,
+            vapidPrivateKey,
+            vapidSubject,
+            ttl: options.ttl ?? 86400,
+            urgency: options.urgency ?? 'high',
+          });
+          if (res.expired && sub.endpoint) {
+            expiredEndpoints.add(sub.endpoint);
+          }
+        } catch (err) {
+          console.error('[Redshift Push] Send failed:', err?.message || err);
+        }
+      }
+      if (expiredEndpoints.size > 0 && Array.isArray(this.db.pushSubscriptions?.[cleanKey])) {
+        this.db.pushSubscriptions[cleanKey] = this.db.pushSubscriptions[cleanKey].filter(
+          (s) => !expiredEndpoints.has(s.endpoint),
+        );
+        this.saveDb();
+      }
+    })();
+
+    try {
+      this.ctx.waitUntil(task);
+    } catch {
+      void task;
+    }
+  }
+
   emitSocialNotify(recipientUsername, eventPayload) {
     if (!recipientUsername) return;
     this.sendWsEventToUser(recipientUsername, {
       type: 'social:notify',
       event: eventPayload,
     });
+    if (eventPayload && typeof eventPayload === 'object') {
+      const actorName = eventPayload.actor?.displayName || eventPayload.actor?.username || 'Someone';
+      if (eventPayload.kind === 'friend-request') {
+        this.sendPushToUser(recipientUsername, {
+          title: 'New Friend Request',
+          body: `${actorName} sent you a friend request`,
+          tag: `friend-req:${eventPayload.actor?.username || ''}`,
+          threadKind: 'friends',
+          threadId: 'pending',
+        });
+      } else if (eventPayload.kind === 'group-added' && eventPayload.groupId) {
+        this.sendPushToUser(recipientUsername, {
+          title: eventPayload.groupName || 'Group Chat',
+          body: `${actorName} added you to ${eventPayload.groupName || 'a group chat'}`,
+          tag: `group-add:${eventPayload.groupId}`,
+          threadKind: 'group',
+          threadId: eventPayload.groupId,
+        });
+      }
+    }
   }
 
   // --- Voice Call Logic ---
@@ -2911,6 +3002,24 @@ export class RedshiftHub extends DurableObject {
               groupIconDataUrl: this.getGroupIconUrl(grp),
               caller: this.toPublicProfile(callerAcc, otherKey),
             });
+            const callThreadMuteKey =
+              call.kind === 'group' && call.groupId ? `group:${call.groupId}` : `dm:${ownerKey}`;
+            if (!this.isThreadMutedForPush(otherKey, callThreadMuteKey, true)) {
+              this.sendPushToUser(
+                otherKey,
+                {
+                  title: call.kind === 'group' ? grp?.name || 'Group Call' : callerAcc.displayName,
+                  body:
+                    call.kind === 'group'
+                      ? `${callerAcc.displayName} started a call`
+                      : 'Incoming voice call...',
+                  tag: `vc:${call.threadKey}`,
+                  threadKind: call.kind === 'group' ? 'group' : 'dm',
+                  threadId: call.kind === 'group' ? call.groupId : ownerKey,
+                },
+                { ttl: 35, urgency: 'high' },
+              );
+            }
           }
         }
       }
@@ -3189,6 +3298,17 @@ export class RedshiftHub extends DurableObject {
         wsReady: true,
         cloud: 'cloudflare-workers',
         serverTime: Date.now(),
+      });
+    }
+
+    // Public Web Push VAPID key (iPhone iOS 16.4+ & Android lock-screen notifications)
+    if (method === 'GET' && reqPath === '/api/push/public-key') {
+      const publicKey = String(this.env.VAPID_PUBLIC_KEY || '').trim();
+      const privateKey = String(this.env.VAPID_PRIVATE_KEY || '').trim();
+      return jsonResponse(request, 200, {
+        ok: true,
+        configured: Boolean(publicKey && privateKey),
+        publicKey,
       });
     }
 
@@ -3701,6 +3821,41 @@ export class RedshiftHub extends DurableObject {
 
     if (method === 'GET' && (reqPath === '/api/social/snapshot' || reqPath === '/api/auth/session')) {
       return jsonResponse(request, 200, { ok: true, snapshot: this.buildSocialSnapshot(selfKey) });
+    }
+
+    if (method === 'POST' && reqPath === '/api/push/subscribe') {
+      const sub = body.subscription;
+      const endpoint = typeof sub?.endpoint === 'string' ? sub.endpoint.trim() : '';
+      const p256dh = typeof sub?.keys?.p256dh === 'string' ? sub.keys.p256dh.trim() : '';
+      const auth = typeof sub?.keys?.auth === 'string' ? sub.keys.auth.trim() : '';
+      if (!endpoint || !/^https:\/\//i.test(endpoint) || endpoint.length > 2000 || !p256dh || !auth) {
+        return jsonResponse(request, 400, { ok: false, error: 'Error: Invalid push subscription' });
+      }
+      if (!this.db.pushSubscriptions || typeof this.db.pushSubscriptions !== 'object') {
+        this.db.pushSubscriptions = {};
+      }
+      const existing = Array.isArray(this.db.pushSubscriptions[selfKey])
+        ? this.db.pushSubscriptions[selfKey].filter((s) => s && s.endpoint !== endpoint)
+        : [];
+      existing.push({
+        endpoint,
+        keys: { p256dh, auth },
+        createdAt: Date.now(),
+      });
+      this.db.pushSubscriptions[selfKey] = existing.slice(-8);
+      this.saveDb();
+      return jsonResponse(request, 200, { ok: true, devices: this.db.pushSubscriptions[selfKey].length });
+    }
+
+    if (method === 'POST' && reqPath === '/api/push/unsubscribe') {
+      const endpoint = typeof body.endpoint === 'string' ? body.endpoint.trim() : '';
+      if (this.db.pushSubscriptions && Array.isArray(this.db.pushSubscriptions[selfKey])) {
+        this.db.pushSubscriptions[selfKey] = endpoint
+          ? this.db.pushSubscriptions[selfKey].filter((s) => s && s.endpoint !== endpoint)
+          : [];
+        this.saveDb();
+      }
+      return jsonResponse(request, 200, { ok: true });
     }
 
     if (method === 'POST' && reqPath === '/api/auth/signout') {
@@ -5278,6 +5433,35 @@ export class RedshiftHub extends DurableObject {
 
       for (const participant of ctx.participants) {
         this.pushSnapshotToUser(participant);
+      }
+
+      // Send native iOS / Android Web Push notifications to recipients (non-blocking via waitUntil).
+      const pushPreview = finalContent
+        ? finalContent.replace(/\s+/g, ' ').trim().slice(0, 140)
+        : voiceNote
+          ? 'Sent a voice message'
+          : finalGif
+            ? 'Sent a GIF'
+            : validAttachmentIds.length > 0 || imageDataUrls.length > 0
+              ? 'Sent an attachment'
+              : 'Sent a message';
+      const pushGroup = ctx.kind === 'group' ? this.db.groupDms[ctx.groupId] : undefined;
+      for (const participant of ctx.participants) {
+        const pKey = participant.toLowerCase();
+        if (pKey === selfKey) continue;
+        const userMuteKey = ctx.kind === 'group' ? `group:${ctx.groupId}` : `dm:${selfKey}`;
+        const isPinged = mentionedUsers.has(pKey) || replyTargetUser === pKey;
+        if (this.isThreadMutedForPush(pKey, userMuteKey, isPinged)) continue;
+        this.sendPushToUser(pKey, {
+          title:
+            ctx.kind === 'group'
+              ? `${activeUser.displayName} in ${pushGroup?.name || 'Group Chat'}`
+              : activeUser.displayName,
+          body: pushPreview,
+          tag: userMuteKey,
+          threadKind: ctx.kind === 'group' ? 'group' : 'dm',
+          threadId: ctx.kind === 'group' ? ctx.groupId : selfKey,
+        });
       }
 
       this.saveDb();

@@ -1,11 +1,11 @@
 {
-  "version": "0.1.15",
-  "releasedAt": "2026-11-21T03:08:23.718Z",
-  "changelog": "Click-to-watch blurred grey stream previews with toggleable big screen & Stop Watching, hover-to-reply top-right button on custom statuses in profile panels & inspection popups, and sound effects for starting/ending streams and joining/rejoining/leaving calls for everyone in the call.",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.15/Redshift-patch.asar",
-  "sha256": "6560edee6b9af5b3ce7c0e03c0d37eb2f061866d64c5e4829e5befb1db4a0730",
-  "size": 6295724,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.15/RedshiftSetup.exe",
+  "version": "0.1.16",
+  "releasedAt": "2026-11-21T03:42:38.943Z",
+  "changelog": "Full Mobile App Support (iPhone & Android PWA): Discord-mobile bottom nav (Chats/Friends/You), full-screen chat with edge-swipe back & long-press menus, flippable front/back phone camera, direct full-screen mobile share, and real lock-screen Web Push notifications from Cloudflare.",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.16/Redshift-patch.asar",
+  "sha256": "7e31e9542b4b225163353d98c37396bd3c7bf816151bc6cac24f5a82f62c190b",
+  "size": 6334319,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.16/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

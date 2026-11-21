@@ -3311,6 +3311,62 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
         },
       });
     });
+
+    // Touch long-press support (420ms) for mobile phones to open the message action sheet.
+    let longPressTimer: number | null = null;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchOriginTarget: EventTarget | null = null;
+    const clearLongPress = () => {
+      if (longPressTimer !== null) {
+        window.clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    };
+    row.addEventListener(
+      'touchstart',
+      (ev) => {
+        if (ev.touches.length !== 1) {
+          clearLongPress();
+          return;
+        }
+        const t = ev.touches[0];
+        const el = ev.target as HTMLElement | null;
+        if (el?.closest('button, a, input, textarea, audio, video')) {
+          return;
+        }
+        touchStartX = t.clientX;
+        touchStartY = t.clientY;
+        touchOriginTarget = ev.target;
+        clearLongPress();
+        longPressTimer = window.setTimeout(() => {
+          longPressTimer = null;
+          const targetEl = (touchOriginTarget instanceof HTMLElement ? touchOriginTarget : row);
+          targetEl.dispatchEvent(
+            new MouseEvent('contextmenu', {
+              bubbles: true,
+              cancelable: true,
+              clientX: touchStartX,
+              clientY: touchStartY,
+            }),
+          );
+        }, 420);
+      },
+      { passive: true },
+    );
+    row.addEventListener(
+      'touchmove',
+      (ev) => {
+        if (longPressTimer === null || ev.touches.length !== 1) return;
+        const t = ev.touches[0];
+        if (Math.hypot(t.clientX - touchStartX, t.clientY - touchStartY) > 10) {
+          clearLongPress();
+        }
+      },
+      { passive: true },
+    );
+    row.addEventListener('touchend', clearLongPress, { passive: true });
+    row.addEventListener('touchcancel', clearLongPress, { passive: true });
   }
 
   return row;

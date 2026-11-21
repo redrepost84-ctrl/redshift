@@ -37,6 +37,7 @@ import {
   captureScreenShareStream,
   createCameraIconSvg,
   createExpandIconSvg,
+  createFlipCameraIconSvg,
   createHeadphonesIconSvg,
   createMicDspChain,
   createMicIconSvg,
@@ -52,6 +53,8 @@ import {
   getScreenShareStreamSettings,
   getSharedVoiceAudioContext,
   getSharedVoiceSilentSink,
+  isIosBrowser,
+  isMobileTouchDevice,
   playStreamEndSound,
   playStreamStartSound,
   playVcJoinSound,
@@ -183,6 +186,8 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
   let localMicDsp: MicDspChain | null = null;
   let localMicDest: MediaStreamAudioDestinationNode | null = null;
   let localCameraStream: MediaStream | null = null;
+  let cameraFacingMode: 'user' | 'environment' = 'user';
+  let flippingCamera = false;
   let localScreenStream: MediaStream | null = null;
   let localScreenPaused = false;
   let expandedStageKey: string | null = null;
@@ -1336,7 +1341,9 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       return;
     }
     try {
-      const stream = await captureCameraStream();
+      const stream = await captureCameraStream(
+        isMobileTouchDevice() ? cameraFacingMode : undefined,
+      );
       if (destroyed || !activeCallThreadKey) {
         stream.getTracks().forEach((t) => t.stop());
         return;
@@ -1353,6 +1360,66 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       emitStateChanged();
     } catch {
       options.onErrorNotice?.('Error: Could not access camera — check browser permissions');
+    }
+  };
+
+  const flipCamera = async () => {
+    if (!activeCallThreadKey || !localCameraStream || flippingCamera || destroyed) {
+      return;
+    }
+    flippingCamera = true;
+    const prevFacing = cameraFacingMode;
+    const nextFacing: 'user' | 'environment' = prevFacing === 'user' ? 'environment' : 'user';
+    const prevStream = localCameraStream;
+    try {
+      // On some phones, releasing the active camera track first allows switching lenses cleanly.
+      for (const t of prevStream.getTracks()) {
+        t.onended = null;
+        t.stop();
+      }
+      const nextStream = await captureCameraStream(nextFacing);
+      if (destroyed || !activeCallThreadKey) {
+        nextStream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      cameraFacingMode = nextFacing;
+      localCameraStream = nextStream;
+      const nextTrack = nextStream.getVideoTracks()[0];
+      if (nextTrack) {
+        nextTrack.onended = () => {
+          stopLocalCameraCapture(true);
+        };
+      }
+      let usedFastReplace = false;
+      for (const pipeline of peers.values()) {
+        if (pipeline.cameraSender && nextTrack) {
+          try {
+            await pipeline.cameraSender.replaceTrack(nextTrack);
+            usedFastReplace = true;
+          } catch {
+            // Fall back to full syncOutboundMediaTracks below.
+          }
+        }
+      }
+      if (!usedFastReplace) {
+        await syncOutboundMediaTracks();
+      }
+      syncTrackAndSinkStates();
+      emitStateChanged();
+    } catch {
+      cameraFacingMode = prevFacing;
+      try {
+        const restored = await captureCameraStream(prevFacing);
+        localCameraStream = restored;
+        await syncOutboundMediaTracks();
+      } catch {
+        localCameraStream = null;
+      }
+      syncTrackAndSinkStates();
+      emitStateChanged();
+      options.onErrorNotice?.('Could not switch camera — only one camera may be available on this device.');
+    } finally {
+      flippingCamera = false;
     }
   };
 
@@ -3315,7 +3382,24 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     avatarBox.className = opts.cameraStream ? 'vc-tile-video-box' : 'vc-tile-avatar-ring';
 
     if (opts.cameraStream) {
-      avatarBox.appendChild(createStageVideoEl(opts.cameraStream, opts.isSelf));
+      avatarBox.appendChild(
+        createStageVideoEl(opts.cameraStream, opts.isSelf && cameraFacingMode === 'user'),
+      );
+      if (opts.isSelf && localCameraStream) {
+        const flipTileBtn = document.createElement('button');
+        flipTileBtn.type = 'button';
+        flipTileBtn.className = 'vc-tile-flip-btn';
+        flipTileBtn.dataset.vcRole = 'tile-flip-camera';
+        flipTileBtn.title =
+          cameraFacingMode === 'user' ? 'Switch to Back Camera' : 'Switch to Front Camera';
+        flipTileBtn.setAttribute('aria-label', flipTileBtn.title);
+        flipTileBtn.appendChild(createFlipCameraIconSvg(13));
+        flipTileBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          void flipCamera();
+        });
+        avatarBox.appendChild(flipTileBtn);
+      }
       if (opts.stageKey && opts.onToggleExpand) {
         const expBtn = document.createElement('button');
         expBtn.type = 'button';
@@ -3571,6 +3655,8 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       inThisCall ? 'IN' : 'OUT',
       prefs.voiceInputMode,
       prefs.voicePushToTalkKey,
+      cameraFacingMode,
+      localCameraStream ? 'CAM1' : 'CAM0',
       expandedStageKey ?? '',
       sortedParticipants
         .map((p) => {
@@ -3732,7 +3818,10 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
         heroVideoWrap.className = 'vc-expanded-video-wrap';
         let heroVideo: HTMLVideoElement | null = null;
         if (hero.stream) {
-          heroVideo = createStageVideoEl(hero.stream, hero.isSelf && !hero.isScreen);
+          heroVideo = createStageVideoEl(
+            hero.stream,
+            hero.isSelf && !hero.isScreen && cameraFacingMode === 'user',
+          );
           heroVideo.classList.add('vc-expanded-video');
           heroVideoWrap.appendChild(heroVideo);
         } else {
@@ -3759,6 +3848,21 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
           pausedOverlay.appendChild(pausedTitle);
           pausedOverlay.appendChild(pausedSub);
           heroVideoWrap.appendChild(pausedOverlay);
+        }
+
+        if (hero.isSelf && !hero.isScreen && localCameraStream) {
+          const expFlipBtn = document.createElement('button');
+          expFlipBtn.type = 'button';
+          expFlipBtn.className = 'vc-stage-tool-btn';
+          expFlipBtn.title =
+            cameraFacingMode === 'user' ? 'Switch to Back Camera' : 'Switch to Front Camera';
+          expFlipBtn.setAttribute('aria-label', expFlipBtn.title);
+          expFlipBtn.appendChild(createFlipCameraIconSvg(15));
+          expFlipBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            void flipCamera();
+          });
+          expActions.appendChild(expFlipBtn);
         }
 
         if (hero.isSelf && hero.isScreen && localScreenStream) {
@@ -4025,12 +4129,57 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
         void toggleCamera();
       });
 
+      const flipCamBtn = document.createElement('button');
+      flipCamBtn.type = 'button';
+      flipCamBtn.className = 'vc-ctrl-btn';
+      flipCamBtn.dataset.vcRole = 'flip-camera';
+      flipCamBtn.title =
+        cameraFacingMode === 'user' ? 'Flip to Back Camera' : 'Flip to Front Camera';
+      flipCamBtn.setAttribute('aria-label', flipCamBtn.title);
+      flipCamBtn.hidden = !localCameraStream;
+      flipCamBtn.appendChild(createFlipCameraIconSvg(17));
+      flipCamBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void flipCamera();
+      });
+
       const screenBtn = document.createElement('button');
       screenBtn.type = 'button';
       screenBtn.dataset.vcRole = 'screen';
       syncControlBtn(screenBtn, 'screen', Boolean(localScreenStream));
       screenBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        if (isMobileTouchDevice()) {
+          if (localScreenStream) {
+            stopLocalScreenCapture(true);
+            return;
+          }
+          if (
+            isIosBrowser() &&
+            (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function')
+          ) {
+            options.onErrorNotice?.(
+              'iPhone Safari only supports watching streams — Apple blocks web screen broadcasting on iOS.',
+            );
+            return;
+          }
+          // Mobile shares full screen directly (no desktop window/tab chooser).
+          void startScreenShareWithOptions({
+            resolution: '1080p',
+            fps: 30,
+            shareAudio: true,
+            surface: 'monitor',
+          }).then((res) => {
+            if (!res.ok && !res.cancelled) {
+              options.onErrorNotice?.(
+                res.blocked
+                  ? 'Screen broadcasting is not supported in this mobile browser (watching streams still works).'
+                  : res.error || 'Could not start full-screen share.',
+              );
+            }
+          });
+          return;
+        }
         openScreenSharePopover(screenBtn);
       });
 
@@ -4049,6 +4198,9 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       controls.appendChild(muteBtn);
       controls.appendChild(deafBtn);
       controls.appendChild(cameraBtn);
+      if (localCameraStream) {
+        controls.appendChild(flipCamBtn);
+      }
       controls.appendChild(screenBtn);
       controls.appendChild(leaveBtn);
     } else {
