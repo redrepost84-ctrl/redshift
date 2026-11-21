@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.17';
+export const CURRENT_REDSHIFT_VERSION = '0.1.18';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,23 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.18',
+    date: 'November 20, 2026',
+    kicker: 'CLICKABLE PROFILE AVATARS (DESKTOP & MOBILE)',
+    headline: 'Tap or Click Any Message Avatar or DM Header PFP to Open Their Full Profile',
+    lead:
+      'Clicking or tapping a user’s profile picture or name on any DM or group chat message, reply quote, or DM header now opens their full profile page instantly on both desktop and mobile.',
+    sections: [
+      {
+        heading: 'What’s New',
+        items: [
+          'Clickable DM & Group Message PFPs — Tap or click any user’s avatar or display name on a message (or reply header) to inspect their full profile page (or your own full profile when tapping yourself).',
+          'Clickable DM Header PFP — Tap or click the profile picture or name in any 1-on-1 DM top bar to jump straight into their full profile.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.17',
     date: 'November 20, 2026',

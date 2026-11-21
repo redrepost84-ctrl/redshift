@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.18',
+      published_at: '2026-11-21T04:10:00Z',
+      body: 'Desktop & Mobile: Clicking or tapping any user’s profile picture or name on DM/group messages, reply quotes, or the DM header now opens their full profile page.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.18`,
+    },
+    {
       tag_name: 'v0.1.17',
       published_at: '2026-11-21T03:58:00Z',
       body: 'Mobile polish: added a universal red Send button in the chat box whenever any text, audio, video, image, file, or embed is inputted; optimized iPhone & Android keyboard sizing and viewport lift; and rebuilt mobile User Settings and Profile modals into full-width un-smooshed touch layouts.',

@@ -2585,6 +2585,56 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     }
   };
 
+  const resolvePublicProfileForUsername = (
+    username: string,
+    fallback?: { displayName?: string; avatarPreset?: number | null; avatarDataUrl?: string },
+  ): PublicProfile | null => {
+    const snap = state.snapshot;
+    const key = username.trim().toLowerCase();
+    if (!snap || !key) {
+      return null;
+    }
+    if (snap.user.username.toLowerCase() === key) {
+      return {
+        username: snap.user.username,
+        displayName: snap.user.displayName,
+        bio: snap.user.bio,
+        avatarPreset: snap.user.avatarPreset,
+        avatarDataUrl: snap.user.avatarDataUrl,
+        bannerColor: snap.user.bannerColor,
+        bannerDataUrl: snap.user.bannerDataUrl,
+        createdAt: snap.user.createdAt,
+        status: snap.user.status,
+        customStatus: snap.user.customStatus ?? null,
+      };
+    }
+    const direct =
+      snap.friends.find((u) => u.username.toLowerCase() === key) ??
+      snap.dmPeers?.find((u) => u.username.toLowerCase() === key) ??
+      snap.incomingRequests.find((r) => r.user.username.toLowerCase() === key)?.user ??
+      snap.outgoingRequests.find((r) => r.user.username.toLowerCase() === key)?.user ??
+      snap.blockedUsers?.find((u) => u.username.toLowerCase() === key);
+    if (direct) {
+      return direct;
+    }
+    for (const grp of snap.groups ?? []) {
+      const member = grp.members.find((m) => m.username.toLowerCase() === key);
+      if (member) {
+        return member;
+      }
+    }
+    return {
+      username,
+      displayName: fallback?.displayName?.trim() || username,
+      bio: '',
+      avatarPreset: fallback?.avatarPreset ?? null,
+      avatarDataUrl: fallback?.avatarDataUrl,
+      createdAt: Date.now(),
+      status: 'offline',
+      customStatus: null,
+    };
+  };
+
   const openProfileModalForUser = (user: PublicProfile) => {
     if (!state.snapshot) {
       return;
@@ -3470,6 +3520,33 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     const headerUsername = document.createElement('span');
     headerUsername.className = 'dm-header-username';
     dmHeader.appendChild(headerUsername);
+
+    if (!isGroup && initialTarget.kind === 'dm') {
+      const openDmHeaderPeerProfile = (e: Event) => {
+        e.stopPropagation();
+        const latest =
+          resolvePublicProfileForUsername(peerKey, {
+            displayName: initialTarget.friend.displayName,
+            avatarPreset: initialTarget.friend.avatarPreset,
+            avatarDataUrl: initialTarget.friend.avatarDataUrl,
+          }) ?? initialTarget.friend;
+        openProfileModalForUser(latest);
+      };
+      for (const triggerEl of [headerAvatarWrap, headerName, headerUsername]) {
+        triggerEl.classList.add('dm-header-profile-trigger');
+        triggerEl.setAttribute('role', 'button');
+        triggerEl.tabIndex = 0;
+        triggerEl.title = `View ${initialTarget.friend.displayName}'s profile`;
+        triggerEl.setAttribute('aria-label', `View ${initialTarget.friend.displayName}'s profile`);
+        triggerEl.addEventListener('click', openDmHeaderPeerProfile);
+        triggerEl.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openDmHeaderPeerProfile(e);
+          }
+        });
+      }
+    }
 
     const dmBodySplit = document.createElement('div');
     dmBodySplit.className = 'dm-body-split';
@@ -4512,6 +4589,12 @@ function renderWorkspaceScreen(root: HTMLElement): void {
           },
           onJumpToMessage: jumpToMessageById,
           onOpenPinnedMessages: openPinnedPopoverFromHeader,
+          onOpenProfile: (username, fallback) => {
+            const profile = resolvePublicProfileForUsername(username, fallback);
+            if (profile) {
+              openProfileModalForUser(profile);
+            }
+          },
           isCallJoined: isJoinedToThisCall,
           onJoinCall: isJoinedToThisCall
             ? undefined

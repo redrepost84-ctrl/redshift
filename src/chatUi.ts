@@ -784,6 +784,10 @@ export interface CreateMessageOptions {
   onForward?: (msg: ChatMessage) => void;
   onJumpToMessage?: (messageId: string) => void;
   onOpenPinnedMessages?: () => void;
+  onOpenProfile?: (
+    username: string,
+    fallback?: { displayName?: string; avatarPreset?: number | null; avatarDataUrl?: string },
+  ) => void;
   onJoinCall?: (msg: ChatMessage) => void;
   isCallJoined?: boolean;
   onStartEdit: (msg: ChatMessage) => void;
@@ -1890,6 +1894,7 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
     onReply,
     onForward,
     onJumpToMessage,
+    onOpenProfile,
     onStartEdit,
     onCancelEdit,
     onSaveEdit,
@@ -1961,6 +1966,33 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
     row.classList.add('chat-message--has-reply');
   }
 
+  const bindProfileTrigger = (
+    el: HTMLElement,
+    username: string,
+    displayName: string,
+    avatarPreset: number | null,
+    avatarDataUrl?: string,
+  ) => {
+    if (!onOpenProfile || !username) {
+      return;
+    }
+    el.setAttribute('role', 'button');
+    el.tabIndex = 0;
+    el.title = `View ${displayName}'s profile`;
+    el.setAttribute('aria-label', `View ${displayName}'s profile`);
+    const trigger = (e: Event) => {
+      e.stopPropagation();
+      onOpenProfile(username, { displayName, avatarPreset, avatarDataUrl });
+    };
+    el.addEventListener('click', trigger);
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        trigger(e);
+      }
+    });
+  };
+
   if (msg.replyTo) {
     const replyRef = msg.replyTo;
     const replyContext = document.createElement('div');
@@ -1973,21 +2005,39 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
 
     if (!replyRef.missing) {
       const miniAvatar = document.createElement('img');
-      miniAvatar.className = 'msg-reply-avatar';
+      miniAvatar.className = onOpenProfile
+        ? 'msg-reply-avatar msg-reply-avatar--clickable'
+        : 'msg-reply-avatar';
       miniAvatar.src = resolveAvatar({
         avatarPreset: replyRef.authorAvatarPreset,
         avatarDataUrl: replyRef.authorAvatarDataUrl,
       });
       miniAvatar.alt = `${replyRef.authorName} avatar`;
+      bindProfileTrigger(
+        miniAvatar,
+        replyRef.authorUsername,
+        replyRef.authorName,
+        replyRef.authorAvatarPreset,
+        replyRef.authorAvatarDataUrl,
+      );
       replyContext.appendChild(miniAvatar);
     }
 
     const replyAuthor = document.createElement('span');
-    replyAuthor.className = 'msg-reply-author';
+    replyAuthor.className = onOpenProfile
+      ? 'msg-reply-author msg-reply-author--clickable'
+      : 'msg-reply-author';
     if (replyRef.authorUsername.toLowerCase() === selfUsernameLower) {
       replyAuthor.classList.add('msg-reply-author--self');
     }
     replyAuthor.textContent = `@${replyRef.authorName}`;
+    bindProfileTrigger(
+      replyAuthor,
+      replyRef.authorUsername,
+      replyRef.authorName,
+      replyRef.authorAvatarPreset,
+      replyRef.authorAvatarDataUrl,
+    );
     replyContext.appendChild(replyAuthor);
 
     const snippetBtn = document.createElement('button');
@@ -2075,12 +2125,21 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
     mainLine.appendChild(gutter);
   } else {
     const avatar = document.createElement('img');
-    avatar.className = 'chat-message-avatar';
+    avatar.className = onOpenProfile
+      ? 'chat-message-avatar chat-message-avatar--clickable'
+      : 'chat-message-avatar';
     avatar.src = resolveAvatar({
       avatarPreset: msg.authorAvatarPreset,
       avatarDataUrl: msg.authorAvatarDataUrl,
     });
     avatar.alt = `${msg.authorName} profile picture`;
+    bindProfileTrigger(
+      avatar,
+      msg.authorUsername,
+      msg.authorName,
+      msg.authorAvatarPreset,
+      msg.authorAvatarDataUrl,
+    );
     mainLine.appendChild(avatar);
   }
 
@@ -2092,8 +2151,17 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
     header.className = 'chat-message-header';
 
     const author = document.createElement('span');
-    author.className = 'chat-message-author';
+    author.className = onOpenProfile
+      ? 'chat-message-author chat-message-author--clickable'
+      : 'chat-message-author';
     author.textContent = msg.authorName;
+    bindProfileTrigger(
+      author,
+      msg.authorUsername,
+      msg.authorName,
+      msg.authorAvatarPreset,
+      msg.authorAvatarDataUrl,
+    );
     header.appendChild(author);
 
     const time = document.createElement('time');
@@ -3346,7 +3414,7 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
         }
         const t = ev.touches[0];
         const el = ev.target as HTMLElement | null;
-        if (el?.closest('button, a, input, textarea, audio, video')) {
+        if (el?.closest('button, [role="button"], a, input, textarea, audio, video')) {
           return;
         }
         touchStartX = t.clientX;

@@ -3483,6 +3483,50 @@ body {
   font-size: 0.82rem;
 }
 
+.dm-header-profile-trigger {
+  cursor: pointer;
+  transition: opacity 120ms ease, transform 120ms ease, filter 120ms ease;
+}
+
+.dm-header-avatar-wrap.dm-header-profile-trigger:hover {
+  filter: brightness(1.1);
+}
+
+.dm-header-avatar-wrap.dm-header-profile-trigger:active {
+  transform: scale(0.95);
+}
+
+.dm-header-name.dm-header-profile-trigger:hover,
+.dm-header-username.dm-header-profile-trigger:hover {
+  text-decoration: underline;
+}
+
+.chat-message-avatar--clickable,
+.msg-reply-avatar--clickable {
+  cursor: pointer;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.chat-message-avatar--clickable:hover,
+.msg-reply-avatar--clickable:hover {
+  filter: brightness(1.12);
+}
+
+.chat-message-avatar--clickable:active,
+.msg-reply-avatar--clickable:active {
+  transform: scale(0.94);
+}
+
+.chat-message-author--clickable,
+.msg-reply-author--clickable {
+  cursor: pointer;
+}
+
+.chat-message-author--clickable:hover,
+.msg-reply-author--clickable:hover {
+  text-decoration: underline;
+}
+
 .dm-header-profile-toggle {
   margin-left: auto;
   width: 32px;
