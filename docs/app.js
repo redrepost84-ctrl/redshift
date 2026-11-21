@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.19',
+      published_at: '2026-11-21T04:40:00Z',
+      body: 'Seamless PC ↔ Mobile voice call transfer (joining a call on another device automatically disconnects the previous device cleanly and reconnects WebRTC), plus removed the duplicate stop streaming button from the VC controls bar.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.19`,
+    },
+    {
       tag_name: 'v0.1.18',
       published_at: '2026-11-21T04:10:00Z',
       body: 'Desktop & Mobile: Clicking or tapping any user’s profile picture or name on DM/group messages, reply quotes, or the DM header now opens their full profile page.',

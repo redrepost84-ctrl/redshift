@@ -1,11 +1,11 @@
 {
-  "version": "0.1.18",
-  "releasedAt": "2026-11-21T04:14:15.225Z",
-  "changelog": "Desktop & Mobile: Clicking or tapping any user's profile picture or name on DM/group messages, reply quotes, or the DM header now opens their full profile page.",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.18/Redshift-patch.asar",
-  "sha256": "b05ef1d462f65a8d613978dd7abc53c50b4c4f063e6158ea62f58d72f631b892",
-  "size": 6348583,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.18/RedshiftSetup.exe",
+  "version": "0.1.19",
+  "releasedAt": "2026-11-21T04:54:18.465Z",
+  "changelog": "Seamless PC <-> Mobile call transfer (joining a call on another device automatically disconnects the previous device cleanly and reconnects WebRTC) + removed duplicate stop streaming button from the VC control bar.",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.19/Redshift-patch.asar",
+  "sha256": "8a84e585ca2e5dbac38ce50df954e4ca185798de275c870a44515ac2f5faf4bb",
+  "size": 6355683,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.19/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

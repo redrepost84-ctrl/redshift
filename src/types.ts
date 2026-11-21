@@ -375,7 +375,14 @@ export interface VcParticipantState {
   screenPaused?: boolean;
   cameraStreamId?: string;
   screenStreamId?: string;
+  connectionId?: string;
   joinedAt: number;
+}
+
+export interface VcTransferredEventPayload {
+  threadKey: string;
+  newThreadKey?: string;
+  reason?: string;
 }
 
 export interface VcStateEventPayload {

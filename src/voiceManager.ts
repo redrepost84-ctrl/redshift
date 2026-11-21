@@ -10,7 +10,7 @@ import { getDesktopBridge } from './desktopBridge';
 import { resolveGroupAvatar } from './groupDmModals';
 import { isModalConfirmShortcut, isTopmostModal } from './modalShortcuts';
 import { isThreadMuted } from './muteUtils';
-import { dispatchRedshiftNotification, isAppWindowFocused } from './notifications';
+import { dispatchRedshiftNotification, isAppWindowFocused, showInAppToast } from './notifications';
 import {
   getUserPreferences,
   getVoiceUserScreenVolume,
@@ -27,6 +27,7 @@ import type {
   VcSignalEventPayload,
   VcSpeakingEventPayload,
   VcStateEventPayload,
+  VcTransferredEventPayload,
 } from './types';
 import {
   applyAudioOutputDevice,
@@ -104,6 +105,7 @@ export interface VoiceManagerHandle {
   handleVcIncomingClear: (threadKey: string) => void;
   handleVcSignal: (payload: VcSignalEventPayload) => void;
   handleVcSpeaking: (payload: VcSpeakingEventPayload) => void;
+  handleVcTransferred: (payload: VcTransferredEventPayload) => void;
   destroy: () => void;
 }
 
@@ -133,6 +135,7 @@ interface PeerAudioPipeline {
   remoteScreenStream: MediaStream | null;
   remoteCameraStreamId?: string;
   remoteScreenStreamId?: string;
+  remoteConnectionId?: string;
   micSender: RTCRtpSender | null;
   cameraSender: RTCRtpSender | null;
   screenVideoSender: RTCRtpSender | null;
@@ -1125,6 +1128,18 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       } else {
         const pState = call.participants.find((p) => p.user.username.toLowerCase() === peerKey);
         if (pState) {
+          if (
+            pState.connectionId &&
+            pipeline.remoteConnectionId &&
+            pipeline.remoteConnectionId !== pState.connectionId
+          ) {
+            // Peer switched devices (e.g. PC <-> Mobile) in the same call: reset WebRTC cleanly.
+            disposePeerPipeline(peerKey, pipeline);
+            continue;
+          }
+          if (pState.connectionId && !pipeline.remoteConnectionId) {
+            pipeline.remoteConnectionId = pState.connectionId;
+          }
           if (pState.cameraStreamId) {
             pipeline.remoteCameraStreamId = pState.cameraStreamId;
           } else if (pState.cameraOn === false) {
@@ -1151,6 +1166,9 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       const pipeline = createPeerConnection(call.threadKey, peerKey);
       const pState = call.participants.find((p) => p.user.username.toLowerCase() === peerKey);
       if (pState) {
+        if (pState.connectionId) {
+          pipeline.remoteConnectionId = pState.connectionId;
+        }
         if (pState.cameraStreamId) {
           pipeline.remoteCameraStreamId = pState.cameraStreamId;
         } else if (pState.cameraOn === false) {
@@ -3341,6 +3359,42 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     emitStateChanged();
   };
 
+  const handleVcTransferred = (payload: VcTransferredEventPayload) => {
+    const transferredThread = activeCallThreadKey;
+    if (!transferredThread) {
+      return;
+    }
+    if (payload.threadKey && payload.threadKey !== transferredThread) {
+      return;
+    }
+    // Tear down THIS device's local call cleanly WITHOUT sending vc:leave
+    // so the newly joined device (PC <-> Mobile) remains connected seamlessly.
+    watchedStreamKeys.clear();
+    knownPeersByCall.delete(transferredThread);
+    closeActivePopover();
+    expandedStageKey = null;
+    activeCallThreadKey = null;
+    lastActiveSpeakerKey = null;
+    lastSentVoiceStateSig = '';
+    stopCallStatsPolling();
+    stopVadPolling();
+    stopLocalCameraCapture(false);
+    stopLocalScreenCapture(false, false);
+    stopLocalMicCapture();
+    closeAllPeers();
+    playVcLeaveSound();
+    syncRingAudio();
+    emitStateChanged();
+    if (!destroyed) {
+      showInAppToast({
+        title: 'Call Moved to Another Device',
+        body: payload.reason || 'Disconnected here because you joined on another device.',
+        badge: 'CALL',
+        durationMs: 4500,
+      });
+    }
+  };
+
   const createStageVideoEl = (stream: MediaStream, mirror = false): HTMLVideoElement => {
     const vid = document.createElement('video');
     vid.className = mirror ? 'vc-stage-video vc-stage-video--mirrored' : 'vc-stage-video';
@@ -3650,13 +3704,21 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       }
     };
 
+    const selfOnOtherDevice = Boolean(
+      !inThisCall &&
+        selfKey &&
+        sortedParticipants.some((p) => p.user.username.toLowerCase() === selfKey),
+    );
+
     const layoutSig = [
       threadKey,
       inThisCall ? 'IN' : 'OUT',
+      selfOnOtherDevice ? 'OTH1' : 'OTH0',
       prefs.voiceInputMode,
       prefs.voicePushToTalkKey,
       cameraFacingMode,
       localCameraStream ? 'CAM1' : 'CAM0',
+      localScreenStream ? 'SCR1' : 'SCR0',
       expandedStageKey ?? '',
       sortedParticipants
         .map((p) => {
@@ -3710,11 +3772,11 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
           'camera',
           Boolean(localCameraStream),
         );
-        syncControlBtn(
-          host.querySelector<HTMLButtonElement>('[data-vc-role="screen"]'),
-          'screen',
-          Boolean(localScreenStream),
-        );
+        const fastScreenBtn = host.querySelector<HTMLButtonElement>('[data-vc-role="screen"]');
+        if (fastScreenBtn) {
+          fastScreenBtn.hidden = Boolean(localScreenStream);
+          syncControlBtn(fastScreenBtn, 'screen', Boolean(localScreenStream));
+        }
         syncLeaveOrEndStreamBtn(
           host.querySelector<HTMLButtonElement>('[data-vc-role="leave"]'),
           Boolean(localScreenStream),
@@ -4146,6 +4208,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       const screenBtn = document.createElement('button');
       screenBtn.type = 'button';
       screenBtn.dataset.vcRole = 'screen';
+      screenBtn.hidden = Boolean(localScreenStream);
       syncControlBtn(screenBtn, 'screen', Boolean(localScreenStream));
       screenBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -4209,7 +4272,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       joinBtn.className = 'vc-ctrl-join-btn';
       joinBtn.appendChild(createPhoneCallIconSvg(15));
       const label = document.createElement('span');
-      label.textContent = 'Join Voice';
+      label.textContent = selfOnOtherDevice ? 'Switch to This Device' : 'Join Voice';
       joinBtn.appendChild(label);
       joinBtn.addEventListener('click', () => {
         const target: ThreadTarget =
@@ -4917,6 +4980,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       handleVcSignal(p);
     },
     handleVcSpeaking,
+    handleVcTransferred,
     destroy: () => {
       destroyed = true;
       closeActivePopover();

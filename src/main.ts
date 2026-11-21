@@ -6661,6 +6661,9 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     onVcSpeaking: (payload) => {
       voiceManager.handleVcSpeaking(payload);
     },
+    onVcTransferred: (payload) => {
+      voiceManager.handleVcTransferred(payload);
+    },
     onVcError: (errMsg) => {
       activeDmErrorReporter?.(errMsg);
     },

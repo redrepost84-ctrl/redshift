@@ -27,6 +27,7 @@ import type {
   VcSignalEventPayload,
   VcSpeakingEventPayload,
   VcStateEventPayload,
+  VcTransferredEventPayload,
   VoiceNoteMeta,
 } from './types';
 
@@ -1853,6 +1854,7 @@ export function connectSocialSocket(handlers: {
   onVcIncomingClear?: (threadKey: string) => void;
   onVcSignal?: (payload: VcSignalEventPayload) => void;
   onVcSpeaking?: (payload: VcSpeakingEventPayload) => void;
+  onVcTransferred?: (payload: VcTransferredEventPayload) => void;
   onVcError?: (error: string) => void;
 }): SocialSocketHandle {
   let closedByCaller = false;
@@ -2015,6 +2017,12 @@ export function connectSocialSocket(handlers: {
             threadKey: msg.threadKey,
             username: msg.username,
             speaking: Boolean(msg.speaking),
+          });
+        } else if (msg.type === 'vc:transferred' && typeof msg.threadKey === 'string') {
+          handlers.onVcTransferred?.({
+            threadKey: msg.threadKey,
+            newThreadKey: typeof msg.newThreadKey === 'string' ? msg.newThreadKey : undefined,
+            reason: typeof msg.reason === 'string' ? msg.reason : undefined,
           });
         } else if (msg.type === 'vc:error' && typeof msg.error === 'string') {
           handlers.onVcError?.(msg.error);

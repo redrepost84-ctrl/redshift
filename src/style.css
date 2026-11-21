@@ -7589,6 +7589,10 @@ body {
   transition: background-color 120ms ease, transform 100ms ease, border-color 120ms ease;
 }
 
+.vc-ctrl-btn[hidden] {
+  display: none !important;
+}
+
 .vc-ctrl-btn:hover {
   background: #272a36;
   border-color: rgba(255, 255, 255, 0.25);
@@ -12979,6 +12983,12 @@ body {
   .vc-ctrl-btn {
     width: 44px;
     height: 44px;
+  }
+
+  .vc-ctrl-btn--end-stream {
+    width: auto;
+    height: 44px;
+    padding: 0 16px;
   }
 
   .vc-screen-thumb-box {

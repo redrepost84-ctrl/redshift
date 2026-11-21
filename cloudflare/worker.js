@@ -849,6 +849,23 @@ export class RedshiftHub extends DurableObject {
     }
   }
 
+  sendWsEventToSocket(ws, payloadObj) {
+    if (!ws) return;
+    try {
+      ws.send(JSON.stringify(payloadObj));
+    } catch {}
+  }
+
+  findUserSocketById(username, socketId) {
+    if (!socketId) return null;
+    for (const ws of this.getUserSockets(username)) {
+      if (ws.deserializeAttachment()?.socketId === socketId) {
+        return ws;
+      }
+    }
+    return null;
+  }
+
   pushSnapshotToUser(username) {
     const key = username.toLowerCase();
     const sockets = this.getUserSockets(key);
@@ -2010,6 +2027,7 @@ export class RedshiftHub extends DurableObject {
         screenPaused: Boolean(entry.screenSharing && entry.screenPaused),
         cameraStreamId: entry.cameraStreamId || undefined,
         screenStreamId: entry.screenStreamId || undefined,
+        connectionId: entry.connectionId || undefined,
         joinedAt: entry.joinedAt,
       });
     }
@@ -2116,6 +2134,27 @@ export class RedshiftHub extends DurableObject {
         anyChanged = true;
         this.finalizeCallIfDone(call);
         this.broadcastVcState(call);
+      }
+    }
+    if (anyChanged) {
+      this.persistActiveVoiceCalls();
+    }
+  }
+
+  cleanupSocketFromVoiceCalls(username, socketId) {
+    if (!socketId) return;
+    const cleanKey = username.toLowerCase();
+    let anyChanged = false;
+    for (const call of Array.from(this.activeVoiceCalls.values())) {
+      const entry = call.participants.get(cleanKey);
+      if (entry && entry.socketId && entry.socketId === socketId) {
+        call.participants.delete(cleanKey);
+        if (cleanKey === call.startedBy || call.participants.size === 0) {
+          this.clearAllRingingInCall(call);
+        }
+        anyChanged = true;
+        this.broadcastVcState(call);
+        this.finalizeCallIfDone(call);
       }
     }
     if (anyChanged) {
@@ -2831,7 +2870,8 @@ export class RedshiftHub extends DurableObject {
     const [client, server] = Object.values(pair);
 
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ username: key, token });
+    const socketId = crypto.randomUUID();
+    server.serializeAttachment({ username: key, token, socketId });
     this.lastSeenByUser.set(key, Date.now());
 
     // Push fresh snapshot and active VC state immediately to this socket
@@ -2853,6 +2893,7 @@ export class RedshiftHub extends DurableObject {
     this.ensureLoaded();
     const att = ws.deserializeAttachment();
     const ownerKey = att?.username;
+    const ownerSocketId = att?.socketId || '';
     if (!ownerKey) return;
 
     this.lastSeenByUser.set(ownerKey, Date.now());
@@ -2907,6 +2948,29 @@ export class RedshiftHub extends DurableObject {
         return;
       }
 
+      // Enforce single active call per account across all devices (desktop <-> mobile):
+      // disconnect this user from any OTHER call and notify the previous device cleanly.
+      for (const otherCall of Array.from(this.activeVoiceCalls.values())) {
+        if (otherCall.threadKey === ctx.threadKey) continue;
+        const prevEntry = otherCall.participants.get(ownerKey);
+        if (!prevEntry) continue;
+        otherCall.participants.delete(ownerKey);
+        if (ownerKey === otherCall.startedBy || otherCall.participants.size === 0) {
+          this.clearAllRingingInCall(otherCall);
+        }
+        if (prevEntry.socketId && prevEntry.socketId !== ownerSocketId) {
+          const prevWs = this.findUserSocketById(ownerKey, prevEntry.socketId);
+          this.sendWsEventToSocket(prevWs, {
+            type: 'vc:transferred',
+            threadKey: otherCall.threadKey,
+            newThreadKey: ctx.threadKey,
+            reason: 'Call moved to another device',
+          });
+        }
+        this.broadcastVcState(otherCall);
+        this.finalizeCallIfDone(otherCall);
+      }
+
       let call = this.activeVoiceCalls.get(ctx.threadKey);
       const isNewCall = !call;
       const now = Date.now();
@@ -2949,11 +3013,30 @@ export class RedshiftHub extends DurableObject {
           screenPaused: Boolean(msg.screenSharing && msg.screenPaused),
           cameraStreamId: nextCameraStreamId || undefined,
           screenStreamId: nextScreenStreamId || undefined,
+          socketId: ownerSocketId,
+          connectionId: crypto.randomUUID(),
           joinedAt: now,
         });
       } else {
         const existing = call.participants.get(ownerKey);
         if (existing) {
+          if (existing.socketId && ownerSocketId && existing.socketId !== ownerSocketId) {
+            const prevWs = this.findUserSocketById(ownerKey, existing.socketId);
+            this.sendWsEventToSocket(prevWs, {
+              type: 'vc:transferred',
+              threadKey: call.threadKey,
+              newThreadKey: call.threadKey,
+              reason: 'Call moved to another device',
+            });
+            existing.socketId = ownerSocketId;
+            existing.connectionId = crypto.randomUUID();
+            existing.joinedAt = now;
+          } else if (!existing.socketId && ownerSocketId) {
+            existing.socketId = ownerSocketId;
+            if (!existing.connectionId) {
+              existing.connectionId = crypto.randomUUID();
+            }
+          }
           existing.muted = Boolean(msg.muted);
           existing.deafened = Boolean(msg.deafened);
           existing.cameraOn = Boolean(msg.cameraOn);
@@ -3051,6 +3134,12 @@ export class RedshiftHub extends DurableObject {
       const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';
       const call = threadKey ? this.activeVoiceCalls.get(threadKey) : undefined;
       if (call) {
+        const currentEntry = call.participants.get(ownerKey);
+        if (currentEntry?.socketId && ownerSocketId && currentEntry.socketId !== ownerSocketId) {
+          // Ignore stale leave from a previously transferred device so the new device stays in the call.
+          this.sendWsEventToSocket(ws, this.buildVcStatePayload(call, ownerKey));
+          return;
+        }
         const removed = call.participants.delete(ownerKey);
         const clearedRing = this.stopRingingUser(call, ownerKey);
         if (ownerKey === call.startedBy || call.participants.size === 0) {
@@ -3083,7 +3172,7 @@ export class RedshiftHub extends DurableObject {
       const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';
       const call = threadKey ? this.activeVoiceCalls.get(threadKey) : undefined;
       const entry = call?.participants.get(ownerKey);
-      if (call && entry) {
+      if (call && entry && (!entry.socketId || !ownerSocketId || entry.socketId === ownerSocketId)) {
         const nextMuted = Boolean(msg.muted);
         const nextDeafened = Boolean(msg.deafened);
         const nextCameraOn = Boolean(msg.cameraOn);
@@ -3123,7 +3212,8 @@ export class RedshiftHub extends DurableObject {
     if (msg.type === 'vc:speaking') {
       const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';
       const call = threadKey ? this.activeVoiceCalls.get(threadKey) : undefined;
-      if (call && call.participants.has(ownerKey)) {
+      const entry = call?.participants.get(ownerKey);
+      if (call && entry && (!entry.socketId || !ownerSocketId || entry.socketId === ownerSocketId)) {
         const payload = {
           type: 'vc:speaking',
           threadKey,
@@ -3143,21 +3233,32 @@ export class RedshiftHub extends DurableObject {
       const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';
       const toKey = typeof msg.toUsername === 'string' ? msg.toUsername.trim().toLowerCase() : '';
       const call = threadKey ? this.activeVoiceCalls.get(threadKey) : undefined;
+      const senderEntry = call?.participants.get(ownerKey);
+      const targetEntry = toKey ? call?.participants.get(toKey) : undefined;
       if (
         call &&
         toKey &&
         toKey !== ownerKey &&
-        call.participants.has(ownerKey) &&
-        call.participants.has(toKey) &&
+        senderEntry &&
+        targetEntry &&
+        (!senderEntry.socketId || !ownerSocketId || senderEntry.socketId === ownerSocketId) &&
         msg.signal &&
         typeof msg.signal === 'object'
       ) {
-        this.sendWsEventToUser(toKey, {
+        const sigPayload = {
           type: 'vc:signal',
           threadKey,
           fromUsername: ownerKey,
           signal: msg.signal,
-        });
+        };
+        const targetWs = targetEntry.socketId
+          ? this.findUserSocketById(toKey, targetEntry.socketId)
+          : null;
+        if (targetWs) {
+          this.sendWsEventToSocket(targetWs, sigPayload);
+        } else {
+          this.sendWsEventToUser(toKey, sigPayload);
+        }
       }
     }
   }
@@ -3166,6 +3267,7 @@ export class RedshiftHub extends DurableObject {
     this.ensureLoaded();
     const att = ws.deserializeAttachment();
     const ownerKey = att?.username;
+    const closingSocketId = att?.socketId || '';
     if (!ownerKey) return;
 
     const remaining = this.ctx
@@ -3184,6 +3286,9 @@ export class RedshiftHub extends DurableObject {
       }
       this.cleanupUserFromVoiceCalls(ownerKey);
       this.notifyRelatedPeers(ownerKey, false);
+    } else {
+      // Only disconnect calls owned by this specific closing device socket.
+      this.cleanupSocketFromVoiceCalls(ownerKey, closingSocketId);
     }
   }
 

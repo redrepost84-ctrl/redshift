@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.18';
+export const CURRENT_REDSHIFT_VERSION = '0.1.19';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,23 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.19',
+    date: 'November 20, 2026',
+    kicker: 'SEAMLESS CALL TRANSFER & CLEANER VC BAR',
+    headline: 'Switch Calls Automatically Between PC & Phone + Removed Duplicate Stop Streaming Button',
+    lead:
+      'Joining a voice call on mobile while already in a call on PC (or vice versa) now automatically disconnects your previous device and seamlessly reconnects audio & video on the new device — and the VC control bar now shows only one End Stream button while sharing your screen.',
+    sections: [
+      {
+        heading: 'Voice Call Improvements',
+        items: [
+          'Automatic PC ↔ Mobile Call Transfer — Joining the same or another call on a second device cleanly disconnects your previous device (no double audio or ghost participants) and re-establishes fresh WebRTC audio/video with everyone in the call.',
+          'Fixed Duplicate Stop Streaming Button — Hid the redundant Share Screen toggle in the VC bar while actively streaming so only a single clear End Stream button appears (with live quality & source switching still available from the stream pill).',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.18',
     date: 'November 20, 2026',

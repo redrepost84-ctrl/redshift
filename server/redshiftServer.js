@@ -253,6 +253,7 @@ const db = loadDb();
 /** Lowercase username -> active WebSockets */
 /** @type {Map<string, Set<WebSocket>>} */
 const onlineSockets = new Map();
+const socketMeta = new WeakMap();
 
 /** Lowercase username -> last authenticated HTTP/WS activity timestamp (ms) */
 /** @type {Map<string, number>} */
@@ -1223,6 +1224,7 @@ function buildVcStatePayload(call, viewerKey) {
       screenPaused: Boolean(entry.screenSharing && entry.screenPaused),
       cameraStreamId: entry.cameraStreamId || undefined,
       screenStreamId: entry.screenStreamId || undefined,
+      connectionId: entry.connectionId || undefined,
       joinedAt: entry.joinedAt,
     });
   }
@@ -1341,6 +1343,28 @@ function cleanupUserFromVoiceCalls(username) {
 }
 
 /**
+ * Removes a user from any voice call currently owned by a specific disconnecting socket
+ * without disturbing calls that have already been transferred to another device.
+ * @param {string} username
+ * @param {string} socketId
+ */
+function cleanupSocketFromVoiceCalls(username, socketId) {
+  if (!socketId) return;
+  const cleanKey = username.toLowerCase();
+  for (const call of Array.from(activeVoiceCalls.values())) {
+    const entry = call.participants.get(cleanKey);
+    if (entry && entry.socketId && entry.socketId === socketId) {
+      call.participants.delete(cleanKey);
+      if (cleanKey === call.startedBy || call.participants.size === 0) {
+        clearAllRingingInCall(call);
+      }
+      broadcastVcState(call);
+      finalizeCallIfDone(call);
+    }
+  }
+}
+
+/**
  * @param {string} username
  * @param {Record<string, unknown>} payloadObj
  */
@@ -1356,6 +1380,27 @@ function sendWsEventToUser(username, payloadObj) {
       ws.send(encoded);
     }
   }
+}
+
+function sendWsEventToSocket(ws, payloadObj) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  try {
+    ws.send(JSON.stringify(payloadObj));
+  } catch {}
+}
+
+function findUserSocketById(username, socketId) {
+  if (!socketId) return null;
+  const sockets = onlineSockets.get(username.toLowerCase());
+  if (!sockets) return null;
+  for (const ws of sockets) {
+    if (socketMeta.get(ws)?.socketId === socketId) {
+      return ws;
+    }
+  }
+  return null;
 }
 
 /**
@@ -6584,8 +6629,6 @@ export function attachRedshiftWebSocket(httpServer) {
       } catch {}
     });
   });
-  /** @type {WeakMap<WebSocket, { username: string; alive: boolean }>} */
-  const socketMeta = new WeakMap();
 
   const pingInterval = setInterval(() => {
     for (const client of wss.clients) {
@@ -6631,7 +6674,8 @@ export function attachRedshiftWebSocket(httpServer) {
 
   wss.on('connection', (ws, _req, username) => {
     const key = username.toLowerCase();
-    socketMeta.set(ws, { username: key, alive: true });
+    const socketId = crypto.randomUUID();
+    socketMeta.set(ws, { username: key, alive: true, socketId });
 
     let set = onlineSockets.get(key);
     const wasOffline = !set || set.size === 0;
@@ -6653,6 +6697,7 @@ export function attachRedshiftWebSocket(httpServer) {
         const msg = JSON.parse(String(rawData));
         const meta = socketMeta.get(ws);
         const ownerKey = meta?.username ?? key;
+        const ownerSocketId = meta?.socketId ?? socketId;
         if (meta) {
           meta.alive = true;
         }
@@ -6693,6 +6738,34 @@ export function attachRedshiftWebSocket(httpServer) {
               error: ctx.error ?? 'Error: Cannot start voice call',
             });
             return;
+          }
+
+          // Enforce single active call per account across all devices (desktop <-> mobile):
+          // if this user is currently in any OTHER call, disconnect them from that call first
+          // and tell the previous device to tear down its local call cleanly.
+          for (const otherCall of Array.from(activeVoiceCalls.values())) {
+            if (otherCall.threadKey === ctx.threadKey) {
+              continue;
+            }
+            const prevEntry = otherCall.participants.get(ownerKey);
+            if (!prevEntry) {
+              continue;
+            }
+            otherCall.participants.delete(ownerKey);
+            if (ownerKey === otherCall.startedBy || otherCall.participants.size === 0) {
+              clearAllRingingInCall(otherCall);
+            }
+            if (prevEntry.socketId && prevEntry.socketId !== ownerSocketId) {
+              const prevWs = findUserSocketById(ownerKey, prevEntry.socketId);
+              sendWsEventToSocket(prevWs, {
+                type: 'vc:transferred',
+                threadKey: otherCall.threadKey,
+                newThreadKey: ctx.threadKey,
+                reason: 'Call moved to another device',
+              });
+            }
+            broadcastVcState(otherCall);
+            finalizeCallIfDone(otherCall);
           }
 
           let call = activeVoiceCalls.get(ctx.threadKey);
@@ -6737,11 +6810,30 @@ export function attachRedshiftWebSocket(httpServer) {
               screenPaused: Boolean(msg.screenSharing && msg.screenPaused),
               cameraStreamId: nextCameraStreamId || undefined,
               screenStreamId: nextScreenStreamId || undefined,
+              socketId: ownerSocketId,
+              connectionId: crypto.randomUUID(),
               joinedAt: now,
             });
           } else {
             const existing = call.participants.get(ownerKey);
             if (existing) {
+              if (existing.socketId && ownerSocketId && existing.socketId !== ownerSocketId) {
+                const prevWs = findUserSocketById(ownerKey, existing.socketId);
+                sendWsEventToSocket(prevWs, {
+                  type: 'vc:transferred',
+                  threadKey: call.threadKey,
+                  newThreadKey: call.threadKey,
+                  reason: 'Call moved to another device',
+                });
+                existing.socketId = ownerSocketId;
+                existing.connectionId = crypto.randomUUID();
+                existing.joinedAt = now;
+              } else if (!existing.socketId && ownerSocketId) {
+                existing.socketId = ownerSocketId;
+                if (!existing.connectionId) {
+                  existing.connectionId = crypto.randomUUID();
+                }
+              }
               existing.muted = Boolean(msg.muted);
               existing.deafened = Boolean(msg.deafened);
               existing.cameraOn = Boolean(msg.cameraOn);
@@ -6833,6 +6925,12 @@ export function attachRedshiftWebSocket(httpServer) {
           const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';
           const call = threadKey ? activeVoiceCalls.get(threadKey) : undefined;
           if (call) {
+            const currentEntry = call.participants.get(ownerKey);
+            if (currentEntry?.socketId && ownerSocketId && currentEntry.socketId !== ownerSocketId) {
+              // Ignore stale leave frame from a previously transferred device so the new device stays connected.
+              sendWsEventToSocket(ws, buildVcStatePayload(call, ownerKey));
+              return;
+            }
             const removed = call.participants.delete(ownerKey);
             const clearedRing = stopRingingUser(call, ownerKey);
             if (ownerKey === call.startedBy || call.participants.size === 0) {
@@ -6860,7 +6958,7 @@ export function attachRedshiftWebSocket(httpServer) {
           const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';
           const call = threadKey ? activeVoiceCalls.get(threadKey) : undefined;
           const entry = call?.participants.get(ownerKey);
-          if (call && entry) {
+          if (call && entry && (!entry.socketId || !ownerSocketId || entry.socketId === ownerSocketId)) {
             const nextMuted = Boolean(msg.muted);
             const nextDeafened = Boolean(msg.deafened);
             const nextCameraOn = Boolean(msg.cameraOn);
@@ -6896,7 +6994,8 @@ export function attachRedshiftWebSocket(httpServer) {
         } else if (msg && msg.type === 'vc:speaking') {
           const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';
           const call = threadKey ? activeVoiceCalls.get(threadKey) : undefined;
-          if (call && call.participants.has(ownerKey)) {
+          const entry = call?.participants.get(ownerKey);
+          if (call && entry && (!entry.socketId || !ownerSocketId || entry.socketId === ownerSocketId)) {
             const payload = {
               type: 'vc:speaking',
               threadKey,
@@ -6913,21 +7012,32 @@ export function attachRedshiftWebSocket(httpServer) {
           const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';
           const toKey = typeof msg.toUsername === 'string' ? msg.toUsername.trim().toLowerCase() : '';
           const call = threadKey ? activeVoiceCalls.get(threadKey) : undefined;
+          const senderEntry = call?.participants.get(ownerKey);
+          const targetEntry = toKey ? call?.participants.get(toKey) : undefined;
           if (
             call &&
             toKey &&
             toKey !== ownerKey &&
-            call.participants.has(ownerKey) &&
-            call.participants.has(toKey) &&
+            senderEntry &&
+            targetEntry &&
+            (!senderEntry.socketId || !ownerSocketId || senderEntry.socketId === ownerSocketId) &&
             msg.signal &&
             typeof msg.signal === 'object'
           ) {
-            sendWsEventToUser(toKey, {
+            const sigPayload = {
               type: 'vc:signal',
               threadKey,
               fromUsername: ownerKey,
               signal: msg.signal,
-            });
+            };
+            const targetWs = targetEntry.socketId
+              ? findUserSocketById(toKey, targetEntry.socketId)
+              : null;
+            if (targetWs) {
+              sendWsEventToSocket(targetWs, sigPayload);
+            } else {
+              sendWsEventToUser(toKey, sigPayload);
+            }
           }
         }
       } catch {
@@ -6946,6 +7056,7 @@ export function attachRedshiftWebSocket(httpServer) {
     ws.on('close', () => {
       const meta = socketMeta.get(ws);
       const ownerKey = meta?.username ?? key;
+      const closingSocketId = meta?.socketId ?? socketId;
       const activeSet = onlineSockets.get(ownerKey);
       if (activeSet) {
         activeSet.delete(ws);
@@ -6963,6 +7074,9 @@ export function attachRedshiftWebSocket(httpServer) {
           }
           cleanupUserFromVoiceCalls(ownerKey);
           notifyRelatedPeers(ownerKey, false);
+        } else {
+          // Only remove calls owned specifically by this disconnecting device socket.
+          cleanupSocketFromVoiceCalls(ownerKey, closingSocketId);
         }
       }
     });
