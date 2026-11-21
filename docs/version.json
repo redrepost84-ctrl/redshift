@@ -1,11 +1,11 @@
 {
-  "version": "0.1.16",
-  "releasedAt": "2026-11-21T03:42:38.943Z",
-  "changelog": "Full Mobile App Support (iPhone & Android PWA): Discord-mobile bottom nav (Chats/Friends/You), full-screen chat with edge-swipe back & long-press menus, flippable front/back phone camera, direct full-screen mobile share, and real lock-screen Web Push notifications from Cloudflare.",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.16/Redshift-patch.asar",
-  "sha256": "7e31e9542b4b225163353d98c37396bd3c7bf816151bc6cac24f5a82f62c190b",
-  "size": 6334319,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.16/RedshiftSetup.exe",
+  "version": "0.1.17",
+  "releasedAt": "2026-11-21T04:05:32.268Z",
+  "changelog": "Mobile Composer, Send Button & Profile/Settings Overhaul: added universal red Send button whenever any text, audio, video, image, file, or embed is inputted; added keyboard-safe 16px anti-zoom textbox & visualViewport height sync; rebuilt mobile User Settings into a full-screen 2-pane menu/detail layout and un-smooshed mobile Profile modals.",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.17/Redshift-patch.asar",
+  "sha256": "58c31e4cbc0f6e6972cdad90ca48446aa5e3ab351fcf1aa6aaa2ec7b5b2c5b12",
+  "size": 6344086,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.17/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

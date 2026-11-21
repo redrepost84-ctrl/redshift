@@ -3,7 +3,7 @@
   "description": "Redshift Desktop Chat, Voice & Screen Share",
   "author": "Redshift",
   "private": true,
-  "version": "0.1.16",
+  "version": "0.1.17",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {

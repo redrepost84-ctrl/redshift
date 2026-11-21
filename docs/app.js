@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.17',
+      published_at: '2026-11-21T03:58:00Z',
+      body: 'Mobile polish: added a universal red Send button in the chat box whenever any text, audio, video, image, file, or embed is inputted; optimized iPhone & Android keyboard sizing and viewport lift; and rebuilt mobile User Settings and Profile modals into full-width un-smooshed touch layouts.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.17`,
+    },
+    {
       tag_name: 'v0.1.16',
       published_at: '2026-11-21T03:40:00Z',
       body: 'Full Mobile App Support (iPhone & Android PWA): Discord-mobile bottom nav (Chats/Friends/You), full-screen chat with edge-swipe back & long-press menus, flippable front/back phone camera, direct full-screen mobile share, and real lock-screen Web Push notifications from Cloudflare.',

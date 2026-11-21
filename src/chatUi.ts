@@ -91,6 +91,20 @@ export function createPlusIconSvg(size = 18): SVGSVGElement {
   return createSvg(['M12 5v14', 'M5 12h14'], '0 0 24 24', size);
 }
 
+export function createSendIconSvg(size = 17): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', String(size));
+  svg.setAttribute('height', String(size));
+  svg.setAttribute('fill', 'currentColor');
+  svg.setAttribute('aria-hidden', 'true');
+  const p = document.createElementNS(ns, 'path');
+  p.setAttribute('d', 'M2.01 21L23 12 2.01 3 2 10l15 2-15 2z');
+  svg.appendChild(p);
+  return svg;
+}
+
 export function createEmojiIconSvg(size = 18): SVGSVGElement {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');

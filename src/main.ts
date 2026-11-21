@@ -69,6 +69,7 @@ import {
   createNewMessagesDivider,
   createPinIconSvg,
   createPlusIconSvg,
+  createSendIconSvg,
   createSettingsGearSvg,
   createVideoIconSvg,
   insertTextAtCursor,
@@ -4794,11 +4795,13 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     composerBox.appendChild(attachmentsStrip);
 
     let pendingAttachments: StagedAttachmentItem[] = [];
+    let syncComposerSendState: () => void = () => {};
 
     const syncAttachmentsStrip = () => {
       attachmentsStrip.replaceChildren();
       if (pendingAttachments.length === 0) {
         attachmentsStrip.hidden = true;
+        syncComposerSendState();
         return;
       }
       attachmentsStrip.hidden = false;
@@ -4912,6 +4915,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
 
         attachmentsStrip.appendChild(card);
       });
+      syncComposerSendState();
     };
 
     const composerRow = document.createElement('div');
@@ -4971,7 +4975,9 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         showComposerError(`Error: Maximum ${MAX_ATTACHMENTS} files allowed per message`);
       }
       syncAttachmentsStrip();
-      chatInput.focus();
+      if (window.innerWidth > 768) {
+        chatInput.focus();
+      }
     };
 
     fileInput.addEventListener('change', () => {
@@ -4984,6 +4990,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     const chatInput = document.createElement('textarea');
     chatInput.className = 'chat-input';
     chatInput.rows = 1;
+    chatInput.enterKeyHint = 'send';
     chatInput.placeholder = 'Send a message';
     chatInput.setAttribute('aria-label', 'Send a message');
 
@@ -5222,14 +5229,38 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       openComposerEmojiPicker();
     });
 
+    const sendBtn = document.createElement('button');
+    sendBtn.type = 'button';
+    sendBtn.className = 'composer-icon-btn composer-send-btn';
+    sendBtn.dataset.action = 'send-message';
+    sendBtn.title = 'Send message';
+    sendBtn.setAttribute('aria-label', 'Send message');
+    sendBtn.hidden = true;
+    sendBtn.appendChild(createSendIconSvg(17));
+    sendBtn.addEventListener('mousedown', (e) => {
+      // Keep keyboard focus smooth on mobile/desktop without blurring before send.
+      e.preventDefault();
+    });
+
     composerRow.appendChild(fileInput);
     composerRow.appendChild(attachBtn);
     composerRow.appendChild(chatInput);
     composerRow.appendChild(voiceNoteBtn);
     composerRow.appendChild(gifBtn);
     composerRow.appendChild(emojiBtn);
+    composerRow.appendChild(sendBtn);
     composerBox.appendChild(composerRow);
     composerBox.appendChild(voiceRecBar);
+
+    syncComposerSendState = () => {
+      const locked = Boolean(getDmWriteBlockReason());
+      const hasInput = chatInput.value.trim().length > 0 || pendingAttachments.length > 0;
+      const canSend = !locked && hasInput;
+      sendBtn.hidden = !hasInput;
+      sendBtn.disabled = !canSend;
+      composerBox.classList.toggle('composer-box--has-content', hasInput);
+      composerBox.classList.toggle('composer-box--has-attachments', pendingAttachments.length > 0);
+    };
 
     const MIN_COMPOSER_HEIGHT = 24;
     const MAX_COMPOSER_HEIGHT = 200;
@@ -5332,6 +5363,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         stopOutboundTyping();
         cancelActiveVoiceRecording();
       }
+      syncComposerSendState();
       activeVcBarSyncer?.();
     };
     syncComposerAccess();
@@ -5423,11 +5455,16 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       void dispatchTextOrMedia();
     };
 
+    sendBtn.addEventListener('click', () => {
+      sendMessage();
+    });
+
     const savedDraft = dmDraftByThread.get(cacheKey);
     if (savedDraft) {
       chatInput.value = savedDraft;
       requestAnimationFrame(() => resizeComposer());
     }
+    syncComposerSendState();
 
     chatInput.addEventListener('input', () => {
       replaceEmojiShortcodeBeforeCursor(chatInput);
@@ -5437,6 +5474,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         dmDraftByThread.delete(cacheKey);
       }
       showComposerError(null);
+      syncComposerSendState();
       resizeComposer();
       handleTypingActivity();
     });
@@ -6185,7 +6223,13 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         getSnapshot: () => state.snapshot!,
         resolveAvatar: resolveProfileAvatar,
         onSnapshotUpdated: (nextSnapshot) => applyLiveSnapshot(nextSnapshot),
-        onOpenEditProfile: () => drawerController.openEdit(),
+        onOpenEditProfile: () => {
+          if (window.innerWidth <= 768) {
+            triggerSelfProfileModal?.(true);
+          } else {
+            drawerController.openEdit();
+          }
+        },
         onSignOut: requestSignOutAction,
         onMicTestChange: (testing) => {
           voiceManager.setTestingMic(testing);
@@ -7150,8 +7194,30 @@ function render(): void {
   root.appendChild(shell);
 }
 
+function attachMobileViewportSync(): void {
+  const syncViewportHeight = () => {
+    if (window.innerWidth > 768) {
+      document.documentElement.style.removeProperty('--app-viewport-height');
+      return;
+    }
+    const vv = window.visualViewport;
+    const nextHeight = vv ? Math.round(vv.height) : window.innerHeight;
+    if (nextHeight > 160) {
+      document.documentElement.style.setProperty('--app-viewport-height', `${nextHeight}px`);
+    }
+    if (vv && vv.offsetTop > 0) {
+      window.scrollTo(0, 0);
+    }
+  };
+  syncViewportHeight();
+  window.addEventListener('resize', syncViewportHeight);
+  window.visualViewport?.addEventListener('resize', syncViewportHeight);
+  window.visualViewport?.addEventListener('scroll', syncViewportHeight);
+}
+
 async function bootstrapApp(): Promise<void> {
   attachGlobalEditableContextMenu();
+  attachMobileViewportSync();
   void registerRedshiftServiceWorker();
   const desktopBridge = getDesktopBridge();
   let githubRepo = 'redrepost84-ctrl/redshift';

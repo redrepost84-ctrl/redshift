@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.16';
+export const CURRENT_REDSHIFT_VERSION = '0.1.17';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,30 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.17',
+    date: 'November 20, 2026',
+    kicker: 'MOBILE COMPOSER, SEND BUTTON & PROFILE/SETTINGS POLISH',
+    headline: 'Mobile Chat Send Button for All Media & Text + Full-Screen Un-Smooshed Mobile Settings & Profiles',
+    lead:
+      'Optimized the chat textbox for iPhone & Android with an instant red Send button whenever any text, audio, video, photo, file, or embed is inputted, fixed keyboard viewport handling, and rebuilt mobile User Settings & Profile screens into spacious full-width touch layouts.',
+    sections: [
+      {
+        heading: 'Mobile Chat Composer & Send Button',
+        items: [
+          'Universal Send Button — Automatically appears the moment you enter text, links/embeds, emojis, images, videos, audio files, or any attachment so sending on iPhone & Android is effortless.',
+          'Keyboard-Safe Mobile Textbox — Fixed 16px anti-zoom sizing, added dynamic visualViewport keyboard height sync so the chat box stays pinned cleanly above the keyboard, horizontal attachment scrolling, and extra textbox room while typing.',
+        ],
+      },
+      {
+        heading: 'Mobile Profile & Settings Overhaul',
+        items: [
+          'Native 2-Pane Mobile Settings — Replaced the squished 3-column desktop grid on phones with a full-screen Settings category menu and full-width detail pages with a sticky Back/Close header.',
+          'Un-Smooshed Profile Modals — Full-width single-column Edit Profile & User Inspection sheets with 16px touch inputs, clean banner/avatar spacing, and fixed "Edit User Profile" launching properly from Mobile Settings.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.16',
     date: 'November 20, 2026',

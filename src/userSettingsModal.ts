@@ -7,6 +7,7 @@ import {
 } from './apiClient';
 import { createCloseIconSvg, playNotificationChime } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
+import { createMobileBackArrowSvg } from './mobileNav';
 import { isModalConfirmShortcut, isTopmostModal } from './modalShortcuts';
 import {
   ensureNotificationPermissionOnGesture,
@@ -107,7 +108,19 @@ function createToggleSwitch(options: {
 export function openUserSettingsOverlay(options: UserSettingsOverlayOptions): () => void {
   let closed = false;
   let activeSection: SettingsSection = options.initialSection ?? 'security';
+  let mobilePane: 'nav' | 'content' = options.initialSection ? 'content' : 'nav';
   let revealEmail = false;
+
+  const sectionLabels: Record<SettingsSection, string> = {
+    security: 'My Account & Security',
+    privacy: 'Privacy & Safety',
+    appearance: 'Appearance',
+    voice: 'Voice & Audio',
+    notifications: 'Notifications',
+    chat: 'Chat & Media',
+    blocked: 'Blocked Users',
+    desktop: 'Desktop & Updates',
+  };
 
   const backdrop = document.createElement('div');
   backdrop.className = 'settings-overlay';
@@ -117,6 +130,43 @@ export function openUserSettingsOverlay(options: UserSettingsOverlayOptions): ()
 
   const container = document.createElement('div');
   container.className = 'settings-shell';
+  container.dataset.mobilePane = mobilePane;
+
+  // Mobile-only top header bar (Discord Mobile 2-step Settings navigation)
+  const mobileHeader = document.createElement('header');
+  mobileHeader.className = 'settings-mobile-header';
+
+  const mobileBackBtn = document.createElement('button');
+  mobileBackBtn.type = 'button';
+  mobileBackBtn.className = 'settings-mobile-back-btn';
+  mobileBackBtn.setAttribute('aria-label', 'Back to Settings menu');
+  mobileBackBtn.appendChild(createMobileBackArrowSvg(20));
+
+  const mobileHeaderTitle = document.createElement('div');
+  mobileHeaderTitle.className = 'settings-mobile-title';
+
+  const mobileCloseBtn = document.createElement('button');
+  mobileCloseBtn.type = 'button';
+  mobileCloseBtn.className = 'settings-mobile-close-btn';
+  mobileCloseBtn.setAttribute('aria-label', 'Close settings');
+  mobileCloseBtn.appendChild(createCloseIconSvg(18));
+
+  mobileHeader.appendChild(mobileBackBtn);
+  mobileHeader.appendChild(mobileHeaderTitle);
+  mobileHeader.appendChild(mobileCloseBtn);
+
+  const syncMobileHeader = () => {
+    container.dataset.mobilePane = mobilePane;
+    mobileBackBtn.hidden = mobilePane !== 'content';
+    mobileHeaderTitle.textContent =
+      mobilePane === 'content' ? sectionLabels[activeSection] : 'Settings';
+  };
+  syncMobileHeader();
+
+  mobileBackBtn.addEventListener('click', () => {
+    mobilePane = 'nav';
+    syncMobileHeader();
+  });
 
   // Left navigation sidebar
   const navRail = document.createElement('nav');
@@ -153,6 +203,7 @@ export function openUserSettingsOverlay(options: UserSettingsOverlayOptions): ()
   closeCol.appendChild(escBtn);
   closeCol.appendChild(escLabel);
 
+  container.appendChild(mobileHeader);
   container.appendChild(navRail);
   container.appendChild(contentArea);
   container.appendChild(closeCol);
@@ -207,11 +258,22 @@ export function openUserSettingsOverlay(options: UserSettingsOverlayOptions): ()
         if (item.id === activeSection) {
           btn.classList.add('settings-nav-item--active');
         }
-        btn.textContent = item.label;
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'settings-nav-item-label';
+        labelSpan.textContent = item.label;
+        const chev = document.createElement('span');
+        chev.className = 'settings-nav-chevron';
+        chev.setAttribute('aria-hidden', 'true');
+        chev.textContent = '›';
+        btn.appendChild(labelSpan);
+        btn.appendChild(chev);
         btn.addEventListener('click', () => {
           activeSection = item.id;
+          mobilePane = 'content';
+          syncMobileHeader();
           renderNav();
           renderContent();
+          contentArea.scrollTop = 0;
         });
         navInner.appendChild(btn);
       }
@@ -2175,6 +2237,7 @@ export function openUserSettingsOverlay(options: UserSettingsOverlayOptions): ()
   };
 
   escBtn.addEventListener('click', close);
+  mobileCloseBtn.addEventListener('click', close);
   window.addEventListener('keydown', onKeyDown, true);
 
   renderNav();
