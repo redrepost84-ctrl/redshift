@@ -1183,6 +1183,36 @@ export function openSelfProfileModal(options: SelfProfileModalOptions): SelfProf
     }
     topRow.appendChild(avatarWrap);
 
+    const openCustomStatusEditor = () => {
+      closeStatusMenu();
+      let pendingSeq = 0;
+      openSetCustomStatusModal({
+        user: options.getSnapshot().user,
+        resolveAvatar: options.resolveAvatar,
+        initialPrompt: sessionPrompt,
+        onOptimisticCustomStatus: (nextCustom) => {
+          pendingSeq = beginOptimisticCustomStatusChange(nextCustom);
+          const snapNow = options.getSnapshot();
+          snapNow.user.customStatus = nextCustom;
+          if (!nextCustom) {
+            sessionPrompt = pickCasualStatusPrompt();
+          }
+          if (options.onOptimisticSelfPatch) {
+            options.onOptimisticSelfPatch({ customStatus: nextCustom });
+          } else {
+            options.onSyncDock();
+            renderModal();
+          }
+        },
+        onSnapshotUpdated: (snapshot) => {
+          if (!pendingSeq || settleOptimisticCustomStatusChange(pendingSeq, snapshot.user.customStatus ?? null)) {
+            options.onSnapshotUpdated(snapshot);
+            renderModal();
+          }
+        },
+      });
+    };
+
     if (!isEditing) {
       const bubbleHost = document.createElement('div');
       bubbleHost.className = 'dm-full-bubble-host';
@@ -1190,35 +1220,7 @@ export function openSelfProfileModal(options: SelfProfileModalOptions): SelfProf
         profile: user,
         interactiveSelf: true,
         placeholderPrompt: sessionPrompt,
-        onEdit: () => {
-          closeStatusMenu();
-          let pendingSeq = 0;
-          openSetCustomStatusModal({
-            user: options.getSnapshot().user,
-            resolveAvatar: options.resolveAvatar,
-            initialPrompt: sessionPrompt,
-            onOptimisticCustomStatus: (nextCustom) => {
-              pendingSeq = beginOptimisticCustomStatusChange(nextCustom);
-              const snapNow = options.getSnapshot();
-              snapNow.user.customStatus = nextCustom;
-              if (!nextCustom) {
-                sessionPrompt = pickCasualStatusPrompt();
-              }
-              if (options.onOptimisticSelfPatch) {
-                options.onOptimisticSelfPatch({ customStatus: nextCustom });
-              } else {
-                options.onSyncDock();
-                renderModal();
-              }
-            },
-            onSnapshotUpdated: (snapshot) => {
-              if (!pendingSeq || settleOptimisticCustomStatusChange(pendingSeq, snapshot.user.customStatus ?? null)) {
-                options.onSnapshotUpdated(snapshot);
-                renderModal();
-              }
-            },
-          });
-        },
+        onEdit: openCustomStatusEditor,
         onClear: async () => {
           closeStatusMenu();
           const mySeq = beginOptimisticCustomStatusChange(null);
@@ -1450,6 +1452,13 @@ export function openSelfProfileModal(options: SelfProfileModalOptions): SelfProf
       editBtn.appendChild(document.createTextNode('Edit Profile'));
       editBtn.addEventListener('click', beginEdit);
 
+      const customStatusActionBtn = document.createElement('button');
+      customStatusActionBtn.type = 'button';
+      customStatusActionBtn.className = 'btn-secondary self-profile-copy-btn';
+      customStatusActionBtn.dataset.action = 'self-profile-custom-status';
+      customStatusActionBtn.textContent = user.customStatus ? 'Edit Status' : 'Custom Status';
+      customStatusActionBtn.addEventListener('click', openCustomStatusEditor);
+
       const copyBtn = document.createElement('button');
       copyBtn.type = 'button';
       copyBtn.className = 'btn-secondary self-profile-copy-btn';
@@ -1467,6 +1476,7 @@ export function openSelfProfileModal(options: SelfProfileModalOptions): SelfProf
       });
 
       actionStrip.appendChild(editBtn);
+      actionStrip.appendChild(customStatusActionBtn);
       actionStrip.appendChild(copyBtn);
       body.appendChild(actionStrip);
 

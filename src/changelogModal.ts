@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.22';
+export const CURRENT_REDSHIFT_VERSION = '0.1.23';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,27 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.23',
+    date: 'November 20, 2026',
+    kicker: 'QUORIDOR WALL TELEGRAPH, BLITZ CHESS/CHECKERS, LAST-MAN-STANDING MINESWEEPER & MOBILE/CALL FIXES',
+    headline: 'Quoridor Side-Groove Walls + Telegraph, Minesweeper Last-Man-Standing, Sidebar Call/Game Badges, Blitz 10s & Mobile Fixes',
+    lead:
+      'Upgraded Quoridor to a true 17×17 groove grid with live wall placement telegraph, added Last Man Standing to multiplayer Minesweeper, added a 30s timer to VexilloGuessr and a 10s Blitz mode to Chess & Checkers, added top-left Game Controller / Phone badges to DM & Group lists, added top-left Eye viewer counts on streams & activities, fixed mid-call stability, and perfected iPhone full-screen scaling & keyboard lift.',
+    sections: [
+      {
+        heading: 'Games, Sidebar Presence, Calls & Mobile Upgrades',
+        items: [
+          'Quoridor 17×17 Side-Groove Walls & Telegraph — Walls sit strictly in the physical grooves between squares (never inside squares) with a live glowing green/red preview before placing.',
+          'Minesweeper Last Man Standing — Multiplayer Minesweeper races now continue when a player explodes until the last survivor stands (or someone clears/flags all mines fastest).',
+          'Blitz Mode (10s/turn) & VexilloGuessr 30s Timer — Added Standard vs ⚡ Blitz (10s/turn) mode to Chess & Checkers and a 30s turn countdown to VexilloGuessr.',
+          'Sidebar Game & Call Icons + Top-Left Eye Counters — DMs and Group Chats display a green game controller top-left during an active Activity or a green phone icon while in a Voice Call; live streams & activities show top-left Eye viewer counts.',
+          'Auto Activity Cleanup & Mid-Call Rejoin Stability — Joining/creating a new activity automatically ends your previous one; leaving/rejoining mid-call never kicks or re-rings the call; winning/quitting/switching removes finished activities cleanly.',
+          'Mobile Phone UI, Status Dots & Keyboard Scaling — Eliminated top/bottom fullscreen lines on mobile PWA/Safari, lifted chat composer cleanly above the keyboard, fixed mobile DM status dot bottom-right alignment, fixed mobile profile header clipping (Edit Profile + Custom Status buttons), and removed green styling from the VC Activities button.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.22',
     date: 'November 20, 2026',

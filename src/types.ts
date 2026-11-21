@@ -76,6 +76,7 @@ export interface PublicProfile {
   bannerColor?: string;
   bannerDataUrl?: string;
   customStatus?: CustomStatusData | null;
+  inVoiceCall?: boolean;
   isProfilePrivate?: boolean;
   isBlockedRelation?: boolean;
   acceptsNonFriendDms?: boolean;
@@ -375,6 +376,7 @@ export interface VcParticipantState {
   screenPaused?: boolean;
   cameraStreamId?: string;
   screenStreamId?: string;
+  watchingStreams?: string[];
   connectionId?: string;
   joinedAt: number;
 }
@@ -458,6 +460,7 @@ export interface ActivityLobby {
   title: string;
   hostUsername: string;
   maxPlayers: number;
+  gameMode?: 'standard' | 'blitz';
   status: 'waiting' | 'playing' | 'finished';
   players: ActivityPlayerEntry[];
   spectators: ActivitySpectatorEntry[];

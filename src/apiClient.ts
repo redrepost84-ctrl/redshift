@@ -1820,7 +1820,13 @@ export async function apiSignOutOtherSessions(): Promise<{
 
 export interface SocialSocketHandle {
   sendTyping: (toUsername: string, isTyping: boolean, groupId?: string) => void;
-  sendVcJoin: (target: ThreadTarget, muted: boolean, deafened: boolean, ring?: boolean) => void;
+  sendVcJoin: (
+    target: ThreadTarget,
+    muted: boolean,
+    deafened: boolean,
+    ring?: boolean,
+    reconnect?: boolean,
+  ) => void;
   sendVcDecline: (threadKey: string) => void;
   sendVcLeave: (threadKey: string) => void;
   sendVcVoiceState: (
@@ -1833,6 +1839,7 @@ export interface SocialSocketHandle {
       screenPaused?: boolean;
       cameraStreamId?: string;
       screenStreamId?: string;
+      watchingStreams?: string[];
     },
   ) => void;
   sendVcSpeaking: (threadKey: string, speaking: boolean) => void;
@@ -1860,6 +1867,7 @@ export function connectSocialSocket(handlers: {
   onVcSignal?: (payload: VcSignalEventPayload) => void;
   onVcSpeaking?: (payload: VcSpeakingEventPayload) => void;
   onVcTransferred?: (payload: VcTransferredEventPayload) => void;
+  onVcPresence?: (payload: { username: string; inVoiceCall: boolean }) => void;
   onVcError?: (error: string) => void;
   onActivityList?: (payload: ActivityListEventPayload) => void;
   onActivityLobbyUpdate?: (payload: ActivityLobbyUpdateEventPayload) => void;
@@ -2032,6 +2040,14 @@ export function connectSocialSocket(handlers: {
             newThreadKey: typeof msg.newThreadKey === 'string' ? msg.newThreadKey : undefined,
             reason: typeof msg.reason === 'string' ? msg.reason : undefined,
           });
+        } else if (
+          msg.type === 'vc:presence' &&
+          typeof msg.username === 'string'
+        ) {
+          handlers.onVcPresence?.({
+            username: msg.username,
+            inVoiceCall: Boolean(msg.inVoiceCall),
+          });
         } else if (msg.type === 'vc:error' && typeof msg.error === 'string') {
           handlers.onVcError?.(msg.error);
         } else if (msg.type === 'activity:list' && Array.isArray(msg.lobbies)) {
@@ -2078,9 +2094,15 @@ export function connectSocialSocket(handlers: {
           : { type: 'dm:typing', toUsername, isTyping },
       );
     },
-    sendVcJoin: (target: ThreadTarget, muted: boolean, deafened: boolean, ring = true) => {
+    sendVcJoin: (
+      target: ThreadTarget,
+      muted: boolean,
+      deafened: boolean,
+      ring = true,
+      reconnect = false,
+    ) => {
       const norm = normalizeThreadTarget(target);
-      sendFrame({ type: 'vc:join', ...norm, muted, deafened, ring }, true);
+      sendFrame({ type: 'vc:join', ...norm, muted, deafened, ring, reconnect }, true);
     },
     sendVcDecline: (threadKey: string) => {
       sendFrame({ type: 'vc:decline', threadKey }, true);
@@ -2098,6 +2120,7 @@ export function connectSocialSocket(handlers: {
         screenPaused?: boolean;
         cameraStreamId?: string;
         screenStreamId?: string;
+        watchingStreams?: string[];
       },
     ) => {
       sendFrame({
@@ -2110,6 +2133,7 @@ export function connectSocialSocket(handlers: {
         screenPaused: Boolean(extra?.screenPaused),
         cameraStreamId: extra?.cameraStreamId || '',
         screenStreamId: extra?.screenStreamId || '',
+        watchingStreams: Array.isArray(extra?.watchingStreams) ? extra.watchingStreams : [],
       });
     },
     sendVcSpeaking: (threadKey: string, speaking: boolean) => {

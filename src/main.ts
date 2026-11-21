@@ -2564,6 +2564,72 @@ function renderWorkspaceScreen(root: HTMLElement): void {
 
   let socketHandle: SocialSocketHandle | null = null;
   let lastSyncedVoiceCallKey: string | null = null;
+  let lastSidebarPresenceSig = '';
+  let triggerSidebarPresenceSync: (() => void) | null = null;
+  const inVoiceCallPeers = new Map<string, boolean>();
+
+  const buildSidebarPresenceSig = (): string => {
+    const peerCallStr = Array.from(inVoiceCallPeers.entries())
+      .filter(([, active]) => active)
+      .map(([u]) => u)
+      .sort()
+      .join(',');
+    return `${voiceManager.getSidebarPresenceSignature()}::${peerCallStr}`;
+  };
+
+  const syncInVoiceCallPeersFromSnapshot = (snap: SocialSnapshot | null) => {
+    if (!snap) return;
+    inVoiceCallPeers.clear();
+    const recordList = (list?: PublicProfile[]) => {
+      for (const u of list ?? []) {
+        if (u?.username && typeof u.inVoiceCall === 'boolean') {
+          inVoiceCallPeers.set(u.username.toLowerCase(), u.inVoiceCall);
+        }
+      }
+    };
+    recordList(snap.friends);
+    recordList(snap.dmPeers);
+    for (const grp of snap.groups ?? []) {
+      recordList(grp.members);
+    }
+  };
+
+  const createSidebarPresenceBadge = (kind: 'activity' | 'call'): HTMLSpanElement => {
+    const badge = document.createElement('span');
+    badge.className = `sidebar-dm-presence-badge sidebar-dm-presence-badge--${kind}`;
+    badge.title = kind === 'activity' ? 'Playing an Activity' : 'In a Voice Call';
+    badge.setAttribute('aria-label', badge.title);
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '10');
+    svg.setAttribute('height', '10');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', '#22c55e');
+    svg.setAttribute('stroke-width', '2.4');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    if (kind === 'activity') {
+      const p1 = document.createElementNS(ns, 'path');
+      p1.setAttribute(
+        'd',
+        'M6 11h4M8 9v4M15 12h.01M18 10h.01M17.32 5H6.68a4 4 0 0 0-3.98 3.59c-.01.05-.01.1-.02.15C2.6 9.42 2 14.46 2 16a3 3 0 0 0 3 3c1 0 1.5-.5 2-1l1.41-1.41A2 2 0 0 1 9.83 16h4.34a2 2 0 0 1 1.42.59L17 18c.5.5 1 1 2 1a3 3 0 0 0 3-3c0-1.55-.6-6.58-.69-7.26-.01-.05-.01-.1-.02-.15A4 4 0 0 0 17.32 5z',
+      );
+      svg.appendChild(p1);
+    } else {
+      const p = document.createElementNS(ns, 'path');
+      p.setAttribute(
+        'd',
+        'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z',
+      );
+      svg.appendChild(p);
+    }
+    badge.appendChild(svg);
+    return badge;
+  };
+
+  syncInVoiceCallPeersFromSnapshot(state.snapshot);
 
   const syncDockVoiceControls = () => {
     const muted = voiceManager.isMuted();
@@ -2597,6 +2663,12 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       if (state.mainView === 'dm' || state.mainView === 'group') {
         activeDmSyncer?.();
       }
+    }
+
+    const nextSidebarPresenceSig = buildSidebarPresenceSig();
+    if (triggerSidebarPresenceSync && nextSidebarPresenceSig !== lastSidebarPresenceSig) {
+      lastSidebarPresenceSig = nextSidebarPresenceSig;
+      triggerSidebarPresenceSync();
     }
   };
 
@@ -3275,6 +3347,10 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         avImg.src = resolveGroupAvatar(group);
         avImg.alt = `${group.name} group icon`;
         avWrap.appendChild(avImg);
+        const groupPresence = voiceManager.getThreadPresence(gKey);
+        if (groupPresence) {
+          avWrap.appendChild(createSidebarPresenceBadge(groupPresence));
+        }
         grpBtn.appendChild(avWrap);
 
         const grpText = document.createElement('span');
@@ -3392,6 +3468,16 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       dmAvatar.alt = `${peer.displayName} profile picture`;
       dmAvatarWrap.appendChild(dmAvatar);
 
+      const friendInActivity = voiceManager.isUserInActivity(friendKey);
+      const friendInCall =
+        inVoiceCallPeers.get(friendKey) ??
+        (Boolean(peer.inVoiceCall) || voiceManager.isUserInAnyKnownCall(friendKey));
+      if (friendInActivity) {
+        dmAvatarWrap.appendChild(createSidebarPresenceBadge('activity'));
+      } else if (friendInCall) {
+        dmAvatarWrap.appendChild(createSidebarPresenceBadge('call'));
+      }
+
       if (!peer.isProfilePrivate) {
         const dmStatus = document.createElement('span');
         dmStatus.className = 'sidebar-dm-status';
@@ -3479,6 +3565,8 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       dmListEl.appendChild(dmBtn);
     }
   };
+  lastSidebarPresenceSig = buildSidebarPresenceSig();
+  triggerSidebarPresenceSync = syncSidebarNavAndDms;
 
   type ConversationTarget =
     | { kind: 'dm'; friend: PublicProfile }
@@ -5597,6 +5685,23 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     }
     syncComposerSendState();
 
+    chatInput.addEventListener('focus', () => {
+      if (window.innerWidth <= 768) {
+        window.setTimeout(() => {
+          window.scrollTo(0, 0);
+          if (pinnedToBottom) {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+          }
+        }, 90);
+        window.setTimeout(() => {
+          window.scrollTo(0, 0);
+          if (pinnedToBottom) {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+          }
+        }, 280);
+      }
+    });
+
     chatInput.addEventListener('input', () => {
       replaceEmojiShortcodeBeforeCursor(chatInput);
       if (chatInput.value) {
@@ -6682,6 +6787,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   socketHandle = connectSocialSocket({
     onOpen: () => {
       socketConnected = true;
+      voiceManager.handleSocketReconnected();
       void flushOutboundQueue();
       triggerBackgroundSnapshotSync(true);
     },
@@ -6689,6 +6795,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       socketConnected = false;
     },
     onSnapshot: (nextSnapshot) => {
+      syncInVoiceCallPeersFromSnapshot(nextSnapshot);
       applyLiveSnapshot(nextSnapshot);
     },
     onGifsUpdated: () => {
@@ -6711,6 +6818,25 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     },
     onVcTransferred: (payload) => {
       voiceManager.handleVcTransferred(payload);
+    },
+    onVcPresence: ({ username, inVoiceCall }) => {
+      const uKey = username.toLowerCase();
+      inVoiceCallPeers.set(uKey, Boolean(inVoiceCall));
+      if (state.snapshot) {
+        const patchUser = (u: PublicProfile) =>
+          u.username.toLowerCase() === uKey ? { ...u, inVoiceCall: Boolean(inVoiceCall) } : u;
+        state.snapshot = {
+          ...state.snapshot,
+          friends: state.snapshot.friends.map(patchUser),
+          dmPeers: state.snapshot.dmPeers?.map(patchUser),
+          groups: state.snapshot.groups?.map((g) => ({
+            ...g,
+            members: g.members.map(patchUser),
+          })),
+        };
+      }
+      lastSidebarPresenceSig = buildSidebarPresenceSig();
+      syncSidebarNavAndDms();
     },
     onVcError: (errMsg) => {
       activeDmErrorReporter?.(errMsg);
@@ -7338,22 +7464,54 @@ function render(): void {
 }
 
 function attachMobileViewportSync(): void {
+  let baselineHeight = window.innerHeight;
   const syncViewportHeight = () => {
     if (window.innerWidth > 768) {
       document.documentElement.style.removeProperty('--app-viewport-height');
+      document.documentElement.style.removeProperty('--app-viewport-top');
+      delete document.documentElement.dataset.mobileKeyboard;
       return;
     }
     const vv = window.visualViewport;
-    const nextHeight = vv ? Math.round(vv.height) : window.innerHeight;
-    if (nextHeight > 160) {
-      document.documentElement.style.setProperty('--app-viewport-height', `${nextHeight}px`);
+    const rawHeight = vv ? Math.round(vv.height) : window.innerHeight;
+    if (rawHeight > baselineHeight || Math.abs(window.innerWidth - baselineHeight) < 200) {
+      if (rawHeight > baselineHeight) baselineHeight = rawHeight;
     }
-    if (vv && vv.offsetTop > 0) {
+    const layoutH = Math.max(window.innerHeight, baselineHeight);
+    const activeEl = document.activeElement;
+    const isInputFocused =
+      activeEl instanceof HTMLTextAreaElement ||
+      (activeEl instanceof HTMLInputElement &&
+        activeEl.type !== 'checkbox' &&
+        activeEl.type !== 'radio' &&
+        activeEl.type !== 'range' &&
+        activeEl.type !== 'file');
+    const keyboardOpen = layoutH - rawHeight > 120 || (isInputFocused && window.innerHeight - rawHeight > 80);
+
+    if (rawHeight > 160) {
+      document.documentElement.style.setProperty('--app-viewport-height', `${rawHeight}px`);
+    }
+    const offsetTop = vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
+    document.documentElement.style.setProperty('--app-viewport-top', `${offsetTop}px`);
+    document.documentElement.dataset.mobileKeyboard = keyboardOpen ? '1' : '0';
+
+    if (window.scrollY !== 0 || window.scrollX !== 0) {
       window.scrollTo(0, 0);
     }
   };
   syncViewportHeight();
-  window.addEventListener('resize', syncViewportHeight);
+  window.addEventListener('resize', () => {
+    baselineHeight = Math.max(baselineHeight, window.innerHeight);
+    syncViewportHeight();
+  });
+  window.addEventListener('orientationchange', () => {
+    window.setTimeout(() => {
+      baselineHeight = window.innerHeight;
+      syncViewportHeight();
+    }, 180);
+  });
+  window.addEventListener('focusin', () => window.setTimeout(syncViewportHeight, 60));
+  window.addEventListener('focusout', () => window.setTimeout(syncViewportHeight, 120));
   window.visualViewport?.addEventListener('resize', syncViewportHeight);
   window.visualViewport?.addEventListener('scroll', syncViewportHeight);
 }

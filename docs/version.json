@@ -1,11 +1,11 @@
 {
-  "version": "0.1.22",
-  "releasedAt": "2026-11-21T06:46:08.354Z",
-  "changelog": "Overhauled Voice Call Activities: Fixed 8x8 Chess & Checkers tiles with rank/file coordinates (1–8, a–h), flanking Left & Right Taken Pieces trays, and smooth piece animations; redesigned 8-Ball Pool with pull-back-on-ball strike force physics & raycast deflection guides; added live split-screen Minesweeper spectator boards; ensured VexilloGuessr never repeats previous flags; added mutual rematch voting; and auto-cancelled lobbies when a seated player leaves.",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.22/Redshift-patch.asar",
-  "sha256": "b75036ec57e18dfc847988ce60267d799e1bbfdf5863f7551d1488f2b9f442d6",
-  "size": 6469714,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.22/RedshiftSetup.exe",
+  "version": "0.1.23",
+  "releasedAt": "2026-11-21T08:07:00.967Z",
+  "changelog": "Quoridor 17x17 groove walls + telegraph, Minesweeper Last Man Standing, Chess/Checkers Blitz 10s & Vexillo 30s timers, sidebar green controller/phone badges, stream/activity Eye counters, auto-end previous activity on join, mid-call stability fix, and mobile fullscreen/keyboard/DM-dot/profile UI fixes",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.23/Redshift-patch.asar",
+  "sha256": "59ebfe44e96feec8c36fd38c6f3c3a841f4b755ed508aa61d31f1c957328fbc0",
+  "size": 6507319,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.23/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

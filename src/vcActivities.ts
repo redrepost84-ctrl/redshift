@@ -76,6 +76,33 @@ export function getActivityGameMeta(gameId: ActivityGameId): ActivityGameMeta {
   return ACTIVITY_GAMES.find((g) => g.id === gameId) ?? ACTIVITY_GAMES[0];
 }
 
+/** Creates a crisp Eye icon SVG for stream watchers & activity spectators. */
+export function createWatcherEyeIconSvg(size = 12): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', String(size));
+  svg.setAttribute('height', String(size));
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2.2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const path = document.createElementNS(ns, 'path');
+  path.setAttribute('d', 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z');
+  svg.appendChild(path);
+
+  const circle = document.createElementNS(ns, 'circle');
+  circle.setAttribute('cx', '12');
+  circle.setAttribute('cy', '12');
+  circle.setAttribute('r', '3');
+  svg.appendChild(circle);
+
+  return svg;
+}
+
 /** Creates the VC control bar Activities icon (gamepad + sparkle). */
 export function createActivitiesControlIconSvg(size = 18): SVGSVGElement {
   const ns = 'http://www.w3.org/2000/svg';
@@ -218,11 +245,16 @@ export type ChessColor = 'w' | 'b';
 export type ChessPieceType = 'P' | 'N' | 'B' | 'R' | 'Q' | 'K';
 export type ChessPiece = `${ChessColor}${ChessPieceType}` | null;
 
+export const BLITZ_TURN_MS = 10_000;
+export const VEXILLO_TURN_MS = 30_000;
+
 export interface ChessGameState {
   board: ChessPiece[][];
   turn: ChessColor;
   whiteUsername: string;
   blackUsername: string;
+  mode?: 'standard' | 'blitz';
+  turnDeadlineAt?: number | null;
   castling: { wK: boolean; wQ: boolean; bK: boolean; bQ: boolean };
   enPassant: [number, number] | null;
   lastMove: { from: [number, number]; to: [number, number] } | null;
@@ -294,7 +326,10 @@ function createChessPieceSvg(piece: NonNullable<ChessPiece>, size = 32): SVGSVGE
   return svg;
 }
 
-export function createInitialChessState(players: ActivityPlayerEntry[]): ChessGameState {
+export function createInitialChessState(
+  players: ActivityPlayerEntry[],
+  gameMode: 'standard' | 'blitz' = 'standard',
+): ChessGameState {
   const p0 = players[0]?.username ?? 'Player 1';
   const p1 = players[1]?.username ?? 'Player 2';
   const back: ChessPieceType[] = ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R'];
@@ -305,17 +340,20 @@ export function createInitialChessState(players: ActivityPlayerEntry[]): ChessGa
     board[6][c] = 'wP';
     board[7][c] = `w${back[c]}`;
   }
+  const mode = gameMode === 'blitz' ? 'blitz' : 'standard';
   return {
     board,
     turn: 'w',
     whiteUsername: p0,
     blackUsername: p1,
+    mode,
+    turnDeadlineAt: mode === 'blitz' ? Date.now() + BLITZ_TURN_MS : null,
     castling: { wK: true, wQ: true, bK: true, bQ: true },
     enPassant: null,
     lastMove: null,
     capturedByWhite: [],
     capturedByBlack: [],
-    statusText: 'White to move',
+    statusText: mode === 'blitz' ? '⚡ Blitz (10s/turn) — White to move' : 'White to move',
     inCheck: null,
     winnerUsername: null,
     moveCount: 0,
@@ -620,6 +658,7 @@ function applyChessMove(
     ...state,
     board: nextBoard,
     turn: enemy,
+    turnDeadlineAt: state.mode === 'blitz' ? Date.now() + BLITZ_TURN_MS : null,
     castling,
     enPassant,
     lastMove: { from, to },
@@ -641,6 +680,7 @@ function applyChessMove(
   }
 
   if (!hasAnyLegalMove) {
+    nextState.turnDeadlineAt = null;
     if (nextState.inCheck) {
       nextState.winnerUsername = color === 'w' ? state.whiteUsername : state.blackUsername;
       nextState.winReason = `Checkmate! ${color === 'w' ? 'White' : 'Black'} wins`;
@@ -668,6 +708,8 @@ export interface CheckersGameState {
   turn: 'r' | 'b';
   redUsername: string;
   blackUsername: string;
+  mode?: 'standard' | 'blitz';
+  turnDeadlineAt?: number | null;
   mustContinueFrom: [number, number] | null;
   lastMove: { from: [number, number]; to: [number, number] } | null;
   redCaptured: number;
@@ -678,7 +720,10 @@ export interface CheckersGameState {
   moveCount?: number;
 }
 
-export function createInitialCheckersState(players: ActivityPlayerEntry[]): CheckersGameState {
+export function createInitialCheckersState(
+  players: ActivityPlayerEntry[],
+  gameMode: 'standard' | 'blitz' = 'standard',
+): CheckersGameState {
   const board: CheckerCell[][] = Array.from({ length: 8 }, () => Array(8).fill(null));
   for (let r = 0; r < 3; r++) {
     for (let c = 0; c < 8; c++) {
@@ -690,17 +735,20 @@ export function createInitialCheckersState(players: ActivityPlayerEntry[]): Chec
       if ((r + c) % 2 === 1) board[r][c] = 'r';
     }
   }
+  const mode = gameMode === 'blitz' ? 'blitz' : 'standard';
   return {
     board,
     turn: 'r',
     redUsername: players[0]?.username ?? 'Player 1',
     blackUsername: players[1]?.username ?? 'Player 2',
+    mode,
+    turnDeadlineAt: mode === 'blitz' ? Date.now() + BLITZ_TURN_MS : null,
     mustContinueFrom: null,
     lastMove: null,
     redCaptured: 0,
     blackCaptured: 0,
     winnerUsername: null,
-    statusText: 'Red to move',
+    statusText: mode === 'blitz' ? '⚡ Blitz (10s/turn) — Red to move' : 'Red to move',
     moveCount: 0,
   };
 }
@@ -820,6 +868,7 @@ function applyCheckersMove(
       return {
         ...state,
         board: nextBoard,
+        turnDeadlineAt: state.mode === 'blitz' ? Date.now() + BLITZ_TURN_MS : null,
         mustContinueFrom: to,
         lastMove: { from, to },
         redCaptured,
@@ -834,6 +883,7 @@ function applyCheckersMove(
     ...state,
     board: nextBoard,
     turn: enemy,
+    turnDeadlineAt: state.mode === 'blitz' ? Date.now() + BLITZ_TURN_MS : null,
     mustContinueFrom: null,
     lastMove: { from, to },
     redCaptured,
@@ -856,6 +906,7 @@ function applyCheckersMove(
   }
 
   if (!enemyHasMoves) {
+    nextState.turnDeadlineAt = null;
     nextState.winnerUsername = color === 'r' ? state.redUsername : state.blackUsername;
     nextState.winReason = `${color === 'r' ? 'Red' : 'Black'} wins by capturing/blocking all pieces!`;
     nextState.statusText = nextState.winReason;
@@ -873,6 +924,7 @@ export interface MinesweeperPlayerBoard {
   flagged: number[];
   status: 'playing' | 'won' | 'exploded';
   explodedIndex?: number;
+  eliminatedAt?: number;
 }
 
 export interface MinesweeperGameState {
@@ -1121,6 +1173,7 @@ export interface VexilloGuessrGameState {
   winnerUsername: string | null;
   winReason?: string;
   roundNumber: number;
+  turnDeadlineAt: number | null;
 }
 
 function dealNextVexilloRound(
@@ -1182,6 +1235,7 @@ export function createInitialVexilloState(
     lastFeedback: null,
     winnerUsername: null,
     roundNumber: 1,
+    turnDeadlineAt: Date.now() + VEXILLO_TURN_MS,
   };
 }
 
@@ -1763,11 +1817,12 @@ function canPlaceQuoridorWall(
 }
 
 export function createInitialGameStateForLobby(lobby: ActivityLobby): any {
+  const mode: 'standard' | 'blitz' = lobby.gameMode === 'blitz' ? 'blitz' : 'standard';
   switch (lobby.gameId) {
     case 'chess':
-      return createInitialChessState(lobby.players);
+      return createInitialChessState(lobby.players, mode);
     case 'checkers':
-      return createInitialCheckersState(lobby.players);
+      return createInitialCheckersState(lobby.players, mode);
     case 'minesweeper':
       return createInitialMinesweeperState(lobby.players);
     case 'vexilloguessr':
@@ -1802,10 +1857,14 @@ export interface VcActivitiesController {
   isLobbyWatched: (lobbyId: string) => boolean;
   isStageExpandedForCall: (threadKey: string) => boolean;
   getExpandedStageKey: () => string | null;
+  isUserInActivity: (username: string) => boolean;
+  hasActiveActivityInThread: (threadKey: string) => boolean;
+  getPresenceSignature: () => string;
   watchLobby: (lobbyId: string, expandBigScreen?: boolean) => void;
   stopWatchingLobby: (lobbyId: string) => void;
   toggleExpandLobby: (lobbyId: string) => void;
   hideExpandedStage: () => void;
+  leaveAllSeatedLobbiesForCall: (threadKey: string) => void;
   openGameBrowser: (threadKey: string, gameId: ActivityGameId) => void;
   toggleActivitiesBubble: (anchorBtn: HTMLElement, threadKey: string) => void;
   closeActivitiesBubble: () => void;
@@ -1815,6 +1874,7 @@ export interface VcActivitiesController {
     onRequireJoinCall: (lobbyId: string) => void,
   ) => HTMLElement[];
   renderExpandedActivityStage: (threadKey: string) => HTMLElement | null;
+  destroy: () => void;
 }
 
 export function createVcActivitiesController(
@@ -1841,14 +1901,264 @@ export function createVcActivitiesController(
   let minesweeperFlagMode = false;
   let minesweeperViewTarget: string = 'auto'; // 'auto' | 'split' | usernameLower
   let quoridorTool: 'move' | 'hwall' | 'vwall' = 'move';
+  let quoridorArmedWall: { orient: 'h' | 'v'; r: number; c: number } | null = null;
   let poolAimAngle = 0;
   let poolAnimatingSeq = 0;
   let lobbyScopeFilter: 'call' | 'public' = 'call';
   let createMaxPlayersDraft = 2;
+  let createGameModeDraft: 'standard' | 'blitz' = 'standard';
   let activeBubbleEl: HTMLElement | null = null;
   let activeBubbleCleanup: (() => void) | null = null;
+  let lastSubmittedTimeoutKey = '';
 
   const getSelfKey = () => (options.getSelfProfile()?.username ?? '').toLowerCase();
+
+  /** Optimistically clears any previous seated activity when creating or joining a new activity. */
+  const evictOwnOtherSeatedLobbies = (exceptLobbyId = '') => {
+    const selfKey = getSelfKey();
+    if (!selfKey) return;
+    for (const [id, existing] of Array.from(lobbiesById.entries())) {
+      if (exceptLobbyId && id === exceptLobbyId) continue;
+      if (existing.players.some((p) => p.username.toLowerCase() === selfKey)) {
+        lobbiesById.delete(id);
+        watchedLobbyIds.delete(id);
+      }
+    }
+  };
+
+  /** Creates a compact top-left Eye Icon + count badge for activity spectators. */
+  const createSpectatorCountPill = (lobby: ActivityLobby): HTMLElement => {
+    const count = (lobby.spectators ?? []).length;
+    const pill = document.createElement('span');
+    pill.className =
+      count > 0
+        ? 'vc-watcher-count-pill vc-watcher-count-pill--active'
+        : 'vc-watcher-count-pill';
+    pill.dataset.vcRole = 'activity-spectator-count';
+    pill.title =
+      count > 0
+        ? `Spectating: ${(lobby.spectators ?? []).map((s) => s.displayName).join(', ')}`
+        : 'No spectators yet';
+    pill.appendChild(createWatcherEyeIconSvg(12));
+    const num = document.createElement('span');
+    num.textContent = String(count);
+    pill.appendChild(num);
+    return pill;
+  };
+
+  /** Builds a live ticking countdown bar updated smoothly in-place every 150ms. */
+  const renderTurnTimerBar = (
+    deadlineAt: number,
+    totalMs: number,
+    labelPrefix: string,
+  ): HTMLElement => {
+    const wrap = document.createElement('div');
+    wrap.className = 'vc-turn-timer-wrap';
+    wrap.dataset.vcTimerDeadline = String(deadlineAt);
+    wrap.dataset.vcTimerTotal = String(totalMs);
+    wrap.dataset.vcTimerLabel = labelPrefix;
+
+    const remainingMs = Math.max(0, deadlineAt - Date.now());
+    const pct = Math.max(0, Math.min(100, (remainingMs / totalMs) * 100));
+    const secStr =
+      totalMs <= 12_000
+        ? `${(remainingMs / 1000).toFixed(1)}s`
+        : `${Math.ceil(remainingMs / 1000)}s`;
+
+    const head = document.createElement('div');
+    head.className = 'vc-turn-timer-head';
+    const lbl = document.createElement('span');
+    lbl.className = 'vc-turn-timer-label';
+    lbl.textContent = labelPrefix;
+    const val = document.createElement('span');
+    val.className = 'vc-turn-timer-value';
+    val.textContent = secStr;
+    head.appendChild(lbl);
+    head.appendChild(val);
+
+    const track = document.createElement('div');
+    track.className = 'vc-turn-timer-track';
+    const fill = document.createElement('div');
+    fill.className = 'vc-turn-timer-fill';
+    fill.style.width = `${pct.toFixed(1)}%`;
+    track.appendChild(fill);
+
+    if (remainingMs <= 3500) {
+      wrap.classList.add('vc-turn-timer-wrap--urgent');
+    } else if (remainingMs <= Math.min(10_000, totalMs * 0.4)) {
+      wrap.classList.add('vc-turn-timer-wrap--warn');
+    }
+
+    wrap.appendChild(head);
+    wrap.appendChild(track);
+    return wrap;
+  };
+
+  const checkTurnTimers = () => {
+    const now = Date.now();
+
+    // 1. Update visible timer bars in-place (zero board re-renders!)
+    document.querySelectorAll<HTMLElement>('.vc-turn-timer-wrap[data-vc-timer-deadline]').forEach((el) => {
+      const deadline = Number(el.dataset.vcTimerDeadline || 0);
+      const total = Math.max(1000, Number(el.dataset.vcTimerTotal || 10000));
+      if (!deadline) return;
+      const rem = Math.max(0, deadline - now);
+      const pct = Math.max(0, Math.min(100, (rem / total) * 100));
+      const valEl = el.querySelector<HTMLElement>('.vc-turn-timer-value');
+      if (valEl) {
+        valEl.textContent =
+          total <= 12_000 ? `${(rem / 1000).toFixed(1)}s` : `${Math.ceil(rem / 1000)}s`;
+      }
+      const fillEl = el.querySelector<HTMLElement>('.vc-turn-timer-fill');
+      if (fillEl) {
+        fillEl.style.width = `${pct.toFixed(1)}%`;
+      }
+      el.classList.toggle('vc-turn-timer-wrap--urgent', rem <= 3500);
+      el.classList.toggle(
+        'vc-turn-timer-wrap--warn',
+        rem > 3500 && rem <= Math.min(10_000, total * 0.4),
+      );
+    });
+
+    // 2. Enforce authoritative turn timeouts for seated players
+    const selfKey = getSelfKey();
+    if (!selfKey) return;
+
+    for (const lobby of lobbiesById.values()) {
+      if (lobby.status !== 'playing' || !lobby.gameState) continue;
+      const isSeated = lobby.players.some((p) => p.username.toLowerCase() === selfKey);
+      if (!isSeated) continue;
+
+      if (lobby.gameId === 'chess') {
+        const st = lobby.gameState as ChessGameState;
+        if (st.mode !== 'blitz' || !st.turnDeadlineAt || st.winnerUsername !== null) continue;
+        const activeUser = st.turn === 'w' ? st.whiteUsername : st.blackUsername;
+        const opponentUser = st.turn === 'w' ? st.blackUsername : st.whiteUsername;
+        const isMyTurn = activeUser.toLowerCase() === selfKey;
+        const grace = isMyTurn ? 0 : 1500;
+        if (now < st.turnDeadlineAt + grace) continue;
+
+        const key = `${lobby.id}:chess:${st.moveCount}:${st.turnDeadlineAt}`;
+        if (lastSubmittedTimeoutKey === key) continue;
+        lastSubmittedTimeoutKey = key;
+
+        const activeProf = lobby.players.find(
+          (p) => p.username.toLowerCase() === activeUser.toLowerCase(),
+        );
+        const oppProf = lobby.players.find(
+          (p) => p.username.toLowerCase() === opponentUser.toLowerCase(),
+        );
+        const winReason = `⚡ Blitz Timeout! ${activeProf?.displayName ?? activeUser} ran out of time (10s) — ${oppProf?.displayName ?? opponentUser} wins!`;
+        const nextState: ChessGameState = {
+          ...st,
+          turnDeadlineAt: null,
+          winnerUsername: opponentUser,
+          winReason,
+          statusText: winReason,
+        };
+        options.sendActivityFrame({
+          type: 'activity:action',
+          lobbyId: lobby.id,
+          gameState: nextState,
+          status: 'finished',
+          winnerUsername: opponentUser,
+        });
+      } else if (lobby.gameId === 'checkers') {
+        const st = lobby.gameState as CheckersGameState;
+        if (st.mode !== 'blitz' || !st.turnDeadlineAt || st.winnerUsername) continue;
+        const activeUser = st.turn === 'r' ? st.redUsername : st.blackUsername;
+        const opponentUser = st.turn === 'r' ? st.blackUsername : st.redUsername;
+        const isMyTurn = activeUser.toLowerCase() === selfKey;
+        const grace = isMyTurn ? 0 : 1500;
+        if (now < st.turnDeadlineAt + grace) continue;
+
+        const key = `${lobby.id}:checkers:${st.moveCount ?? 0}:${st.turnDeadlineAt}`;
+        if (lastSubmittedTimeoutKey === key) continue;
+        lastSubmittedTimeoutKey = key;
+
+        const activeProf = lobby.players.find(
+          (p) => p.username.toLowerCase() === activeUser.toLowerCase(),
+        );
+        const oppProf = lobby.players.find(
+          (p) => p.username.toLowerCase() === opponentUser.toLowerCase(),
+        );
+        const winReason = `⚡ Blitz Timeout! ${activeProf?.displayName ?? activeUser} ran out of time (10s) — ${oppProf?.displayName ?? opponentUser} wins!`;
+        const nextState: CheckersGameState = {
+          ...st,
+          turnDeadlineAt: null,
+          winnerUsername: opponentUser,
+          winReason,
+          statusText: winReason,
+        };
+        options.sendActivityFrame({
+          type: 'activity:action',
+          lobbyId: lobby.id,
+          gameState: nextState,
+          status: 'finished',
+          winnerUsername: opponentUser,
+        });
+      } else if (lobby.gameId === 'vexilloguessr') {
+        const st = lobby.gameState as VexilloGuessrGameState;
+        if (!st.turnDeadlineAt || st.winnerUsername) continue;
+        const activeUsername = st.playerUsernames[st.turnIndex] ?? st.playerUsernames[0];
+        const activeKey = activeUsername.toLowerCase();
+        const isMyTurn = activeKey === selfKey;
+        const grace = isMyTurn ? 0 : 1500;
+        if (now < st.turnDeadlineAt + grace) continue;
+
+        const key = `${lobby.id}:vex:${st.roundNumber}:${st.turnDeadlineAt}`;
+        if (lastSubmittedTimeoutKey === key) continue;
+        lastSubmittedTimeoutKey = key;
+
+        const nextLives = { ...st.lives };
+        nextLives[activeKey] = Math.max(0, (nextLives[activeKey] ?? 3) - 1);
+        const nextTurnIdx = st.turnIndex === 0 ? 1 : 0;
+        const opponentName = st.playerUsernames[nextTurnIdx];
+        const activeProf = lobby.players.find((p) => p.username.toLowerCase() === activeKey);
+        const oppProf = lobby.players.find(
+          (p) => p.username.toLowerCase() === opponentName.toLowerCase(),
+        );
+
+        let winnerUsername: string | null = null;
+        let winReason: string | undefined;
+        if (nextLives[activeKey] <= 0) {
+          winnerUsername = opponentName;
+          winReason = `⏱ ${activeProf?.displayName ?? activeUsername} timed out and lost all 3 lives — ${oppProf?.displayName ?? opponentName} wins VexilloGuessr!`;
+        }
+
+        const deal = dealNextVexilloRound(st.usedCodes, st.currentFlagCode);
+        const nextState: VexilloGuessrGameState = {
+          ...st,
+          turnIndex: nextTurnIdx,
+          lives: nextLives,
+          currentFlagCode: deal.flag.code.toLowerCase(),
+          currentFlagName: deal.flag.name,
+          lastFlagCode: st.currentFlagCode.toLowerCase(),
+          choices: deal.choices,
+          usedCodes: deal.nextUsed,
+          lastFeedback: {
+            username: activeProf?.displayName ?? activeUsername,
+            chosen: '⏱ Time Expired (30s)',
+            correctName: st.currentFlagName,
+            isCorrect: false,
+          },
+          winnerUsername,
+          winReason,
+          roundNumber: (st.roundNumber || 1) + 1,
+          turnDeadlineAt: winnerUsername ? null : Date.now() + VEXILLO_TURN_MS,
+        };
+        options.sendActivityFrame({
+          type: 'activity:action',
+          lobbyId: lobby.id,
+          gameState: nextState,
+          status: winnerUsername ? 'finished' : 'playing',
+          winnerUsername: winnerUsername || undefined,
+        });
+      }
+    }
+  };
+
+  const turnTimerInterval = window.setInterval(checkTurnTimers, 150);
 
   const closeActivitiesBubble = () => {
     if (activeBubbleCleanup) {
@@ -1875,10 +2185,26 @@ export function createVcActivitiesController(
     closeActivitiesBubble();
     const meta = getActivityGameMeta(gameId);
     createMaxPlayersDraft = meta.defaultMaxPlayers;
+    createGameModeDraft = 'standard';
     const selfKey = getSelfKey();
+
+    // Clean up any finished or solo-waiting lobbies this user was seated in when picking another game.
+    if (selfKey) {
+      for (const l of getCallLobbies(threadKey)) {
+        const seated = l.players.some((p) => p.username.toLowerCase() === selfKey);
+        if (!seated) continue;
+        if (l.status === 'finished' || (l.status === 'waiting' && l.gameId !== gameId && l.players.length <= 1)) {
+          lobbiesById.delete(l.id);
+          watchedLobbyIds.delete(l.id);
+          options.sendActivityFrame({ type: 'activity:leave', lobbyId: l.id });
+        }
+      }
+    }
+
     const existingOwn = getCallLobbies(threadKey).find(
       (l) =>
         l.gameId === gameId &&
+        l.status !== 'finished' &&
         l.players.some((p) => p.username.toLowerCase() === selfKey),
     );
     if (existingOwn) {
@@ -2055,12 +2381,19 @@ export function createVcActivitiesController(
       artBg.appendChild(createGameLogoSvg(lobby.gameId, 38));
       const statusSub = document.createElement('div');
       statusSub.className = 'vc-activity-thumb-meta';
+      const blitzSuffix = lobby.gameMode === 'blitz' ? ' · ⚡10s' : '';
       statusSub.textContent =
         lobby.status === 'playing'
-          ? `In Match · ${lobby.players.length}/${lobby.maxPlayers}P`
-          : `Lobby · ${lobby.players.length}/${lobby.maxPlayers}P`;
+          ? `In Match · ${lobby.players.length}/${lobby.maxPlayers}P${blitzSuffix}`
+          : lobby.status === 'finished'
+            ? `Match Finished${blitzSuffix}`
+            : `Lobby · ${lobby.players.length}/${lobby.maxPlayers}P${blitzSuffix}`;
       artBg.appendChild(statusSub);
       thumbBox.appendChild(artBg);
+
+      const topLeftBadges = document.createElement('div');
+      topLeftBadges.className = 'vc-tile-top-left-badges';
+      topLeftBadges.appendChild(createSpectatorCountPill(lobby));
 
       const livePill = document.createElement('span');
       livePill.className = 'vc-screen-live-pill vc-activity-live-pill';
@@ -2068,18 +2401,35 @@ export function createVcActivitiesController(
         ? 'PLAYING'
         : lobby.status === 'playing'
           ? 'LIVE'
-          : 'LOBBY';
-      thumbBox.appendChild(livePill);
+          : lobby.status === 'finished'
+            ? 'ENDED'
+            : 'LOBBY';
+      topLeftBadges.appendChild(livePill);
+      thumbBox.appendChild(topLeftBadges);
 
       const openThisLobby = () => {
         if (!inThisCall) {
           watchedLobbyIds.add(lobby.id);
           expandedTarget = { kind: 'lobby', threadKey, lobbyId: lobby.id };
+          if (!isSelfSeated) {
+            options.sendActivityFrame({
+              type: 'activity:join',
+              lobbyId: lobby.id,
+              asSpectator: true,
+            });
+          }
           onRequireJoinCall(lobby.id);
           return;
         }
         watchedLobbyIds.add(lobby.id);
         expandedTarget = { kind: 'lobby', threadKey, lobbyId: lobby.id };
+        if (!isSelfSeated) {
+          options.sendActivityFrame({
+            type: 'activity:join',
+            lobbyId: lobby.id,
+            asSpectator: true,
+          });
+        }
         options.onStateChanged();
       };
 
@@ -2200,17 +2550,46 @@ export function createVcActivitiesController(
       createActions.appendChild(modeGroup);
     }
 
+    if (gameId === 'chess' || gameId === 'checkers') {
+      const modeGroup = document.createElement('div');
+      modeGroup.className = 'vc-activity-mode-pills';
+      const modes: Array<{ id: 'standard' | 'blitz'; label: string }> = [
+        { id: 'standard', label: 'Standard' },
+        { id: 'blitz', label: '⚡ Blitz (10s/turn)' },
+      ];
+      for (const m of modes) {
+        const pill = document.createElement('button');
+        pill.type = 'button';
+        pill.className =
+          createGameModeDraft === m.id
+            ? 'vc-activity-mode-pill vc-activity-mode-pill--active'
+            : 'vc-activity-mode-pill';
+        pill.textContent = m.label;
+        pill.addEventListener('click', () => {
+          createGameModeDraft = m.id;
+          options.onStateChanged();
+        });
+        modeGroup.appendChild(pill);
+      }
+      createActions.appendChild(modeGroup);
+    }
+
     const createBtn = document.createElement('button');
     createBtn.type = 'button';
     createBtn.className = 'btn-primary vc-activity-create-btn';
-    createBtn.textContent = `+ Create ${meta.name} Lobby`;
+    createBtn.textContent =
+      (gameId === 'chess' || gameId === 'checkers') && createGameModeDraft === 'blitz'
+        ? `+ Create ⚡ Blitz ${meta.name} Lobby`
+        : `+ Create ${meta.name} Lobby`;
     createBtn.addEventListener('click', () => {
       const selfProf = options.getSelfProfile();
+      evictOwnOtherSeatedLobbies();
       options.sendActivityFrame({
         type: 'activity:create',
         gameId,
         threadKey,
         maxPlayers: createMaxPlayersDraft,
+        gameMode: gameId === 'chess' || gameId === 'checkers' ? createGameModeDraft : 'standard',
         isPublic: true,
         title: `${selfProf?.displayName ?? 'Player'}'s ${meta.name}`,
       });
@@ -2264,7 +2643,7 @@ export function createVcActivitiesController(
         left.className = 'vc-activity-lobby-info';
         const lTitle = document.createElement('div');
         lTitle.className = 'vc-activity-lobby-title';
-        lTitle.textContent = `${lobby.title} (${lobby.players.length}/${lobby.maxPlayers})`;
+        lTitle.textContent = `${lobby.title} (${lobby.players.length}/${lobby.maxPlayers})${lobby.gameMode === 'blitz' ? ' · ⚡ Blitz 10s' : ''}`;
         const lPlayers = document.createElement('div');
         lPlayers.className = 'vc-activity-lobby-players';
         lPlayers.textContent =
@@ -2298,6 +2677,7 @@ export function createVcActivitiesController(
           joinBtn.className = 'btn-primary vc-activity-sm-btn';
           joinBtn.textContent = 'Join Match';
           joinBtn.addEventListener('click', () => {
+            evictOwnOtherSeatedLobbies(lobby.id);
             watchedLobbyIds.add(lobby.id);
             expandedTarget = { kind: 'lobby', threadKey, lobbyId: lobby.id };
             options.sendActivityFrame({
@@ -2359,6 +2739,18 @@ export function createVcActivitiesController(
     statusBanner.className = 'vc-game-status-banner';
     statusBanner.textContent = state.statusText;
     wrap.appendChild(statusBanner);
+
+    if (
+      state.mode === 'blitz' &&
+      state.turnDeadlineAt &&
+      lobby.status === 'playing' &&
+      state.winnerUsername === null
+    ) {
+      const turnSide = state.turn === 'w' ? 'White' : 'Black';
+      wrap.appendChild(
+        renderTurnTimerBar(state.turnDeadlineAt, BLITZ_TURN_MS, `⚡ Blitz Turn (${turnSide})`),
+      );
+    }
 
     // Compute material advantage for side captured trays
     const whiteCaptures = (state.capturedByWhite || []).filter(Boolean) as NonNullable<ChessPiece>[];
@@ -2583,6 +2975,18 @@ export function createVcActivitiesController(
     statusBanner.textContent = state.statusText;
     wrap.appendChild(statusBanner);
 
+    if (
+      state.mode === 'blitz' &&
+      state.turnDeadlineAt &&
+      lobby.status === 'playing' &&
+      !state.winnerUsername
+    ) {
+      const turnSide = state.turn === 'r' ? 'Red' : 'Black';
+      wrap.appendChild(
+        renderTurnTimerBar(state.turnDeadlineAt, BLITZ_TURN_MS, `⚡ Blitz Turn (${turnSide})`),
+      );
+    }
+
     const flankLayout = document.createElement('div');
     flankLayout.className = 'vc-board-flank-layout';
 
@@ -2771,16 +3175,32 @@ export function createVcActivitiesController(
     const isSeated = lobby.players.some((p) => p.username.toLowerCase() === selfKey);
     const totalSafe = state.rows * state.cols - state.mineCount;
     const mineSet = new Set(state.mines ?? []);
+    const alivePlayersList = lobby.players.filter(
+      (p) => (state.playerBoards?.[p.username.toLowerCase()]?.status ?? 'playing') === 'playing',
+    );
+    const myCurrentStatus =
+      state.playerBoards?.[selfKey]?.status ?? 'playing';
 
     // Determine which board(s) to display:
-    // - If spectator (!isSeated), default to 'split' so spectators watch ALL players' live boards side-by-side!
-    // - Any user (player or spectator) can also click a player tab or 'Split-Screen All' to watch live progress!
+    // - Spectators OR eliminated players see split-screen live view by default so they can watch survivors!
     const effectiveView =
       minesweeperViewTarget === 'auto'
-        ? isSeated
+        ? isSeated && myCurrentStatus === 'playing'
           ? selfKey
           : 'split'
         : minesweeperViewTarget;
+
+    if (lobby.status === 'playing' && !state.winnerUsername) {
+      const lmsBanner = document.createElement('div');
+      lmsBanner.className = 'vc-game-status-banner';
+      lmsBanner.textContent =
+        lobby.players.length > 2
+          ? `💣 Last Man Standing — ${alivePlayersList.length}/${lobby.players.length} Players Alive (Beat it first or outlast everyone!)`
+          : myCurrentStatus === 'exploded'
+            ? '💥 You hit a mine!'
+            : '💣 Flag all mines or outlast your opponent to win!';
+      wrap.appendChild(lmsBanner);
+    }
 
     const switcherBar = document.createElement('div');
     switcherBar.className = 'vc-mine-race-bar';
@@ -2924,19 +3344,47 @@ export function createVcActivitiesController(
         flagged: Array.from(nextFlag),
         status: nextStatus,
         explodedIndex,
+        eliminatedAt: nextStatus === 'exploded' ? Date.now() : undefined,
       };
 
-      let winnerUsername = state.winnerUsername;
-      let winReason = state.winReason;
+      const updatedBoardsMap: Record<string, MinesweeperPlayerBoard> = {
+        ...(state.playerBoards || {}),
+        [selfKey]: nextPlayerBoard,
+      };
+      const remainingAlive = lobby.players.filter(
+        (p) => (updatedBoardsMap[p.username.toLowerCase()]?.status ?? 'playing') === 'playing',
+      );
+
+      let winnerUsername: string | null = null;
+      let winReason: string | undefined;
       const selfProf = options.getSelfProfile();
 
       if (nextStatus === 'won') {
         winnerUsername = selfProf?.username ?? selfKey;
         winReason = `${selfProf?.displayName ?? selfKey} flagged/cleared all mines first and won!`;
       } else if (nextStatus === 'exploded') {
-        const opponent = lobby.players.find((p) => p.username.toLowerCase() !== selfKey);
-        winnerUsername = opponent?.username ?? selfKey;
-        winReason = `${selfProf?.displayName ?? selfKey} hit a mine! ${opponent?.displayName ?? 'Opponent'} wins!`;
+        if (remainingAlive.length === 1 && lobby.players.length >= 2) {
+          const survivor = remainingAlive[0];
+          winnerUsername = survivor.username;
+          winReason = `${selfProf?.displayName ?? selfKey} hit a mine — ${survivor.displayName} is the last player standing and won!`;
+        } else if (remainingAlive.length === 0 && lobby.players.length >= 2) {
+          // Simultaneous edge case: survivor who exploded last wins
+          const sortedDead = [...lobby.players].sort(
+            (a, b) =>
+              (updatedBoardsMap[b.username.toLowerCase()]?.eliminatedAt ?? 0) -
+              (updatedBoardsMap[a.username.toLowerCase()]?.eliminatedAt ?? 0),
+          );
+          const lastDead = sortedDead[0];
+          winnerUsername = lastDead.username;
+          winReason = `${lastDead.displayName} survived longest and won Minesweeper!`;
+        } else {
+          // 2+ players still alive -> match keeps going in Last Man Standing!
+          winnerUsername = null;
+          winReason = undefined;
+          if (lobby.players.length > 2) {
+            minesweeperViewTarget = 'split';
+          }
+        }
       }
 
       options.sendActivityFrame({
@@ -3096,6 +3544,19 @@ export function createVcActivitiesController(
     }
     wrap.appendChild(livesRow);
 
+    if (state.turnDeadlineAt && lobby.status === 'playing' && !state.winnerUsername) {
+      const activeProf = lobby.players.find(
+        (p) => p.username.toLowerCase() === activeUsername.toLowerCase(),
+      );
+      wrap.appendChild(
+        renderTurnTimerBar(
+          state.turnDeadlineAt,
+          VEXILLO_TURN_MS,
+          `⏱ Turn Timer (${activeProf?.displayName ?? activeUsername})`,
+        ),
+      );
+    }
+
     if (state.lastFeedback) {
       const fb = document.createElement('div');
       fb.className = state.lastFeedback.isCorrect
@@ -3191,6 +3652,7 @@ export function createVcActivitiesController(
           winnerUsername,
           winReason,
           roundNumber: (state.roundNumber || 1) + 1,
+          turnDeadlineAt: winnerUsername ? null : Date.now() + VEXILLO_TURN_MS,
         };
 
         options.sendActivityFrame({
@@ -3635,23 +4097,153 @@ export function createVcActivitiesController(
       btn.disabled = t.id !== 'move' && (activePawn?.wallsLeft ?? 0) <= 0;
       btn.addEventListener('click', () => {
         quoridorTool = t.id;
+        quoridorArmedWall = null;
         options.onStateChanged();
       });
       toolRow.appendChild(btn);
     }
     wrap.appendChild(toolRow);
 
-    const boardEl = document.createElement('div');
-    boardEl.className = 'vc-quoridor-board';
+    const isPlacingWall =
+      isMyTurn &&
+      (quoridorTool === 'hwall' || quoridorTool === 'vwall') &&
+      (activePawn?.wallsLeft ?? 0) > 0;
+    const wallOrient: 'h' | 'v' = quoridorTool === 'vwall' ? 'v' : 'h';
 
-    const legalMoves = isMyTurn ? getLegalQuoridorPawnMoves(state, state.turnIndex) : [];
+    const commitWallPlacement = (orient: 'h' | 'v', wr: number, wc: number) => {
+      if (!isMyTurn || activePawn.wallsLeft <= 0) return;
+      if (!canPlaceQuoridorWall(state, orient, wr, wc)) return;
+      const nextPawns = state.pawns.map((p, idx) =>
+        idx === state.turnIndex
+          ? { ...p, prevR: undefined, prevC: undefined, wallsLeft: p.wallsLeft - 1 }
+          : { ...p, prevR: undefined, prevC: undefined },
+      );
+      const nextTurn = (state.turnIndex + 1) % nextPawns.length;
+      const nextState: QuoridorGameState = {
+        ...state,
+        pawns: nextPawns,
+        turnIndex: nextTurn,
+        hWalls: orient === 'h' ? [...state.hWalls, `${wr},${wc}`] : state.hWalls,
+        vWalls: orient === 'v' ? [...state.vWalls, `${wr},${wc}`] : state.vWalls,
+        moveCount: (state.moveCount || 0) + 1,
+        statusText: `${nextPawns[nextTurn].displayName}'s turn`,
+      };
+      quoridorTool = 'move';
+      quoridorArmedWall = null;
+      options.sendActivityFrame({
+        type: 'activity:action',
+        lobbyId: lobby.id,
+        gameState: nextState,
+        status: 'playing',
+      });
+    };
+
     const files = 'abcdefghi';
 
+    const telegraphBar = document.createElement('div');
+    telegraphBar.className = 'vc-quoridor-telegraph-bar';
+    const telegraphStatus = document.createElement('span');
+    telegraphStatus.className = 'vc-quoridor-telegraph-text';
+    const confirmWallBtn = document.createElement('button');
+    confirmWallBtn.type = 'button';
+    confirmWallBtn.className = 'btn-primary vc-activity-sm-btn';
+    confirmWallBtn.textContent = '✓ Place Wall';
+    confirmWallBtn.hidden = true;
+    confirmWallBtn.addEventListener('click', () => {
+      if (quoridorArmedWall) {
+        commitWallPlacement(
+          quoridorArmedWall.orient,
+          quoridorArmedWall.r,
+          quoridorArmedWall.c,
+        );
+      }
+    });
+
+    if (isPlacingWall) {
+      telegraphStatus.textContent =
+        wallOrient === 'h'
+          ? 'Aim along any horizontal groove between rows to preview your wall (green = legal)'
+          : 'Aim along any vertical groove between columns to preview your wall (green = legal)';
+      telegraphBar.appendChild(telegraphStatus);
+      telegraphBar.appendChild(confirmWallBtn);
+      wrap.appendChild(telegraphBar);
+    }
+
+    const boardEl = document.createElement('div');
+    boardEl.className = isPlacingWall
+      ? `vc-quoridor-board vc-quoridor-board--wall-mode vc-quoridor-board--${wallOrient}wall`
+      : 'vc-quoridor-board';
+
+    // Single live Wall Telegraph bar inside the 17x17 groove grid (updated in-place on hover/tap!)
+    const telegraphEl = document.createElement('div');
+    telegraphEl.className = 'vc-quoridor-telegraph';
+    telegraphEl.hidden = true;
+
+    const showWallTelegraph = (orient: 'h' | 'v', wr: number, wc: number, armed = false) => {
+      if (!isPlacingWall || wr < 0 || wr >= 8 || wc < 0 || wc >= 8) {
+        telegraphEl.hidden = true;
+        return;
+      }
+      const valid = canPlaceQuoridorWall(state, orient, wr, wc);
+      telegraphEl.hidden = false;
+      telegraphEl.className = `vc-quoridor-telegraph vc-quoridor-telegraph--${orient} ${
+        valid ? 'vc-quoridor-telegraph--valid' : 'vc-quoridor-telegraph--invalid'
+      }`;
+      if (orient === 'h') {
+        telegraphEl.style.gridRow = String(wr * 2 + 2);
+        telegraphEl.style.gridColumn = `${wc * 2 + 1} / span 3`;
+      } else {
+        telegraphEl.style.gridColumn = String(wc * 2 + 2);
+        telegraphEl.style.gridRow = `${wr * 2 + 1} / span 3`;
+      }
+      const colPair = `${(files[wc] ?? '').toUpperCase()}–${(files[wc + 1] ?? '').toUpperCase()}`;
+      const rowPair = `${9 - wr}–${8 - wr}`;
+      if (valid) {
+        telegraphStatus.textContent =
+          orient === 'h'
+            ? `✓ Horizontal wall between rows ${rowPair} (cols ${colPair}) — click to place`
+            : `✓ Vertical wall between cols ${colPair} (rows ${rowPair}) — click to place`;
+        telegraphStatus.className = 'vc-quoridor-telegraph-text vc-quoridor-telegraph-text--valid';
+      } else {
+        telegraphStatus.textContent = '✗ Cannot place wall here (overlaps wall or blocks a player path)';
+        telegraphStatus.className = 'vc-quoridor-telegraph-text vc-quoridor-telegraph-text--invalid';
+      }
+      confirmWallBtn.hidden = !(armed && valid);
+    };
+
+    const clearWallTelegraph = () => {
+      if (quoridorArmedWall && quoridorArmedWall.orient === wallOrient) {
+        showWallTelegraph(
+          quoridorArmedWall.orient,
+          quoridorArmedWall.r,
+          quoridorArmedWall.c,
+          true,
+        );
+        return;
+      }
+      telegraphEl.hidden = true;
+      confirmWallBtn.hidden = true;
+      telegraphStatus.className = 'vc-quoridor-telegraph-text';
+      telegraphStatus.textContent =
+        wallOrient === 'h'
+          ? 'Aim along any horizontal groove between rows to preview your wall (green = legal)'
+          : 'Aim along any vertical groove between columns to preview your wall (green = legal)';
+    };
+
+    boardEl.addEventListener('pointerleave', () => {
+      if (isPlacingWall) clearWallTelegraph();
+    });
+
+    const legalMoves = isMyTurn ? getLegalQuoridorPawnMoves(state, state.turnIndex) : [];
+
+    // 1. Place the 9x9 squares strictly in odd 17x17 CSS Grid tracks (2*r + 1, 2*c + 1)
     for (let r = 0; r < 9; r++) {
       for (let c = 0; c < 9; c++) {
         const cell = document.createElement('button');
         cell.type = 'button';
         cell.className = 'vc-quoridor-cell';
+        cell.style.gridRow = String(r * 2 + 1);
+        cell.style.gridColumn = String(c * 2 + 1);
         const isLegalMove =
           isMyTurn &&
           quoridorTool === 'move' &&
@@ -3685,7 +4277,17 @@ export function createVcActivitiesController(
           cell.appendChild(pawnEl);
         }
 
-        cell.addEventListener('click', () => {
+        if (isPlacingWall) {
+          const mappedR = Math.min(7, r);
+          const mappedC = Math.min(7, c);
+          cell.addEventListener('pointerenter', (e) => {
+            if (e.pointerType !== 'touch') {
+              showWallTelegraph(wallOrient, mappedR, mappedC, false);
+            }
+          });
+        }
+
+        cell.addEventListener('click', (e) => {
           if (!isMyTurn) return;
           if (quoridorTool === 'move' && isLegalMove) {
             const nextPawns = state.pawns.map((p, idx) =>
@@ -3718,38 +4320,25 @@ export function createVcActivitiesController(
               status: reachedGoal ? 'finished' : 'playing',
               winnerUsername: reachedGoal ? moved.username : undefined,
             });
-          } else if (
-            (quoridorTool === 'hwall' || quoridorTool === 'vwall') &&
-            r < 8 &&
-            c < 8 &&
-            activePawn.wallsLeft > 0
-          ) {
-            const orient = quoridorTool === 'hwall' ? 'h' : 'v';
-            if (!canPlaceQuoridorWall(state, orient, r, c)) {
-              return;
+          } else if (isPlacingWall) {
+            const wr = Math.min(7, r);
+            const wc = Math.min(7, c);
+            const isTouchLike = (e as PointerEvent).pointerType === 'touch' || window.matchMedia('(pointer: coarse)').matches;
+            if (isTouchLike) {
+              if (
+                quoridorArmedWall &&
+                quoridorArmedWall.orient === wallOrient &&
+                quoridorArmedWall.r === wr &&
+                quoridorArmedWall.c === wc
+              ) {
+                commitWallPlacement(wallOrient, wr, wc);
+              } else {
+                quoridorArmedWall = { orient: wallOrient, r: wr, c: wc };
+                showWallTelegraph(wallOrient, wr, wc, true);
+              }
+            } else {
+              commitWallPlacement(wallOrient, wr, wc);
             }
-            const nextPawns = state.pawns.map((p, idx) =>
-              idx === state.turnIndex
-                ? { ...p, prevR: undefined, prevC: undefined, wallsLeft: p.wallsLeft - 1 }
-                : { ...p, prevR: undefined, prevC: undefined },
-            );
-            const nextTurn = (state.turnIndex + 1) % nextPawns.length;
-            const nextState: QuoridorGameState = {
-              ...state,
-              pawns: nextPawns,
-              turnIndex: nextTurn,
-              hWalls: orient === 'h' ? [...state.hWalls, `${r},${c}`] : state.hWalls,
-              vWalls: orient === 'v' ? [...state.vWalls, `${r},${c}`] : state.vWalls,
-              moveCount: (state.moveCount || 0) + 1,
-              statusText: `${nextPawns[nextTurn].displayName}'s turn`,
-            };
-            quoridorTool = 'move';
-            options.sendActivityFrame({
-              type: 'activity:action',
-              lobbyId: lobby.id,
-              gameState: nextState,
-              status: 'playing',
-            });
           }
         });
 
@@ -3757,23 +4346,80 @@ export function createVcActivitiesController(
       }
     }
 
+    // 2. Render interactive groove hit-targets directly in the side grooves between squares
+    if (isPlacingWall) {
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          const grooveBtn = document.createElement('button');
+          grooveBtn.type = 'button';
+          grooveBtn.className = `vc-quoridor-groove vc-quoridor-groove--${wallOrient}`;
+          grooveBtn.dataset.groove = `${wallOrient}:${r},${c}`;
+          grooveBtn.setAttribute(
+            'aria-label',
+            `${wallOrient === 'h' ? 'Horizontal' : 'Vertical'} wall groove ${r},${c}`,
+          );
+          if (wallOrient === 'h') {
+            grooveBtn.style.gridRow = String(r * 2 + 2);
+            grooveBtn.style.gridColumn = `${c * 2 + 1} / span 2`;
+          } else {
+            grooveBtn.style.gridColumn = String(c * 2 + 2);
+            grooveBtn.style.gridRow = `${r * 2 + 1} / span 2`;
+          }
+          grooveBtn.addEventListener('pointerenter', (e) => {
+            if (e.pointerType !== 'touch') {
+              showWallTelegraph(wallOrient, r, c, false);
+            }
+          });
+          grooveBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isTouchLike = (e as PointerEvent).pointerType === 'touch' || window.matchMedia('(pointer: coarse)').matches;
+            if (isTouchLike) {
+              if (
+                quoridorArmedWall &&
+                quoridorArmedWall.orient === wallOrient &&
+                quoridorArmedWall.r === r &&
+                quoridorArmedWall.c === c
+              ) {
+                commitWallPlacement(wallOrient, r, c);
+              } else {
+                quoridorArmedWall = { orient: wallOrient, r, c };
+                showWallTelegraph(wallOrient, r, c, true);
+              }
+            } else {
+              commitWallPlacement(wallOrient, r, c);
+            }
+          });
+          boardEl.appendChild(grooveBtn);
+        }
+      }
+    }
+
+    // 3. Render placed walls strictly in the even 17x17 CSS Grid groove tracks (NEVER inside squares!)
     for (const hw of state.hWalls) {
       const [r, c] = hw.split(',').map(Number);
       const wallEl = document.createElement('div');
       wallEl.className = 'vc-quoridor-wall vc-quoridor-wall--h';
-      wallEl.style.left = `calc(${(c / 9) * 100}% + 2px)`;
-      wallEl.style.top = `calc(${((r + 1) / 9) * 100}% - 3px)`;
-      wallEl.style.width = `calc(${(2 / 9) * 100}% - 4px)`;
+      wallEl.style.gridRow = String(r * 2 + 2);
+      wallEl.style.gridColumn = `${c * 2 + 1} / span 3`;
       boardEl.appendChild(wallEl);
     }
     for (const vw of state.vWalls) {
       const [r, c] = vw.split(',').map(Number);
       const wallEl = document.createElement('div');
       wallEl.className = 'vc-quoridor-wall vc-quoridor-wall--v';
-      wallEl.style.left = `calc(${((c + 1) / 9) * 100}% - 3px)`;
-      wallEl.style.top = `calc(${(r / 9) * 100}% + 2px)`;
-      wallEl.style.height = `calc(${(2 / 9) * 100}% - 4px)`;
+      wallEl.style.gridColumn = String(c * 2 + 2);
+      wallEl.style.gridRow = `${r * 2 + 1} / span 3`;
       boardEl.appendChild(wallEl);
+    }
+
+    boardEl.appendChild(telegraphEl);
+    if (isPlacingWall && quoridorArmedWall && quoridorArmedWall.orient === wallOrient) {
+      showWallTelegraph(
+        quoridorArmedWall.orient,
+        quoridorArmedWall.r,
+        quoridorArmedWall.c,
+        true,
+      );
     }
 
     wrap.appendChild(boardEl);
@@ -3822,6 +4468,7 @@ export function createVcActivitiesController(
       takeSeatBtn.className = 'btn-primary vc-activity-sm-btn';
       takeSeatBtn.textContent = 'Join Match Seat';
       takeSeatBtn.addEventListener('click', () => {
+        evictOwnOtherSeatedLobbies(lobby.id);
         options.sendActivityFrame({
           type: 'activity:join',
           lobbyId: lobby.id,
@@ -3848,6 +4495,34 @@ export function createVcActivitiesController(
           });
         });
         seatActions.appendChild(cntBtn);
+      }
+    }
+
+    if (
+      isHost &&
+      lobby.status === 'waiting' &&
+      (lobby.gameId === 'chess' || lobby.gameId === 'checkers')
+    ) {
+      const currentMode = lobby.gameMode === 'blitz' ? 'blitz' : 'standard';
+      for (const m of [
+        { id: 'standard' as const, label: 'Standard' },
+        { id: 'blitz' as const, label: '⚡ Blitz 10s' },
+      ]) {
+        const mBtn = document.createElement('button');
+        mBtn.type = 'button';
+        mBtn.className =
+          currentMode === m.id
+            ? 'vc-activity-mode-pill vc-activity-mode-pill--active'
+            : 'vc-activity-mode-pill';
+        mBtn.textContent = m.label;
+        mBtn.addEventListener('click', () => {
+          options.sendActivityFrame({
+            type: 'activity:config',
+            lobbyId: lobby.id,
+            gameMode: m.id,
+          });
+        });
+        seatActions.appendChild(mBtn);
       }
     }
 
@@ -3906,8 +4581,14 @@ export function createVcActivitiesController(
       const leaveLobbyBtn = document.createElement('button');
       leaveLobbyBtn.type = 'button';
       leaveLobbyBtn.className = 'btn-danger vc-activity-sm-btn';
-      leaveLobbyBtn.textContent = 'Leave & Cancel Game';
+      leaveLobbyBtn.textContent =
+        lobby.status === 'waiting'
+          ? 'Disband Lobby'
+          : lobby.status === 'finished'
+            ? 'End & Close Activity'
+            : 'Quit & End Game';
       leaveLobbyBtn.addEventListener('click', () => {
+        lobbiesById.delete(lobby.id);
         watchedLobbyIds.delete(lobby.id);
         expandedTarget = null;
         options.sendActivityFrame({
@@ -3991,26 +4672,63 @@ export function createVcActivitiesController(
     const expHeader = document.createElement('div');
     expHeader.className = 'vc-expanded-header';
 
+    const expTitleRow = document.createElement('div');
+    expTitleRow.className = 'vc-expanded-title-row';
+
+    if (activeLobby) {
+      expTitleRow.appendChild(createSpectatorCountPill(activeLobby));
+    }
+
     const expTitle = document.createElement('span');
     expTitle.className = 'vc-expanded-title';
     expTitle.textContent = activeLobby
-      ? `${meta.name} — ${activeLobby.title}`
+      ? `${meta.name} — ${activeLobby.title}${activeLobby.gameMode === 'blitz' ? ' · ⚡ Blitz 10s' : ''}`
       : `${meta.name} — Lobbies`;
-    expHeader.appendChild(expTitle);
+    expTitleRow.appendChild(expTitle);
+    expHeader.appendChild(expTitleRow);
 
     const expActions = document.createElement('div');
     expActions.className = 'vc-expanded-actions';
 
     if (activeLobby) {
+      const selfKey = getSelfKey();
+      const isSeatedInActive = activeLobby.players.some(
+        (p) => p.username.toLowerCase() === selfKey,
+      );
       const stopWatchBtn = document.createElement('button');
       stopWatchBtn.type = 'button';
       stopWatchBtn.className = 'vc-stage-tool-btn vc-stage-tool-btn--stop-watch';
       stopWatchBtn.dataset.vcRole = 'stop-watching-activity';
-      stopWatchBtn.title = 'Close activity view without leaving your game';
-      stopWatchBtn.textContent = 'Hide Game';
+      if (isSeatedInActive && activeLobby.status === 'finished') {
+        stopWatchBtn.title = 'Close and remove finished activity from the call';
+        stopWatchBtn.textContent = 'Close Activity';
+      } else if (isSeatedInActive) {
+        stopWatchBtn.title = 'Minimize game without quitting your match';
+        stopWatchBtn.textContent = 'Hide Game';
+      } else {
+        stopWatchBtn.title = 'Stop spectating this activity';
+        stopWatchBtn.textContent = 'Stop Watching';
+      }
       stopWatchBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        expandedTarget = null;
+        if (isSeatedInActive && activeLobby!.status === 'finished') {
+          lobbiesById.delete(activeLobby!.id);
+          watchedLobbyIds.delete(activeLobby!.id);
+          expandedTarget = null;
+          options.sendActivityFrame({
+            type: 'activity:leave',
+            lobbyId: activeLobby!.id,
+          });
+        } else if (!isSeatedInActive) {
+          watchedLobbyIds.delete(activeLobby!.id);
+          expandedTarget = null;
+          options.sendActivityFrame({
+            type: 'activity:unwatch',
+            lobbyId: activeLobby!.id,
+          });
+        } else {
+          expandedTarget = null;
+        }
         options.onStateChanged();
       });
       expActions.appendChild(stopWatchBtn);
@@ -4093,6 +4811,34 @@ export function createVcActivitiesController(
           ? `act:${expandedTarget.lobbyId}`
           : `act-browser:${expandedTarget.gameId}`
         : null,
+    isUserInActivity: (username) => {
+      const targetKey = username.trim().toLowerCase();
+      if (!targetKey) return false;
+      for (const lobby of lobbiesById.values()) {
+        if (lobby.status === 'finished') continue;
+        if (lobby.players.some((p) => p.username.toLowerCase() === targetKey)) {
+          return true;
+        }
+      }
+      return false;
+    },
+    hasActiveActivityInThread: (threadKey) => {
+      for (const lobby of lobbiesById.values()) {
+        if (lobby.threadKey === threadKey && lobby.status !== 'finished') {
+          return true;
+        }
+      }
+      return false;
+    },
+    getPresenceSignature: () =>
+      Array.from(lobbiesById.values())
+        .filter((l) => l.status !== 'finished')
+        .map(
+          (l) =>
+            `${l.id}:${l.threadKey}:${l.status}:${l.players.map((p) => p.username.toLowerCase()).join('+')}`,
+        )
+        .sort()
+        .join(';'),
     watchLobby: (lobbyId, expandBigScreen = true) => {
       const l = lobbiesById.get(lobbyId);
       if (!l) return;
@@ -4103,9 +4849,15 @@ export function createVcActivitiesController(
       options.onStateChanged();
     },
     stopWatchingLobby: (lobbyId) => {
+      const l = lobbiesById.get(lobbyId);
+      const selfKey = getSelfKey();
+      const isSeated = l?.players.some((p) => p.username.toLowerCase() === selfKey);
       watchedLobbyIds.delete(lobbyId);
       if (expandedTarget?.kind === 'lobby' && expandedTarget.lobbyId === lobbyId) {
         expandedTarget = null;
+      }
+      if (l && !isSeated) {
+        options.sendActivityFrame({ type: 'activity:unwatch', lobbyId });
       }
       options.onStateChanged();
     },
@@ -4124,10 +4876,46 @@ export function createVcActivitiesController(
       expandedTarget = null;
       options.onStateChanged();
     },
+    leaveAllSeatedLobbiesForCall: (threadKey) => {
+      const selfKey = getSelfKey();
+      if (!selfKey) return;
+      let mutated = false;
+      for (const [id, lobby] of Array.from(lobbiesById.entries())) {
+        if (lobby.threadKey !== threadKey) continue;
+        const isSeated = lobby.players.some((p) => p.username.toLowerCase() === selfKey);
+        if (isSeated) {
+          lobbiesById.delete(id);
+          watchedLobbyIds.delete(id);
+          if (expandedTarget?.kind === 'lobby' && expandedTarget.lobbyId === id) {
+            expandedTarget = null;
+          }
+          options.sendActivityFrame({ type: 'activity:leave', lobbyId: id });
+          mutated = true;
+        } else if (watchedLobbyIds.has(id)) {
+          watchedLobbyIds.delete(id);
+          if (expandedTarget?.kind === 'lobby' && expandedTarget.lobbyId === id) {
+            expandedTarget = null;
+          }
+          options.sendActivityFrame({ type: 'activity:unwatch', lobbyId: id });
+          mutated = true;
+        }
+      }
+      if (expandedTarget && expandedTarget.threadKey === threadKey) {
+        expandedTarget = null;
+        mutated = true;
+      }
+      if (mutated) {
+        options.onStateChanged();
+      }
+    },
     openGameBrowser,
     toggleActivitiesBubble,
     closeActivitiesBubble,
     renderActivityStageTiles,
     renderExpandedActivityStage,
+    destroy: () => {
+      window.clearInterval(turnTimerInterval);
+      closeActivitiesBubble();
+    },
   };
 }

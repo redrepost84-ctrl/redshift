@@ -35,6 +35,7 @@ import type {
 import {
   createActivitiesControlIconSvg,
   createVcActivitiesController,
+  createWatcherEyeIconSvg,
 } from './vcActivities';
 import {
   applyAudioOutputDevice,
@@ -105,6 +106,10 @@ export interface VoiceManagerHandle {
   getActiveCallThreadKey: () => string | null;
   getActiveCallState: () => VcStateEventPayload | null;
   getCallStateForThread: (threadKey: string) => VcStateEventPayload | null;
+  isUserInActivity: (username: string) => boolean;
+  isUserInAnyKnownCall: (username: string) => boolean;
+  getThreadPresence: (threadKey: string) => 'activity' | 'call' | null;
+  getSidebarPresenceSignature: () => string;
   renderCallTopBar: (host: HTMLElement, threadKey: string) => void;
   renderSidebarStatusBar: (host: HTMLElement) => void;
   handleVcState: (payload: VcStateEventPayload) => void;
@@ -113,6 +118,7 @@ export interface VoiceManagerHandle {
   handleVcSignal: (payload: VcSignalEventPayload) => void;
   handleVcSpeaking: (payload: VcSpeakingEventPayload) => void;
   handleVcTransferred: (payload: VcTransferredEventPayload) => void;
+  handleSocketReconnected: () => void;
   handleActivityList: (payload: ActivityListEventPayload) => void;
   handleActivityLobbyUpdate: (payload: ActivityLobbyUpdateEventPayload) => void;
   handleActivityLobbyRemoved: (payload: ActivityLobbyRemovedEventPayload) => void;
@@ -194,6 +200,8 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
   const speakingHoldUntil = new Map<string, number>();
 
   let activeCallThreadKey: string | null = null;
+  let activeCallTarget: ThreadTarget | null = null;
+  let lastReconnectRejoinAt = 0;
   let localMicStream: MediaStream | null = null;
   let localRawMicStream: MediaStream | null = null;
   let localMicDsp: MicDspChain | null = null;
@@ -510,7 +518,9 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       const scrPaused = Boolean(scrOn && localScreenPaused);
       const camId = localCameraStream?.id ?? '';
       const scrId = localScreenStream?.id ?? '';
-      const sig = `${activeCallThreadKey}:${muted ? 1 : 0}:${deaf ? 1 : 0}:${camOn ? 1 : 0}:${scrOn ? 1 : 0}:${scrPaused ? 1 : 0}:${camId}:${scrId}`;
+      const watchingStreams = Array.from(watchedStreamKeys).sort();
+      const watchingSig = watchingStreams.join(',');
+      const sig = `${activeCallThreadKey}:${muted ? 1 : 0}:${deaf ? 1 : 0}:${camOn ? 1 : 0}:${scrOn ? 1 : 0}:${scrPaused ? 1 : 0}:${camId}:${scrId}:${watchingSig}`;
       if (sig !== lastSentVoiceStateSig) {
         lastSentVoiceStateSig = sig;
         options.getSocket()?.sendVcVoiceState(activeCallThreadKey, muted, deaf, {
@@ -519,6 +529,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
           screenPaused: scrPaused,
           cameraStreamId: camId,
           screenStreamId: scrId,
+          watchingStreams,
         });
       }
     } else {
@@ -1319,9 +1330,11 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     lastAutoLeaveResendAt.delete(leavingThread);
     watchedStreamKeys.clear();
     knownPeersByCall.delete(leavingThread);
+    activitiesCtrl.leaveAllSeatedLobbiesForCall(leavingThread);
     closeActivePopover();
     expandedStageKey = null;
     activeCallThreadKey = null;
+    activeCallTarget = null;
     lastActiveSpeakerKey = null;
     lastSentVoiceStateSig = '';
     stopCallStatsPolling();
@@ -2841,6 +2854,12 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     };
 
     const startOrJoinCall = (target: ThreadTarget, threadKey: string) => {
+    // Already connected to this exact call — never leave, kick, or re-ring!
+    if (activeCallThreadKey === threadKey) {
+      activeCallTarget = target;
+      emitStateChanged();
+      return;
+    }
     refreshIceServers();
     ensureVadContext();
     startCallStatsPolling();
@@ -2853,6 +2872,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     syncIncomingPopup();
 
     activeCallThreadKey = threadKey;
+    activeCallTarget = target;
     recentlyLeftCalls.delete(threadKey);
     lastAutoLeaveResendAt.delete(threadKey);
     const isJoiningExisting = Boolean(callsByThread.get(threadKey)?.active || pendingIncoming);
@@ -2891,6 +2911,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       leaveCall();
     }
     activeCallThreadKey = threadKey;
+    activeCallTarget = target;
     recentlyLeftCalls.delete(threadKey);
     lastAutoLeaveResendAt.delete(threadKey);
     seedOptimisticActiveCall(target, threadKey, incoming);
@@ -3141,6 +3162,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
         closeActivePopover();
         expandedStageKey = null;
         activeCallThreadKey = null;
+        activeCallTarget = null;
         lastActiveSpeakerKey = null;
         stopCallStatsPolling();
         stopVadPolling();
@@ -3214,6 +3236,24 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
               }
             }
           }
+        } else if (
+          !selfJoined &&
+          activeCallTarget &&
+          !recentlyLeftCalls.has(effectivePayload.threadKey) &&
+          Date.now() - lastReconnectRejoinAt > 2500
+        ) {
+          // Server dropped our participant entry during a brief reconnect; silently re-attach without ringing!
+          lastReconnectRejoinAt = Date.now();
+          lastSentVoiceStateSig = '';
+          options
+            .getSocket()
+            ?.sendVcJoin(
+              activeCallTarget,
+              getEffectiveMuted(),
+              getEffectiveDeafened(),
+              false,
+              true,
+            );
         }
         void reconcilePeerConnections(effectivePayload);
       }
@@ -3384,6 +3424,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     closeActivePopover();
     expandedStageKey = null;
     activeCallThreadKey = null;
+    activeCallTarget = null;
     lastActiveSpeakerKey = null;
     lastSentVoiceStateSig = '';
     stopCallStatsPolling();
@@ -3731,6 +3772,43 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
         sortedParticipants.some((p) => p.user.username.toLowerCase() === selfKey),
     );
 
+    const getStreamWatchers = (streamKey: string, ownerKey: string): PublicProfile[] => {
+      const watchers: PublicProfile[] = [];
+      const seen = new Set<string>();
+      for (const p of sortedParticipants) {
+        const uKey = p.user.username.toLowerCase();
+        if (uKey === ownerKey) continue;
+        const isSelfWatching =
+          uKey === selfKey && inThisCall && watchedStreamKeys.has(streamKey);
+        const serverWatching =
+          Array.isArray(p.watchingStreams) && p.watchingStreams.includes(streamKey);
+        if ((uKey === selfKey ? isSelfWatching : serverWatching) && !seen.has(uKey)) {
+          seen.add(uKey);
+          watchers.push(p.user);
+        }
+      }
+      return watchers;
+    };
+
+    const createStreamWatcherPill = (streamKey: string, ownerKey: string): HTMLElement => {
+      const watchers = getStreamWatchers(streamKey, ownerKey);
+      const pill = document.createElement('span');
+      pill.className =
+        watchers.length > 0
+          ? 'vc-watcher-count-pill vc-watcher-count-pill--active'
+          : 'vc-watcher-count-pill';
+      pill.dataset.vcRole = 'stream-watcher-count';
+      pill.title =
+        watchers.length > 0
+          ? `Watching: ${watchers.map((w) => w.displayName).join(', ')}`
+          : 'No viewers yet';
+      pill.appendChild(createWatcherEyeIconSvg(12));
+      const num = document.createElement('span');
+      num.textContent = String(watchers.length);
+      pill.appendChild(num);
+      return pill;
+    };
+
     const layoutSig = [
       threadKey,
       inThisCall ? 'IN' : 'OUT',
@@ -3748,13 +3826,20 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
           const scrItem = streamItems.get(`scr:${uKey}`);
           const camId = camItem?.stream?.id ?? '';
           const scrId = scrItem ? `${scrItem.stream?.id ?? 'pending'}:${scrItem.watched ? 'W' : 'U'}` : '';
-          return `${uKey}:${p.user.displayName}:${camId}:${scrId}`;
+          const watchingStr =
+            uKey === selfKey
+              ? Array.from(watchedStreamKeys).sort().join('~')
+              : (p.watchingStreams ?? []).join('~');
+          return `${uKey}:${p.user.displayName}:${camId}:${scrId}:${watchingStr}`;
         })
         .join(','),
       sortedRinging.map((r) => `${r.username.toLowerCase()}:${r.displayName}`).join(','),
       `ACT:${activitiesCtrl.getRenderRevision()}:${activitiesCtrl.getExpandedStageKey() ?? ''}:${activitiesCtrl
         .getCallLobbies(threadKey)
-        .map((l) => `${l.id}:${l.version}:${l.status}:${activitiesCtrl.isLobbyWatched(l.id) ? 'W' : 'U'}`)
+        .map(
+          (l) =>
+            `${l.id}:${l.version}:${l.status}:${(l.spectators ?? []).length}:${activitiesCtrl.isLobbyWatched(l.id) ? 'W' : 'U'}`,
+        )
         .join(',')}`,
     ].join('|');
 
@@ -3885,6 +3970,13 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
 
         const expHeader = document.createElement('div');
         expHeader.className = 'vc-expanded-header';
+        const expLeft = document.createElement('div');
+        expLeft.className = 'vc-expanded-title-row';
+        if (hero.isScreen) {
+          expLeft.appendChild(
+            createStreamWatcherPill(hero.key, hero.owner.username.toLowerCase()),
+          );
+        }
         const badge = document.createElement('span');
         badge.className = hero.isScreen
           ? hero.paused
@@ -3896,7 +3988,8 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
             ? `${hero.owner.displayName} • Stream Paused`
             : `${hero.owner.displayName} • Screen Share`
           : `${hero.owner.displayName} • Camera`;
-        expHeader.appendChild(badge);
+        expLeft.appendChild(badge);
+        expHeader.appendChild(expLeft);
 
         const expActions = document.createElement('div');
         expActions.className = 'vc-expanded-actions';
@@ -4066,12 +4159,17 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
           vidBox.appendChild(thumbVideo);
         }
 
+        const topLeftBadges = document.createElement('div');
+        topLeftBadges.className = 'vc-tile-top-left-badges';
+        topLeftBadges.appendChild(createStreamWatcherPill(scrItem.key, uKey));
+
         const livePill = document.createElement('span');
         livePill.className = scrItem.paused
           ? 'vc-screen-live-pill vc-screen-live-pill--paused'
           : 'vc-screen-live-pill';
         livePill.textContent = scrItem.paused ? 'PAUSED' : 'LIVE';
-        vidBox.appendChild(livePill);
+        topLeftBadges.appendChild(livePill);
+        vidBox.appendChild(topLeftBadges);
 
         const triggerWatch = () => {
           if (!inThisCall) {
@@ -4293,19 +4391,11 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
 
       const activitiesBtn = document.createElement('button');
       activitiesBtn.type = 'button';
-      const hasActiveCallLobbies = activitiesCtrl.getCallLobbies(threadKey).length > 0;
-      activitiesBtn.className = hasActiveCallLobbies
-        ? 'vc-ctrl-btn vc-ctrl-btn--activities vc-ctrl-btn--has-live'
-        : 'vc-ctrl-btn vc-ctrl-btn--activities';
+      activitiesBtn.className = 'vc-ctrl-btn vc-ctrl-btn--activities';
       activitiesBtn.dataset.vcRole = 'activities';
       activitiesBtn.title = 'Activities — Play Games in Call';
       activitiesBtn.setAttribute('aria-label', 'Activities');
       activitiesBtn.appendChild(createActivitiesControlIconSvg(18));
-      if (hasActiveCallLobbies) {
-        const dot = document.createElement('span');
-        dot.className = 'vc-ctrl-live-dot';
-        activitiesBtn.appendChild(dot);
-      }
       activitiesBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         activitiesCtrl.toggleActivitiesBubble(activitiesBtn, threadKey);
@@ -5037,6 +5127,39 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     getActiveCallState: () =>
       activeCallThreadKey ? callsByThread.get(activeCallThreadKey) ?? null : null,
     getCallStateForThread: (threadKey) => callsByThread.get(threadKey) ?? null,
+    isUserInActivity: (username) => activitiesCtrl.isUserInActivity(username),
+    isUserInAnyKnownCall: (username) => {
+      const targetKey = username.trim().toLowerCase();
+      if (!targetKey) return false;
+      for (const call of callsByThread.values()) {
+        if (!call.active) continue;
+        if (call.participants.some((p) => p.user.username.toLowerCase() === targetKey)) {
+          return true;
+        }
+      }
+      return false;
+    },
+    getThreadPresence: (threadKey) => {
+      if (activitiesCtrl.hasActiveActivityInThread(threadKey)) {
+        return 'activity';
+      }
+      const call = callsByThread.get(threadKey);
+      if (call && call.active && call.participants.length > 0) {
+        return 'call';
+      }
+      return null;
+    },
+    getSidebarPresenceSignature: () => {
+      const callSig = Array.from(callsByThread.entries())
+        .filter(([, c]) => c.active && c.participants.length > 0)
+        .map(
+          ([k, c]) =>
+            `${k}:${c.participants.map((p) => p.user.username.toLowerCase()).sort().join(',')}`,
+        )
+        .sort()
+        .join('|');
+      return `${callSig}##${activitiesCtrl.getPresenceSignature()}`;
+    },
     renderCallTopBar,
     renderSidebarStatusBar,
     handleVcState,
@@ -5047,6 +5170,24 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     },
     handleVcSpeaking,
     handleVcTransferred,
+    handleSocketReconnected: () => {
+      if (destroyed) return;
+      if (activeCallThreadKey && activeCallTarget) {
+        lastReconnectRejoinAt = Date.now();
+        lastSentVoiceStateSig = '';
+        options
+          .getSocket()
+          ?.sendVcJoin(
+            activeCallTarget,
+            getEffectiveMuted(),
+            getEffectiveDeafened(),
+            false,
+            true,
+          );
+        syncTrackAndSinkStates();
+      }
+      options.getSocket()?.sendActivityFrame({ type: 'activity:list' });
+    },
     handleActivityList: (p) => {
       activitiesCtrl.handleLobbyList(p.lobbies);
     },
@@ -5059,7 +5200,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     destroy: () => {
       destroyed = true;
       closeActivePopover();
-      activitiesCtrl.closeActivitiesBubble();
+      activitiesCtrl.destroy();
       miniPipDragCleanup?.();
       window.removeEventListener('resize', handleMiniPipWindowResize);
       unsubPrefs();

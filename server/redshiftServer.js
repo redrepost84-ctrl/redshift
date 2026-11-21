@@ -1224,6 +1224,7 @@ function buildVcStatePayload(call, viewerKey) {
       screenPaused: Boolean(entry.screenSharing && entry.screenPaused),
       cameraStreamId: entry.cameraStreamId || undefined,
       screenStreamId: entry.screenStreamId || undefined,
+      watchingStreams: Array.isArray(entry.watchingStreams) ? entry.watchingStreams : [],
       connectionId: entry.connectionId || undefined,
       joinedAt: entry.joinedAt,
     });
@@ -1369,6 +1370,7 @@ function serializeActivityLobby(lobby) {
     title: lobby.title,
     hostUsername: lobby.hostUsername,
     maxPlayers: lobby.maxPlayers,
+    gameMode: lobby.gameMode === 'blitz' ? 'blitz' : 'standard',
     status: lobby.status,
     players: (lobby.players || []).map((p) => ({
       ...buildActivityUserProfile(p.username),
@@ -1446,9 +1448,125 @@ function sendActiveActivitiesToUser(username) {
   });
 }
 
+function removeUserSeatedLobbies(userKey, onlyThreadKey = '', excludeLobbyId = '') {
+  const cleanKey = userKey.toLowerCase();
+  for (const [id, lobby] of Array.from(activeActivityLobbies.entries())) {
+    if (excludeLobbyId && id === excludeLobbyId) continue;
+    if (onlyThreadKey && lobby.threadKey !== onlyThreadKey) continue;
+    const isSeated = (lobby.players || []).some((p) => p.username.toLowerCase() === cleanKey);
+    if (isSeated) {
+      const recipients = getActivityLobbyRecipients(lobby);
+      activeActivityLobbies.delete(id);
+      const removePayload = {
+        type: 'activity:lobby-removed',
+        lobbyId: id,
+        threadKey: lobby.threadKey,
+      };
+      for (const targetKey of recipients) {
+        sendWsEventToUser(targetKey, removePayload);
+      }
+    } else {
+      const prevLen = (lobby.spectators || []).length;
+      lobby.spectators = (lobby.spectators || []).filter(
+        (s) => s.username.toLowerCase() !== cleanKey,
+      );
+      if (lobby.spectators.length !== prevLen) {
+        lobby.version = (lobby.version || 1) + 1;
+        lobby.updatedAt = Date.now();
+        broadcastActivityLobby(lobby);
+      }
+    }
+  }
+}
+
+function resolveMinesweeperLobbyOutcome(lobby) {
+  if (!lobby || lobby.gameId !== 'minesweeper' || !lobby.gameState) return;
+  const gs = lobby.gameState;
+  const boards = gs.playerBoards || {};
+  const players = lobby.players || [];
+
+  const wonPlayer = players.find((p) => boards[p.username.toLowerCase()]?.status === 'won');
+  if (wonPlayer) {
+    gs.winnerUsername = wonPlayer.username;
+    gs.winReason = `${wonPlayer.displayName} flagged/cleared all mines first and won!`;
+    lobby.status = 'finished';
+    return;
+  }
+
+  const alivePlayers = players.filter((p) => {
+    const st = boards[p.username.toLowerCase()]?.status || 'playing';
+    return st === 'playing';
+  });
+
+  if (alivePlayers.length >= 2) {
+    gs.winnerUsername = null;
+    gs.winReason = undefined;
+    lobby.status = 'playing';
+    return;
+  }
+
+  if (alivePlayers.length === 1 && players.length >= 2) {
+    const survivor = alivePlayers[0];
+    gs.winnerUsername = survivor.username;
+    gs.winReason = `${survivor.displayName} is the last player standing and won Minesweeper!`;
+    lobby.status = 'finished';
+    return;
+  }
+
+  if (alivePlayers.length === 0 && players.length >= 2) {
+    let lastDead = players[0];
+    let bestTs = -1;
+    for (const p of players) {
+      const ts = Number(boards[p.username.toLowerCase()]?.eliminatedAt || 0);
+      if (ts >= bestTs) {
+        bestTs = ts;
+        lastDead = p;
+      }
+    }
+    gs.winnerUsername = lastDead.username;
+    gs.winReason = `${lastDead.displayName} survived longest and won Minesweeper!`;
+    lobby.status = 'finished';
+  }
+}
+
+function isUserInAnyVoiceCall(username) {
+  const cleanKey = username.toLowerCase();
+  for (const call of activeVoiceCalls.values()) {
+    if (call.participants.has(cleanKey)) return true;
+  }
+  return false;
+}
+
+function notifyPeersVoicePresence(username) {
+  const key = username.toLowerCase();
+  const inVoiceCall = isUserInAnyVoiceCall(key);
+  const affected = new Set([key]);
+  for (const friendId of db.friendships[key] ?? []) {
+    affected.add(friendId.toLowerCase());
+  }
+  for (const group of Object.values(db.groupDms)) {
+    if (group && Array.isArray(group.members) && group.members.some((m) => m.toLowerCase() === key)) {
+      for (const m of group.members) affected.add(m.toLowerCase());
+    }
+  }
+  for (const peerKey of getDmPeerKeys(key)) {
+    affected.add(peerKey.toLowerCase());
+  }
+  for (const [owner, list] of Object.entries(db.openDms)) {
+    if (Array.isArray(list) && list.some((u) => u.toLowerCase() === key)) {
+      affected.add(owner.toLowerCase());
+    }
+  }
+  const payload = { type: 'vc:presence', username: key, inVoiceCall };
+  for (const target of affected) {
+    sendWsEventToUser(target, payload);
+  }
+}
+
 /** @param {string} username */
 function cleanupUserFromVoiceCalls(username) {
   const cleanKey = username.toLowerCase();
+  let leftAny = false;
   for (const call of Array.from(activeVoiceCalls.values())) {
     let changed = false;
     if (stopRingingUser(call, cleanKey)) {
@@ -1456,7 +1574,9 @@ function cleanupUserFromVoiceCalls(username) {
     }
     if (call.participants.delete(cleanKey)) {
       changed = true;
-      if (cleanKey === call.startedBy || call.participants.size === 0) {
+      leftAny = true;
+      removeUserSeatedLobbies(cleanKey, call.threadKey);
+      if (call.participants.size === 0 || (cleanKey === call.startedBy && !call.everHadAnswer)) {
         clearAllRingingInCall(call);
       }
     }
@@ -1464,6 +1584,9 @@ function cleanupUserFromVoiceCalls(username) {
       finalizeCallIfDone(call);
       broadcastVcState(call);
     }
+  }
+  if (leftAny) {
+    notifyPeersVoicePresence(cleanKey);
   }
 }
 
@@ -1476,16 +1599,22 @@ function cleanupUserFromVoiceCalls(username) {
 function cleanupSocketFromVoiceCalls(username, socketId) {
   if (!socketId) return;
   const cleanKey = username.toLowerCase();
+  let leftAny = false;
   for (const call of Array.from(activeVoiceCalls.values())) {
     const entry = call.participants.get(cleanKey);
     if (entry && entry.socketId && entry.socketId === socketId) {
       call.participants.delete(cleanKey);
-      if (cleanKey === call.startedBy || call.participants.size === 0) {
+      leftAny = true;
+      removeUserSeatedLobbies(cleanKey, call.threadKey);
+      if (call.participants.size === 0 || (cleanKey === call.startedBy && !call.everHadAnswer)) {
         clearAllRingingInCall(call);
       }
       broadcastVcState(call);
       finalizeCallIfDone(call);
     }
+  }
+  if (leftAny) {
+    notifyPeersVoicePresence(cleanKey);
   }
 }
 
@@ -1746,6 +1875,7 @@ function toPublicProfile(account, viewerUsername) {
     bannerColor: account.bannerColor || undefined,
     bannerDataUrl: getAccountBannerUrl(account),
     customStatus: getActiveCustomStatus(account),
+    inVoiceCall: isUserInAnyVoiceCall(account.username),
     isProfilePrivate: false,
     isBlockedRelation: false,
     acceptsNonFriendDms,
@@ -6877,7 +7007,11 @@ export function attachRedshiftWebSocket(httpServer) {
               continue;
             }
             otherCall.participants.delete(ownerKey);
-            if (ownerKey === otherCall.startedBy || otherCall.participants.size === 0) {
+            removeUserSeatedLobbies(ownerKey, otherCall.threadKey);
+            if (
+              otherCall.participants.size === 0 ||
+              (ownerKey === otherCall.startedBy && !otherCall.everHadAnswer)
+            ) {
               clearAllRingingInCall(otherCall);
             }
             if (prevEntry.socketId && prevEntry.socketId !== ownerSocketId) {
@@ -6894,7 +7028,7 @@ export function attachRedshiftWebSocket(httpServer) {
           }
 
           let call = activeVoiceCalls.get(ctx.threadKey);
-          const isNewCall = !call;
+          const isNewCall = !call || (call.participants.size === 0 && call.ringing.size === 0);
           const now = Date.now();
           if (!call) {
             call = {
@@ -6935,6 +7069,7 @@ export function attachRedshiftWebSocket(httpServer) {
               screenPaused: Boolean(msg.screenSharing && msg.screenPaused),
               cameraStreamId: nextCameraStreamId || undefined,
               screenStreamId: nextScreenStreamId || undefined,
+              watchingStreams: [],
               socketId: ownerSocketId,
               connectionId: crypto.randomUUID(),
               joinedAt: now,
@@ -6944,15 +7079,19 @@ export function attachRedshiftWebSocket(httpServer) {
             if (existing) {
               if (existing.socketId && ownerSocketId && existing.socketId !== ownerSocketId) {
                 const prevWs = findUserSocketById(ownerKey, existing.socketId);
-                sendWsEventToSocket(prevWs, {
-                  type: 'vc:transferred',
-                  threadKey: call.threadKey,
-                  newThreadKey: call.threadKey,
-                  reason: 'Call moved to another device',
-                });
+                if (prevWs) {
+                  sendWsEventToSocket(prevWs, {
+                    type: 'vc:transferred',
+                    threadKey: call.threadKey,
+                    newThreadKey: call.threadKey,
+                    reason: 'Call moved to another device',
+                  });
+                }
                 existing.socketId = ownerSocketId;
-                existing.connectionId = crypto.randomUUID();
-                existing.joinedAt = now;
+                if (prevWs || !msg.reconnect) {
+                  existing.connectionId = crypto.randomUUID();
+                  existing.joinedAt = now;
+                }
               } else if (!existing.socketId && ownerSocketId) {
                 existing.socketId = ownerSocketId;
                 if (!existing.connectionId) {
@@ -7033,6 +7172,7 @@ export function attachRedshiftWebSocket(httpServer) {
           // Broadcast live VC state IMMEDIATELY so joining/ringing UI updates in <10ms
           // before persisting/creating call log messages.
           broadcastVcState(call);
+          notifyPeersVoicePresence(ownerKey);
 
           if (isNewCall) {
             createCallLogMessage(call);
@@ -7058,16 +7198,24 @@ export function attachRedshiftWebSocket(httpServer) {
             }
             const removed = call.participants.delete(ownerKey);
             const clearedRing = stopRingingUser(call, ownerKey);
-            if (ownerKey === call.startedBy || call.participants.size === 0) {
+            removeUserSeatedLobbies(ownerKey, call.threadKey);
+            if (
+              call.participants.size === 0 ||
+              (ownerKey === call.startedBy && !call.everHadAnswer)
+            ) {
               clearAllRingingInCall(call);
             }
             if (removed || clearedRing) {
               broadcastVcState(call);
               finalizeCallIfDone(call);
+              if (removed) {
+                notifyPeersVoicePresence(ownerKey);
+              }
             } else {
               sendWsEventToUser(ownerKey, buildVcStatePayload(call, ownerKey));
             }
           } else if (threadKey) {
+            removeUserSeatedLobbies(ownerKey, threadKey);
             const isGroup = threadKey.startsWith('group:');
             sendWsEventToUser(ownerKey, {
               type: 'vc:state',
@@ -7097,6 +7245,16 @@ export function attachRedshiftWebSocket(httpServer) {
               typeof msg.screenStreamId === 'string' && msg.screenStreamId.trim()
                 ? msg.screenStreamId.trim().slice(0, 80)
                 : undefined;
+            const nextWatching = Array.isArray(msg.watchingStreams)
+              ? msg.watchingStreams
+                  .filter((s) => typeof s === 'string' && s.trim())
+                  .map((s) => s.trim().slice(0, 80))
+                  .slice(0, 20)
+              : [];
+            const prevWatchingSig = Array.isArray(entry.watchingStreams)
+              ? entry.watchingStreams.join(',')
+              : '';
+            const nextWatchingSig = nextWatching.join(',');
             if (
               entry.muted !== nextMuted ||
               entry.deafened !== nextDeafened ||
@@ -7104,7 +7262,8 @@ export function attachRedshiftWebSocket(httpServer) {
               Boolean(entry.screenSharing) !== nextScreenSharing ||
               Boolean(entry.screenPaused) !== nextScreenPaused ||
               entry.cameraStreamId !== nextCamId ||
-              entry.screenStreamId !== nextScrId
+              entry.screenStreamId !== nextScrId ||
+              prevWatchingSig !== nextWatchingSig
             ) {
               entry.muted = nextMuted;
               entry.deafened = nextDeafened;
@@ -7113,6 +7272,7 @@ export function attachRedshiftWebSocket(httpServer) {
               entry.screenPaused = nextScreenPaused;
               entry.cameraStreamId = nextCamId;
               entry.screenStreamId = nextScrId;
+              entry.watchingStreams = nextWatching;
               broadcastVcState(call);
             }
           }
@@ -7172,6 +7332,8 @@ export function attachRedshiftWebSocket(httpServer) {
           if (!VALID_ACTIVITY_GAMES.has(gameId)) {
             return;
           }
+          // Close/remove any previous lobby this player was seated in so switching games leaves no stale activity behind.
+          removeUserSeatedLobbies(ownerKey);
           const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';
           const rawMax = Number(msg.maxPlayers) || 2;
           const maxPlayers =
@@ -7180,6 +7342,10 @@ export function attachRedshiftWebSocket(httpServer) {
               : gameId === 'minesweeper'
                 ? Math.max(2, Math.min(6, Math.round(rawMax)))
                 : 2;
+          const gameMode =
+            (gameId === 'chess' || gameId === 'checkers') && msg.gameMode === 'blitz'
+              ? 'blitz'
+              : 'standard';
           const isPublic = msg.isPublic !== false;
           const hostProfile = buildActivityUserProfile(ownerKey);
           const nowTs = Date.now();
@@ -7194,6 +7360,7 @@ export function attachRedshiftWebSocket(httpServer) {
                 : `${hostProfile.displayName}'s Lobby`,
             hostUsername: hostProfile.username,
             maxPlayers,
+            gameMode,
             status: 'waiting',
             players: [{ username: hostProfile.username, seat: 0, wins: 0 }],
             spectators: [],
@@ -7224,6 +7391,7 @@ export function attachRedshiftWebSocket(httpServer) {
             lobby.players.length < lobby.maxPlayers &&
             (lobby.status === 'waiting' || Boolean(msg.allowMidJoin))
           ) {
+            removeUserSeatedLobbies(ownerKey, '', lobby.id);
             if (existingSpecIdx >= 0) {
               lobby.spectators.splice(existingSpecIdx, 1);
             }
@@ -7243,6 +7411,21 @@ export function attachRedshiftWebSocket(httpServer) {
           lobby.version = (lobby.version || 1) + 1;
           lobby.updatedAt = Date.now();
           broadcastActivityLobby(lobby);
+        } else if (msg && msg.type === 'activity:unwatch') {
+          const lobbyId = typeof msg.lobbyId === 'string' ? msg.lobbyId.trim() : '';
+          const lobby = lobbyId ? activeActivityLobbies.get(lobbyId) : undefined;
+          if (!lobby) {
+            return;
+          }
+          const prevLen = (lobby.spectators || []).length;
+          lobby.spectators = (lobby.spectators || []).filter(
+            (s) => s.username.toLowerCase() !== ownerKey,
+          );
+          if (lobby.spectators.length !== prevLen) {
+            lobby.version = (lobby.version || 1) + 1;
+            lobby.updatedAt = Date.now();
+            broadcastActivityLobby(lobby);
+          }
         } else if (msg && msg.type === 'activity:config') {
           const lobbyId = typeof msg.lobbyId === 'string' ? msg.lobbyId.trim() : '';
           const lobby = lobbyId ? activeActivityLobbies.get(lobbyId) : undefined;
@@ -7261,6 +7444,12 @@ export function attachRedshiftWebSocket(httpServer) {
                   ? Math.max(2, Math.min(6, Math.round(msg.maxPlayers)))
                   : 2;
             lobby.maxPlayers = Math.max(lobby.players.length, nextMax);
+          }
+          if (
+            (lobby.gameId === 'chess' || lobby.gameId === 'checkers') &&
+            (msg.gameMode === 'standard' || msg.gameMode === 'blitz')
+          ) {
+            lobby.gameMode = msg.gameMode;
           }
           if (typeof msg.isPublic === 'boolean') {
             lobby.isPublic = msg.isPublic;
@@ -7358,9 +7547,13 @@ export function attachRedshiftWebSocket(httpServer) {
             return;
           }
           if (msg.playerBoardPatch && lobby.gameState && typeof lobby.gameState === 'object') {
+            const patch =
+              msg.playerBoardPatch.status === 'exploded' && !msg.playerBoardPatch.eliminatedAt
+                ? { ...msg.playerBoardPatch, eliminatedAt: Date.now() }
+                : msg.playerBoardPatch;
             lobby.gameState.playerBoards = {
               ...(lobby.gameState.playerBoards || {}),
-              [ownerKey]: msg.playerBoardPatch,
+              [ownerKey]: patch,
             };
             if (msg.gameStatePatch && typeof msg.gameStatePatch === 'object') {
               Object.assign(lobby.gameState, msg.gameStatePatch);
@@ -7368,7 +7561,21 @@ export function attachRedshiftWebSocket(httpServer) {
           } else if (msg.gameState !== undefined) {
             lobby.gameState = msg.gameState;
           }
-          if (msg.status === 'finished' && lobby.status !== 'finished') {
+          if (lobby.gameId === 'minesweeper' && lobby.status === 'playing') {
+            const prevStatus = lobby.status;
+            resolveMinesweeperLobbyOutcome(lobby);
+            if (lobby.status === 'finished' && prevStatus !== 'finished') {
+              lobby.rematchVotes = [];
+              const winUser = lobby.gameState?.winnerUsername;
+              if (typeof winUser === 'string' && winUser.trim()) {
+                const winKey = winUser.trim().toLowerCase();
+                const winner = lobby.players.find((p) => p.username.toLowerCase() === winKey);
+                if (winner) {
+                  winner.wins = (winner.wins || 0) + 1;
+                }
+              }
+            }
+          } else if (msg.status === 'finished' && lobby.status !== 'finished') {
             lobby.status = 'finished';
             lobby.rematchVotes = [];
             if (typeof msg.winnerUsername === 'string' && msg.winnerUsername.trim()) {

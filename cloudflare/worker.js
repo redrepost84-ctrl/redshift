@@ -710,22 +710,24 @@ export class RedshiftHub extends DurableObject {
     }
     if (!Array.isArray(list) || list.length === 0) return;
 
-    const onlineUsers = new Set();
-    for (const ws of this.ctx.getWebSockets()) {
-      const att = ws.deserializeAttachment();
-      if (att && typeof att.username === 'string') {
-        onlineUsers.add(att.username.toLowerCase());
-      }
-    }
-
     const now = Date.now();
+    const maxCallAgeMs = 12 * 60 * 60 * 1000;
     let changed = false;
     for (const raw of list) {
       if (!raw || !raw.threadKey) continue;
+      if (typeof raw.startedAt === 'number' && now - raw.startedAt > maxCallAgeMs) {
+        changed = true;
+        continue;
+      }
+      // Preserve active call participants across Durable Object hibernation/restarts
+      // instead of pruning against transient getWebSockets() before clients re-attach.
       const participants = new Map();
       for (const p of Array.isArray(raw.participants) ? raw.participants : []) {
-        if (p && p.username && onlineUsers.has(p.username.toLowerCase())) {
-          participants.set(p.username.toLowerCase(), p);
+        if (p && p.username) {
+          participants.set(p.username.toLowerCase(), {
+            ...p,
+            watchingStreams: Array.isArray(p.watchingStreams) ? p.watchingStreams : [],
+          });
         } else {
           changed = true;
         }
@@ -1304,6 +1306,7 @@ export class RedshiftHub extends DurableObject {
       bannerColor: account.bannerColor || undefined,
       bannerDataUrl: this.getAccountBannerUrl(account),
       customStatus: this.getActiveCustomStatus(account),
+      inVoiceCall: this.isUserInAnyVoiceCall(account.username),
       isProfilePrivate: false,
       isBlockedRelation: false,
       acceptsNonFriendDms,
@@ -2060,6 +2063,7 @@ export class RedshiftHub extends DurableObject {
         screenPaused: Boolean(entry.screenSharing && entry.screenPaused),
         cameraStreamId: entry.cameraStreamId || undefined,
         screenStreamId: entry.screenStreamId || undefined,
+        watchingStreams: Array.isArray(entry.watchingStreams) ? entry.watchingStreams : [],
         connectionId: entry.connectionId || undefined,
         joinedAt: entry.joinedAt,
       });
@@ -2178,6 +2182,7 @@ export class RedshiftHub extends DurableObject {
       title: lobby.title,
       hostUsername: lobby.hostUsername,
       maxPlayers: lobby.maxPlayers,
+      gameMode: lobby.gameMode === 'blitz' ? 'blitz' : 'standard',
       status: lobby.status,
       players: (lobby.players || []).map((p) => ({
         ...this.buildActivityUserProfile(p.username),
@@ -2269,15 +2274,139 @@ export class RedshiftHub extends DurableObject {
     }
   }
 
+  isUserInAnyVoiceCall(username) {
+    const cleanKey = username.toLowerCase();
+    for (const call of this.activeVoiceCalls.values()) {
+      if (call.participants.has(cleanKey)) return true;
+    }
+    return false;
+  }
+
+  notifyPeersVoicePresence(username) {
+    const key = username.toLowerCase();
+    const inVoiceCall = this.isUserInAnyVoiceCall(key);
+    const affected = new Set([key]);
+    for (const friendId of this.db.friendships[key] ?? []) {
+      affected.add(friendId.toLowerCase());
+    }
+    for (const group of Object.values(this.db.groupDms)) {
+      if (group && Array.isArray(group.members) && group.members.some((m) => m.toLowerCase() === key)) {
+        for (const m of group.members) affected.add(m.toLowerCase());
+      }
+    }
+    for (const peerKey of this.getDmPeerKeys(key)) {
+      affected.add(peerKey.toLowerCase());
+    }
+    for (const [owner, list] of Object.entries(this.db.openDms)) {
+      if (Array.isArray(list) && list.some((u) => u.toLowerCase() === key)) {
+        affected.add(owner.toLowerCase());
+      }
+    }
+    const payload = { type: 'vc:presence', username: key, inVoiceCall };
+    for (const target of affected) {
+      this.sendWsEventToUser(target, payload);
+    }
+  }
+
+  resolveMinesweeperLobbyOutcome(lobby) {
+    if (!lobby || lobby.gameId !== 'minesweeper' || !lobby.gameState) return;
+    const gs = lobby.gameState;
+    const boards = gs.playerBoards || {};
+    const players = lobby.players || [];
+
+    const wonPlayer = players.find((p) => boards[p.username.toLowerCase()]?.status === 'won');
+    if (wonPlayer) {
+      gs.winnerUsername = wonPlayer.username;
+      gs.winReason = `${wonPlayer.displayName} flagged/cleared all mines first and won!`;
+      lobby.status = 'finished';
+      return;
+    }
+
+    const alivePlayers = players.filter((p) => {
+      const st = boards[p.username.toLowerCase()]?.status || 'playing';
+      return st === 'playing';
+    });
+
+    if (alivePlayers.length >= 2) {
+      gs.winnerUsername = null;
+      gs.winReason = undefined;
+      lobby.status = 'playing';
+      return;
+    }
+
+    if (alivePlayers.length === 1 && players.length >= 2) {
+      const survivor = alivePlayers[0];
+      gs.winnerUsername = survivor.username;
+      gs.winReason = `${survivor.displayName} is the last player standing and won Minesweeper!`;
+      lobby.status = 'finished';
+      return;
+    }
+
+    if (alivePlayers.length === 0 && players.length >= 2) {
+      let lastDead = players[0];
+      let bestTs = -1;
+      for (const p of players) {
+        const ts = Number(boards[p.username.toLowerCase()]?.eliminatedAt || 0);
+        if (ts >= bestTs) {
+          bestTs = ts;
+          lastDead = p;
+        }
+      }
+      gs.winnerUsername = lastDead.username;
+      gs.winReason = `${lastDead.displayName} survived longest and won Minesweeper!`;
+      lobby.status = 'finished';
+    }
+  }
+
+  removeUserSeatedLobbies(userKey, onlyThreadKey = '', excludeLobbyId = '') {
+    const cleanKey = userKey.toLowerCase();
+    let mutated = false;
+    for (const [id, lobby] of Array.from(this.activeActivityLobbies.entries())) {
+      if (excludeLobbyId && id === excludeLobbyId) continue;
+      if (onlyThreadKey && lobby.threadKey !== onlyThreadKey) continue;
+      const isSeated = (lobby.players || []).some((p) => p.username.toLowerCase() === cleanKey);
+      if (isSeated) {
+        const recipients = this.getActivityLobbyRecipients(lobby);
+        this.activeActivityLobbies.delete(id);
+        mutated = true;
+        const removePayload = {
+          type: 'activity:lobby-removed',
+          lobbyId: id,
+          threadKey: lobby.threadKey,
+        };
+        for (const targetKey of recipients) {
+          this.sendWsEventToUser(targetKey, removePayload);
+        }
+      } else {
+        const prevLen = (lobby.spectators || []).length;
+        lobby.spectators = (lobby.spectators || []).filter(
+          (s) => s.username.toLowerCase() !== cleanKey,
+        );
+        if (lobby.spectators.length !== prevLen) {
+          lobby.version = (lobby.version || 1) + 1;
+          lobby.updatedAt = Date.now();
+          mutated = true;
+          this.broadcastActivityLobby(lobby);
+        }
+      }
+    }
+    if (mutated) {
+      this.persistActiveActivityLobbies();
+    }
+  }
+
   cleanupUserFromVoiceCalls(username) {
     const cleanKey = username.toLowerCase();
     let anyChanged = false;
+    let leftAny = false;
     for (const call of Array.from(this.activeVoiceCalls.values())) {
       let changed = false;
       if (this.stopRingingUser(call, cleanKey)) changed = true;
       if (call.participants.delete(cleanKey)) {
         changed = true;
-        if (cleanKey === call.startedBy || call.participants.size === 0) {
+        leftAny = true;
+        this.removeUserSeatedLobbies(cleanKey, call.threadKey);
+        if (call.participants.size === 0 || (cleanKey === call.startedBy && !call.everHadAnswer)) {
           this.clearAllRingingInCall(call);
         }
       }
@@ -2290,17 +2419,23 @@ export class RedshiftHub extends DurableObject {
     if (anyChanged) {
       this.persistActiveVoiceCalls();
     }
+    if (leftAny) {
+      this.notifyPeersVoicePresence(cleanKey);
+    }
   }
 
   cleanupSocketFromVoiceCalls(username, socketId) {
     if (!socketId) return;
     const cleanKey = username.toLowerCase();
     let anyChanged = false;
+    let leftAny = false;
     for (const call of Array.from(this.activeVoiceCalls.values())) {
       const entry = call.participants.get(cleanKey);
       if (entry && entry.socketId && entry.socketId === socketId) {
         call.participants.delete(cleanKey);
-        if (cleanKey === call.startedBy || call.participants.size === 0) {
+        leftAny = true;
+        this.removeUserSeatedLobbies(cleanKey, call.threadKey);
+        if (call.participants.size === 0 || (cleanKey === call.startedBy && !call.everHadAnswer)) {
           this.clearAllRingingInCall(call);
         }
         anyChanged = true;
@@ -2310,6 +2445,9 @@ export class RedshiftHub extends DurableObject {
     }
     if (anyChanged) {
       this.persistActiveVoiceCalls();
+    }
+    if (leftAny) {
+      this.notifyPeersVoicePresence(cleanKey);
     }
   }
 
@@ -3107,7 +3245,11 @@ export class RedshiftHub extends DurableObject {
         const prevEntry = otherCall.participants.get(ownerKey);
         if (!prevEntry) continue;
         otherCall.participants.delete(ownerKey);
-        if (ownerKey === otherCall.startedBy || otherCall.participants.size === 0) {
+        this.removeUserSeatedLobbies(ownerKey, otherCall.threadKey);
+        if (
+          otherCall.participants.size === 0 ||
+          (ownerKey === otherCall.startedBy && !otherCall.everHadAnswer)
+        ) {
           this.clearAllRingingInCall(otherCall);
         }
         if (prevEntry.socketId && prevEntry.socketId !== ownerSocketId) {
@@ -3124,7 +3266,7 @@ export class RedshiftHub extends DurableObject {
       }
 
       let call = this.activeVoiceCalls.get(ctx.threadKey);
-      const isNewCall = !call;
+      const isNewCall = !call || (call.participants.size === 0 && call.ringing.size === 0);
       const now = Date.now();
       if (!call) {
         call = {
@@ -3165,6 +3307,7 @@ export class RedshiftHub extends DurableObject {
           screenPaused: Boolean(msg.screenSharing && msg.screenPaused),
           cameraStreamId: nextCameraStreamId || undefined,
           screenStreamId: nextScreenStreamId || undefined,
+          watchingStreams: [],
           socketId: ownerSocketId,
           connectionId: crypto.randomUUID(),
           joinedAt: now,
@@ -3174,15 +3317,19 @@ export class RedshiftHub extends DurableObject {
         if (existing) {
           if (existing.socketId && ownerSocketId && existing.socketId !== ownerSocketId) {
             const prevWs = this.findUserSocketById(ownerKey, existing.socketId);
-            this.sendWsEventToSocket(prevWs, {
-              type: 'vc:transferred',
-              threadKey: call.threadKey,
-              newThreadKey: call.threadKey,
-              reason: 'Call moved to another device',
-            });
+            if (prevWs) {
+              this.sendWsEventToSocket(prevWs, {
+                type: 'vc:transferred',
+                threadKey: call.threadKey,
+                newThreadKey: call.threadKey,
+                reason: 'Call moved to another device',
+              });
+            }
             existing.socketId = ownerSocketId;
-            existing.connectionId = crypto.randomUUID();
-            existing.joinedAt = now;
+            if (prevWs || !msg.reconnect) {
+              existing.connectionId = crypto.randomUUID();
+              existing.joinedAt = now;
+            }
           } else if (!existing.socketId && ownerSocketId) {
             existing.socketId = ownerSocketId;
             if (!existing.connectionId) {
@@ -3261,6 +3408,7 @@ export class RedshiftHub extends DurableObject {
 
       // Broadcast live VC state IMMEDIATELY so joining/ringing UI updates in <10ms.
       this.broadcastVcState(call);
+      this.notifyPeersVoicePresence(ownerKey);
 
       if (isNewCall) {
         this.createCallLogMessage(call);
@@ -3294,7 +3442,11 @@ export class RedshiftHub extends DurableObject {
         }
         const removed = call.participants.delete(ownerKey);
         const clearedRing = this.stopRingingUser(call, ownerKey);
-        if (ownerKey === call.startedBy || call.participants.size === 0) {
+        this.removeUserSeatedLobbies(ownerKey, call.threadKey);
+        if (
+          call.participants.size === 0 ||
+          (ownerKey === call.startedBy && !call.everHadAnswer)
+        ) {
           this.clearAllRingingInCall(call);
         }
         if (removed || clearedRing) {
@@ -3302,10 +3454,14 @@ export class RedshiftHub extends DurableObject {
           this.broadcastVcState(call);
           this.finalizeCallIfDone(call);
           this.persistActiveVoiceCalls();
+          if (removed) {
+            this.notifyPeersVoicePresence(ownerKey);
+          }
         } else {
           this.sendWsEventToUser(ownerKey, this.buildVcStatePayload(call, ownerKey));
         }
       } else if (threadKey) {
+        this.removeUserSeatedLobbies(ownerKey, threadKey);
         const isGroup = threadKey.startsWith('group:');
         this.sendWsEventToUser(ownerKey, {
           type: 'vc:state',
@@ -3338,6 +3494,16 @@ export class RedshiftHub extends DurableObject {
           typeof msg.screenStreamId === 'string' && msg.screenStreamId.trim()
             ? msg.screenStreamId.trim().slice(0, 80)
             : undefined;
+        const nextWatching = Array.isArray(msg.watchingStreams)
+          ? msg.watchingStreams
+              .filter((s) => typeof s === 'string' && s.trim())
+              .map((s) => s.trim().slice(0, 80))
+              .slice(0, 20)
+          : [];
+        const prevWatchingSig = Array.isArray(entry.watchingStreams)
+          ? entry.watchingStreams.join(',')
+          : '';
+        const nextWatchingSig = nextWatching.join(',');
         if (
           entry.muted !== nextMuted ||
           entry.deafened !== nextDeafened ||
@@ -3345,7 +3511,8 @@ export class RedshiftHub extends DurableObject {
           Boolean(entry.screenSharing) !== nextScreenSharing ||
           Boolean(entry.screenPaused) !== nextScreenPaused ||
           entry.cameraStreamId !== nextCamId ||
-          entry.screenStreamId !== nextScrId
+          entry.screenStreamId !== nextScrId ||
+          prevWatchingSig !== nextWatchingSig
         ) {
           entry.muted = nextMuted;
           entry.deafened = nextDeafened;
@@ -3354,6 +3521,7 @@ export class RedshiftHub extends DurableObject {
           entry.screenPaused = nextScreenPaused;
           entry.cameraStreamId = nextCamId;
           entry.screenStreamId = nextScrId;
+          entry.watchingStreams = nextWatching;
           this.persistActiveVoiceCalls();
           this.broadcastVcState(call);
         }
@@ -3431,6 +3599,8 @@ export class RedshiftHub extends DurableObject {
       ]);
       const gameId = typeof msg.gameId === 'string' ? msg.gameId.trim().toLowerCase() : '';
       if (!validGames.has(gameId)) return;
+      // Remove any previous lobby this player was seated in so switching games leaves no stale activity behind.
+      this.removeUserSeatedLobbies(ownerKey);
       const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';
       const rawMax = Number(msg.maxPlayers) || 2;
       const maxPlayers =
@@ -3439,6 +3609,10 @@ export class RedshiftHub extends DurableObject {
           : gameId === 'minesweeper'
             ? Math.max(2, Math.min(6, Math.round(rawMax)))
             : 2;
+      const gameMode =
+        (gameId === 'chess' || gameId === 'checkers') && msg.gameMode === 'blitz'
+          ? 'blitz'
+          : 'standard';
       const isPublic = msg.isPublic !== false;
       const hostProfile = this.buildActivityUserProfile(ownerKey);
       const nowTs = Date.now();
@@ -3453,6 +3627,7 @@ export class RedshiftHub extends DurableObject {
             : `${hostProfile.displayName}'s Lobby`,
         hostUsername: hostProfile.username,
         maxPlayers,
+        gameMode,
         status: 'waiting',
         players: [{ username: hostProfile.username, seat: 0, wins: 0 }],
         spectators: [],
@@ -3483,6 +3658,7 @@ export class RedshiftHub extends DurableObject {
         lobby.players.length < lobby.maxPlayers &&
         (lobby.status === 'waiting' || Boolean(msg.allowMidJoin))
       ) {
+        this.removeUserSeatedLobbies(ownerKey, '', lobby.id);
         if (existingSpecIdx >= 0) {
           lobby.spectators.splice(existingSpecIdx, 1);
         }
@@ -3506,6 +3682,23 @@ export class RedshiftHub extends DurableObject {
       return;
     }
 
+    if (msg.type === 'activity:unwatch') {
+      const lobbyId = typeof msg.lobbyId === 'string' ? msg.lobbyId.trim() : '';
+      const lobby = lobbyId ? this.activeActivityLobbies.get(lobbyId) : undefined;
+      if (!lobby) return;
+      const prevLen = (lobby.spectators || []).length;
+      lobby.spectators = (lobby.spectators || []).filter(
+        (s) => s.username.toLowerCase() !== ownerKey,
+      );
+      if (lobby.spectators.length !== prevLen) {
+        lobby.version = (lobby.version || 1) + 1;
+        lobby.updatedAt = Date.now();
+        this.persistActiveActivityLobbies();
+        this.broadcastActivityLobby(lobby);
+      }
+      return;
+    }
+
     if (msg.type === 'activity:config') {
       const lobbyId = typeof msg.lobbyId === 'string' ? msg.lobbyId.trim() : '';
       const lobby = lobbyId ? this.activeActivityLobbies.get(lobbyId) : undefined;
@@ -3520,6 +3713,12 @@ export class RedshiftHub extends DurableObject {
               ? Math.max(2, Math.min(6, Math.round(msg.maxPlayers)))
               : 2;
         lobby.maxPlayers = Math.max(lobby.players.length, nextMax);
+      }
+      if (
+        (lobby.gameId === 'chess' || lobby.gameId === 'checkers') &&
+        (msg.gameMode === 'standard' || msg.gameMode === 'blitz')
+      ) {
+        lobby.gameMode = msg.gameMode;
       }
       if (typeof msg.isPublic === 'boolean') {
         lobby.isPublic = msg.isPublic;
@@ -3619,9 +3818,13 @@ export class RedshiftHub extends DurableObject {
       const isPlayer = lobby.players.some((p) => p.username.toLowerCase() === ownerKey);
       if (!isPlayer) return;
       if (msg.playerBoardPatch && lobby.gameState && typeof lobby.gameState === 'object') {
+        const patch =
+          msg.playerBoardPatch.status === 'exploded' && !msg.playerBoardPatch.eliminatedAt
+            ? { ...msg.playerBoardPatch, eliminatedAt: Date.now() }
+            : msg.playerBoardPatch;
         lobby.gameState.playerBoards = {
           ...(lobby.gameState.playerBoards || {}),
-          [ownerKey]: msg.playerBoardPatch,
+          [ownerKey]: patch,
         };
         if (msg.gameStatePatch && typeof msg.gameStatePatch === 'object') {
           Object.assign(lobby.gameState, msg.gameStatePatch);
@@ -3629,7 +3832,21 @@ export class RedshiftHub extends DurableObject {
       } else if (msg.gameState !== undefined) {
         lobby.gameState = msg.gameState;
       }
-      if (msg.status === 'finished' && lobby.status !== 'finished') {
+      if (lobby.gameId === 'minesweeper' && lobby.status === 'playing') {
+        const prevStatus = lobby.status;
+        this.resolveMinesweeperLobbyOutcome(lobby);
+        if (lobby.status === 'finished' && prevStatus !== 'finished') {
+          lobby.rematchVotes = [];
+          const winUser = lobby.gameState?.winnerUsername;
+          if (typeof winUser === 'string' && winUser.trim()) {
+            const winKey = winUser.trim().toLowerCase();
+            const winner = lobby.players.find((p) => p.username.toLowerCase() === winKey);
+            if (winner) {
+              winner.wins = (winner.wins || 0) + 1;
+            }
+          }
+        }
+      } else if (msg.status === 'finished' && lobby.status !== 'finished') {
         lobby.status = 'finished';
         lobby.rematchVotes = [];
         if (typeof msg.winnerUsername === 'string' && msg.winnerUsername.trim()) {
