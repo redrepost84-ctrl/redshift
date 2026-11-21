@@ -23,6 +23,8 @@ import {
 import { type ContextMenuItem, openContextMenu } from './contextMenu';
 import { createThoughtBubbleElement } from './customStatusModal';
 import { isModalConfirmShortcut, isTopmostModal } from './modalShortcuts';
+import { buildModerationContextMenuItems } from './moderationActions';
+import { setDisplayNameWithRoleBadge } from './profileBadges';
 import { createStatusGlyph, STATUS_LABELS } from './profileDrawer';
 import type { GroupDmInfo, PublicProfile, SocialSnapshot } from './types';
 
@@ -1041,7 +1043,7 @@ export function createGroupMembersPanel(options: {
       nameLine.className = 'group-member-name-row';
       const nameEl = document.createElement('span');
       nameEl.className = 'group-member-name';
-      nameEl.textContent = member.displayName;
+      setDisplayNameWithRoleBadge(nameEl, member.displayName, member, { badgeSize: 13 });
       nameLine.appendChild(nameEl);
 
       if (isMemberOwner) {
@@ -1221,6 +1223,10 @@ export function createGroupMembersPanel(options: {
               },
             },
           );
+        }
+
+        if (!isSelf) {
+          items.push(...buildModerationContextMenuItems(member));
         }
 
         openContextMenu({

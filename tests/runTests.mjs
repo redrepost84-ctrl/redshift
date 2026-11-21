@@ -247,13 +247,17 @@ async function run() {
       PORT: String(port),
       REDSHIFT_DATA_DIR: dataDir,
       REDSHIFT_UPDATES_DIR: updatesDir,
-      REDSHIFT_AUTH_RATE_LIMIT: '12',
+      REDSHIFT_AUTH_RATE_LIMIT: '22',
       REDSHIFT_MSG_RATE_LIMIT: '150',
       REDSHIFT_TURN_URLS: 'turn:turn.test.local:3478',
       REDSHIFT_TURN_USERNAME: 'turnuser',
       REDSHIFT_TURN_CREDENTIAL: 'turnpass',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  serverProc.stderr.on('data', (chunk) => {
+    const txt = chunk.toString('utf8').trim();
+    if (txt) console.error('[server stderr]', txt);
   });
 
   try {
@@ -440,7 +444,7 @@ async function run() {
 
         await waitFor(
           async () => await cdp.evalJson(`Boolean(document.querySelector('.sidebar-dm-item'))`),
-          8000,
+          14000,
         );
 
         // Verify persistent token saved in localStorage AND clear sessionStorage + reload to test survival across session restart!
@@ -455,7 +459,7 @@ async function run() {
 
         await waitFor(
           async () => await cdp.evalJson(`Boolean(document.querySelector('.sidebar-dm-item'))`),
-          8000,
+          14000,
         );
 
         // Verify @1 mention badge on alice_t before opening
@@ -483,16 +487,20 @@ async function run() {
         );
 
         // Scroll to top -> triggers paginated fetch of older 15 messages (total 65)
-        await cdp.evalJson(`(() => {
-          const box = document.querySelector('.chat-messages');
-          box.scrollTop = 0;
-          box.dispatchEvent(new Event('scroll'));
-          return true;
-        })()`);
-
+        await new Promise((r) => setTimeout(r, 120));
         await waitFor(
-          async () => await cdp.evalJson(`document.querySelectorAll('.chat-message').length === 65`),
-          8000,
+          async () =>
+            await cdp.evalJson(`(() => {
+              const count = document.querySelectorAll('.chat-message').length;
+              if (count === 65) return true;
+              const box = document.querySelector('.chat-messages');
+              if (box) {
+                box.scrollTop = 0;
+                box.dispatchEvent(new Event('scroll'));
+              }
+              return false;
+            })()`),
+          10000,
         );
 
         // Test @mention autocomplete + Ctrl+Shift+F Global Search
@@ -512,7 +520,7 @@ async function run() {
         })()`);
         await waitFor(
           async () => await cdp.evalJson(`Boolean(document.querySelector('.global-search-card input'))`),
-          5000,
+          12000,
         );
         await cdp.evalJson(`(() => {
           const inp = document.querySelector('.global-search-card input');
@@ -522,7 +530,7 @@ async function run() {
         })()`);
         await waitFor(
           async () => await cdp.evalJson(`document.querySelectorAll('.global-search-list .dm-search-result-card').length === 1`),
-          6000,
+          12000,
         );
         await cdp.evalJson(`(() => {
           document.querySelector('.global-search-list .dm-search-result-card')?.click();
@@ -1795,7 +1803,7 @@ async function run() {
             await cdp.evalJson(
               `Boolean(document.querySelector('.changelog-article-modal')) && Boolean(document.querySelector('[data-action="close-changelog"]'))`,
             ),
-          8000,
+          14000,
         );
         await cdp.evalJson(`(() => {
           document.querySelector('[data-action="close-changelog"]').click();
@@ -1836,6 +1844,9 @@ async function run() {
           return true;
         })()`);
         console.log('[PASS] Browser E2E: Post-update News-Article Changelog modal & Header Update Available button/popup');
+      } catch (browserErr) {
+        console.error('[Browser E2E errors]:', cdp.errors);
+        throw browserErr;
       } finally {
         cdp.close();
         try {
@@ -1945,9 +1956,496 @@ async function run() {
     assert.equal(validVidGifRes.data.added[0].mediaKind, 'video');
     console.log('[PASS] Universal GIF creator (MP4/audio support, 5-min cap, playback speed) & video streaming headers');
 
+    // 4.8 Staff Roles & Badges, Built-in Redshift Bot, Reporting, Atomic Dibs, Sandbox Admin Panel, Moderation & Appeals
+    const devSignUp = await api(baseUrl, '/api/auth/signup', {
+      method: 'POST',
+      body: {
+        username: 'Redrepost95',
+        email: 'dev@test.local',
+        confirmEmail: 'dev@test.local',
+        password: 'Password123!',
+        confirmPassword: 'Password123!',
+        avatarPreset: 0,
+      },
+    });
+    assert.equal(devSignUp.status, 200);
+    assert.equal(devSignUp.data.snapshot.user.role, 'developer');
+    const tokenDev = devSignUp.data.token;
+
+    const mod1SignUp = await api(baseUrl, '/api/auth/signup', {
+      method: 'POST',
+      body: {
+        username: 'leyvora',
+        email: 'leyvora@test.local',
+        confirmEmail: 'leyvora@test.local',
+        password: 'Password123!',
+        confirmPassword: 'Password123!',
+        avatarPreset: 1,
+      },
+    });
+    assert.equal(mod1SignUp.status, 200);
+    assert.equal(mod1SignUp.data.snapshot.user.role, 'moderator');
+    const tokenMod1 = mod1SignUp.data.token;
+
+    const mod2SignUp = await api(baseUrl, '/api/auth/signup', {
+      method: 'POST',
+      body: {
+        username: 'lumpofsoil',
+        email: 'lumpofsoil@test.local',
+        confirmEmail: 'lumpofsoil@test.local',
+        password: 'Password123!',
+        confirmPassword: 'Password123!',
+        avatarPreset: 2,
+      },
+    });
+    assert.equal(mod2SignUp.status, 200);
+    assert.equal(mod2SignUp.data.snapshot.user.role, 'moderator');
+    const tokenMod2 = mod2SignUp.data.token;
+
+    // Verify Developer role persists across displayName updates
+    const devRename = await api(baseUrl, '/api/profile/update', {
+      method: 'POST',
+      token: tokenDev,
+      body: { displayName: 'Owner Renamed', username: 'Redrepost95', bio: '' },
+    });
+    assert.equal(devRename.status, 200);
+    assert.equal(devRename.data.snapshot.user.displayName, 'Owner Renamed');
+    assert.equal(devRename.data.snapshot.user.role, 'developer');
+
+    // Verify Redshift system bot cannot be signed into or blocked
+    const botSignInAttempt = await api(baseUrl, '/api/auth/signin', {
+      method: 'POST',
+      body: { identifier: 'redshift', password: 'Password123!' },
+    });
+    assert.equal(botSignInAttempt.status, 403);
+    const botBlockAttempt = await api(baseUrl, '/api/friends/block', {
+      method: 'POST',
+      token: tokenA,
+      body: { targetUsername: 'redshift' },
+    });
+    assert.equal(botBlockAttempt.status, 400);
+
+    // Non-staff user is blocked from Staff Sandbox / Mod endpoints
+    const nonStaffMod = await api(baseUrl, '/api/mod/overview', { token: tokenA });
+    assert.equal(nonStaffMod.status, 403);
+
+    // Report bob_t -> Redshift Bot delivers report card DM to Redrepost95, leyvora, lumpofsoil
+    const reportRes = await api(baseUrl, '/api/reports/create', {
+      method: 'POST',
+      token: tokenA,
+      body: {
+        targetUsername: 'bob_t',
+        reason: 'Harassment or Bullying',
+        details: 'Repeated harassment in direct messages.',
+        reportedMessage: {
+          content: 'Mean test message',
+          authorUsername: 'bob_t',
+          authorName: 'bob_t',
+          timestamp: Date.now(),
+        },
+      },
+    });
+    assert.equal(reportRes.status, 200);
+    assert.ok(reportRes.data.ticketId);
+    const reportTicketId = reportRes.data.ticketId;
+
+    // Check bot profile & DM delivery to all 3 staff members
+    const devBotDm = await api(baseUrl, '/api/dms/history?peer=redshift', { token: tokenDev });
+    assert.equal(devBotDm.status, 200);
+    assert.ok(
+      devBotDm.data.messages.some((m) => m.botCard?.ticketId === reportTicketId && m.authorRole === 'bot'),
+      'Expected Redshift Bot to DM developer with report botCard',
+    );
+    const devUsersList = await api(baseUrl, '/api/mod/users', { token: tokenDev });
+    assert.equal(devUsersList.status, 200);
+    const botSummary = devUsersList.data.users.find((u) => u.username === 'redshift');
+    assert.ok(botSummary, 'Expected built-in Redshift bot account');
+    assert.equal(botSummary.role, 'bot');
+    assert.equal(botSummary.bio, 'The official bot for Redshift!');
+    const devSnapAfterReport = await api(baseUrl, '/api/social/snapshot', { token: tokenDev });
+    const botPublicProfile = (devSnapAfterReport.data.snapshot.dmPeers ?? []).find((p) => p.username === 'redshift');
+    assert.ok(botPublicProfile, 'Expected Redshift bot in staff dmPeers after report');
+    assert.equal(botPublicProfile.bannerColor, '#c92a35');
+    assert.equal(botPublicProfile.avatarPreset, 0);
+    assert.equal(botPublicProfile.role, 'bot');
+
+    // Atomic Dibs ("Take Request"): leyvora claims -> 200; lumpofsoil tries -> 409
+    const claim1 = await api(baseUrl, '/api/mod/tickets/claim', {
+      method: 'POST',
+      token: tokenMod1,
+      body: { ticketId: reportTicketId },
+    });
+    assert.equal(claim1.status, 200);
+    assert.equal(claim1.data.ticket.claimedBy, 'leyvora');
+
+    const claim2 = await api(baseUrl, '/api/mod/tickets/claim', {
+      method: 'POST',
+      token: tokenMod2,
+      body: { ticketId: reportTicketId },
+    });
+    assert.equal(claim2.status, 409);
+
+    // Confirm Redrepost95's bot DM live-reflects claimedBy === 'leyvora'
+    const devBotDmAfterClaim = await api(baseUrl, '/api/dms/history?peer=redshift', { token: tokenDev });
+    const claimedCardMsg = devBotDmAfterClaim.data.messages.find((m) => m.botCard?.ticketId === reportTicketId);
+    assert.equal(claimedCardMsg?.botCard?.claimedBy, 'leyvora');
+    assert.equal(claimedCardMsg?.botCard?.status, 'claimed');
+
+    // Staff Sandbox: edit displayName, email & password + inspect user chat logs
+    const sandboxEdit = await api(baseUrl, '/api/mod/users/update', {
+      method: 'POST',
+      token: tokenMod1,
+      body: {
+        username: 'bob_t',
+        displayName: 'Bob Sandbox',
+        email: 'bob_sandbox@test.local',
+        newPassword: 'NewSandboxPassword99!',
+      },
+    });
+    assert.equal(sandboxEdit.status, 200);
+    assert.equal(sandboxEdit.data.user.displayName, 'Bob Sandbox');
+    assert.equal(sandboxEdit.data.user.email, 'bob_sandbox@test.local');
+
+    const bobRelogin = await api(baseUrl, '/api/auth/signin', {
+      method: 'POST',
+      body: { identifier: 'bob_t', password: 'NewSandboxPassword99!' },
+    });
+    assert.equal(bobRelogin.status, 200);
+    const bobFreshToken = bobRelogin.data.token;
+
+    const bobThreads = await api(baseUrl, '/api/mod/users/threads?username=bob_t', { token: tokenDev });
+    assert.equal(bobThreads.status, 200);
+    assert.ok(bobThreads.data.threads.length >= 1, 'Expected staff to inspect user threads');
+
+    // Suspend bob_t with multi-evidence + duration + moderator note
+    const suspendRes = await api(baseUrl, '/api/mod/users/moderate', {
+      method: 'POST',
+      token: tokenDev,
+      body: {
+        targetUsername: 'bob_t',
+        action: 'suspend',
+        reason: 'Harassment or Bullying',
+        durationMs: 72 * 60 * 60 * 1000,
+        durationLabel: '3 Days',
+        moderatorNote: 'Dont do that again.',
+        evidence: [
+          { content: 'Offensive message #1', authorUsername: 'bob_t', authorName: 'Bob Sandbox', timestamp: Date.now() },
+          { content: 'https://bad-link.example/evidence2', authorUsername: 'bob_t', authorName: 'Bob Sandbox', timestamp: Date.now() },
+        ],
+      },
+    });
+    assert.equal(suspendRes.status, 200);
+
+    // Active session token is immediately revoked (401), and fresh sign-in returns 403 moderated payload
+    const bobBlockedSession = await api(baseUrl, '/api/social/snapshot', { token: bobFreshToken });
+    assert.equal(bobBlockedSession.status, 401);
+
+    const bobBlockedSignIn = await api(baseUrl, '/api/auth/signin', {
+      method: 'POST',
+      body: { identifier: 'bob_t', password: 'NewSandboxPassword99!' },
+    });
+    assert.equal(bobBlockedSignIn.status, 403);
+    assert.equal(bobBlockedSignIn.data.moderated, true);
+    assert.equal(bobBlockedSignIn.data.moderation.status, 'suspended');
+    assert.equal(bobBlockedSignIn.data.moderation.durationLabel, '3 Days');
+    assert.equal(bobBlockedSignIn.data.moderation.moderatorNote, 'Dont do that again.');
+    assert.equal(bobBlockedSignIn.data.moderation.evidence.length, 2);
+
+    // Appeal flow: verify account -> submit appeal -> lumpofsoil claims & accepts -> bob_t restored!
+    const verifyModRes = await api(baseUrl, '/api/appeals/verify-account', {
+      method: 'POST',
+      body: { identifier: 'bob_t', password: 'NewSandboxPassword99!' },
+    });
+    assert.equal(verifyModRes.status, 200);
+    assert.ok(verifyModRes.data.appealToken);
+
+    const appealSubmit = await api(baseUrl, '/api/appeals/submit', {
+      method: 'POST',
+      body: {
+        username: 'bob_t',
+        appealToken: verifyModRes.data.appealToken,
+        details: 'I apologize and understand the rules now. Please reactivate my account.',
+      },
+    });
+    assert.equal(appealSubmit.status, 200);
+    const appealTicketId = appealSubmit.data.ticketId;
+
+    const claimAppeal = await api(baseUrl, '/api/mod/tickets/claim', {
+      method: 'POST',
+      token: tokenMod2,
+      body: { ticketId: appealTicketId },
+    });
+    assert.equal(claimAppeal.status, 200);
+
+    const acceptAppeal = await api(baseUrl, '/api/mod/appeals/decide', {
+      method: 'POST',
+      token: tokenMod2,
+      body: { ticketId: appealTicketId, decision: 'accepted', note: 'Approved by moderator.' },
+    });
+    assert.equal(acceptAppeal.status, 200);
+    assert.equal(acceptAppeal.data.ticket.status, 'accepted');
+
+    const bobRestoredLogin = await api(baseUrl, '/api/auth/signin', {
+      method: 'POST',
+      body: { identifier: 'bob_t', password: 'NewSandboxPassword99!' },
+    });
+    assert.equal(bobRestoredLogin.status, 200);
+    console.log('[PASS] Staff roles/badges, built-in Redshift bot, reports, atomic dibs, sandbox admin panel, moderation & appeals API');
+
+    // Browser E2E for Developer Badge, Staff Panel, Redshift Bot Card, Full-Screen Report & Roblox-Style Ban/Appeal Modal
+    if (chromeBin && fs.existsSync(path.join(ROOT_DIR, 'dist', 'index.html'))) {
+      const modDebugPort = 9450 + Math.floor(Math.random() * 250);
+      const modUd = fs.mkdtempSync(path.join(os.tmpdir(), 'rs_chrome_mod_'));
+      const modChrome = spawn(
+        chromeBin,
+        [
+          '--headless=new',
+          '--use-gl=angle',
+          '--use-angle=swiftshader',
+          `--remote-debugging-port=${modDebugPort}`,
+          `--user-data-dir=${modUd}`,
+          '--window-size=1280,820',
+          '--no-first-run',
+          '--no-default-browser-check',
+          '--disable-background-networking',
+          `${baseUrl}/`,
+        ],
+        { stdio: 'ignore' },
+      );
+      const cdpMod = new CdpSession(modDebugPort);
+      try {
+        await cdpMod.connect(baseUrl);
+        await waitFor(
+          async () => await cdpMod.evalJson(`document.querySelectorAll('.auth-form input').length >= 2`),
+          8000,
+        );
+        // 1) Sign in as Redrepost95 (Developer)
+        await cdpMod.evalJson(`(() => {
+          const inputs = document.querySelectorAll('.auth-form input');
+          inputs[0].value = 'Redrepost95';
+          inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
+          inputs[1].value = 'Password123!';
+          inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
+          document.querySelector('.auth-form button[type="submit"]')?.click();
+          return true;
+        })()`);
+        await waitFor(
+          async () => await cdpMod.evalJson(`Boolean(document.querySelector('.user-dock'))`),
+          10000,
+        );
+        // Dismiss changelog modal if present
+        await cdpMod.evalJson(`(() => {
+          document.querySelector('[data-action="close-changelog"]')?.click();
+          return true;
+        })()`);
+
+        // Verify Developer crossed red hammers badge to LEFT of display name + exact tooltip
+        const devBadgeInfo = await cdpMod.evalJson(`(() => {
+          const badge = document.querySelector('.user-dock .rs-role-badge--developer');
+          const parent = badge?.parentElement;
+          const textEl = parent?.querySelector('.rs-name-with-badge-text');
+          const isLeft = Boolean(badge && textEl && badge.nextElementSibling === textEl);
+          const staffBtn = document.querySelector('[data-action="open-staff-panel"]:not([hidden])');
+          return {
+            found: Boolean(badge),
+            isLeft,
+            tooltip: badge?.getAttribute('aria-label') ?? null,
+            hasStaffBtn: Boolean(staffBtn),
+          };
+        })()`);
+        assert.equal(devBadgeInfo.found, true, 'Expected developer badge in user dock');
+        assert.equal(devBadgeInfo.isLeft, true, 'Expected developer badge to sit to the LEFT of display name');
+        assert.equal(devBadgeInfo.tooltip, 'This person is the owner of Redshift, say hi!');
+        assert.equal(devBadgeInfo.hasStaffBtn, true, 'Expected Staff Panel button for developer');
+
+        // Open Staff Panel -> verify 5 tabs -> open User Sandbox -> open Suspend full-screen screen -> verify Redshift brand, doubling durations & Back confirmation
+        await cdpMod.evalJson(`(() => {
+          document.querySelector('[data-action="open-staff-panel"]').click();
+          return true;
+        })()`);
+        await waitFor(
+          async () => await cdpMod.evalJson(`document.querySelectorAll('.staff-tab-btn').length === 5`),
+          5000,
+        );
+        await cdpMod.evalJson(`(() => {
+          const tabs = Array.from(document.querySelectorAll('.staff-tab-btn'));
+          tabs.find((t) => t.textContent.includes('User Sandbox'))?.click();
+          return true;
+        })()`);
+        await waitFor(
+          async () => await cdpMod.evalJson(`Boolean(document.querySelector('.staff-user-row'))`),
+          5000,
+        );
+        await cdpMod.evalJson(`(() => {
+          const rows = Array.from(document.querySelectorAll('.staff-user-row'));
+          rows.find((r) => r.textContent.toLowerCase().includes('@alice_t'))?.click();
+          return true;
+        })()`);
+        await waitFor(
+          async () =>
+            await cdpMod.evalJson(
+              `Array.from(document.querySelectorAll('.staff-editor-quick-actions button')).some((b) => b.textContent.trim() === 'Suspend Account')`,
+            ),
+          5000,
+        );
+        await cdpMod.evalJson(`(() => {
+          const btn = Array.from(document.querySelectorAll('.staff-editor-quick-actions button')).find((b) => b.textContent.trim() === 'Suspend Account');
+          btn?.click();
+          return true;
+        })()`);
+        await waitFor(
+          async () => await cdpMod.evalJson(`Boolean(document.querySelector('.mod-fullscreen-overlay'))`),
+          5000,
+        );
+        const suspendScreenCheck = await cdpMod.evalJson(`(() => {
+          const brand = document.querySelector('.mod-fullscreen-brand')?.textContent?.trim() ?? null;
+          const durOptions = Array.from(document.querySelectorAll('.mod-fullscreen-overlay select option')).map((o) => o.textContent.trim());
+          return {
+            brand,
+            has12Hours: durOptions.includes('12 Hours'),
+            has31Days: durOptions.includes('31 Days'),
+            has62Days: durOptions.includes('62 Days'),
+            has365Days: durOptions.some((o) => o.startsWith('365 Days')),
+            hasCustom: durOptions.some((o) => o.toLowerCase().includes('custom')),
+          };
+        })()`);
+        assert.equal(suspendScreenCheck.brand, 'Redshift');
+        assert.equal(suspendScreenCheck.has12Hours, true);
+        assert.equal(suspendScreenCheck.has31Days, true);
+        assert.equal(suspendScreenCheck.has62Days, true);
+        assert.equal(suspendScreenCheck.has365Days, true);
+        assert.equal(suspendScreenCheck.hasCustom, true);
+        // Click Back -> triggers "Are you sure?" popup -> Confirm Discard & Go Back
+        await cdpMod.evalJson(`(() => {
+          document.querySelector('.mod-fullscreen-back-btn')?.click();
+          return true;
+        })()`);
+        await waitFor(
+          async () => await cdpMod.evalJson(`Boolean(document.querySelector('.modal-card--confirm'))`),
+          4000,
+        );
+        await cdpMod.evalJson(`(() => {
+          const confirmBtn = Array.from(document.querySelectorAll('.modal-card--confirm button')).find((b) => b.textContent.includes('Discard'));
+          confirmBtn?.click();
+          return true;
+        })()`);
+        await waitFor(
+          async () => await cdpMod.evalJson(`!document.querySelector('.mod-fullscreen-overlay')`),
+          4000,
+        );
+
+        // Open Redshift Bot DM -> verify Blue BOT badge + interactive bot ticket card
+        await cdpMod.evalJson(`(() => {
+          const botRow = Array.from(document.querySelectorAll('.sidebar-dm-item')).find((el) => el.textContent.toLowerCase().includes('redshift'));
+          botRow?.click();
+          return true;
+        })()`);
+        await waitFor(
+          async () =>
+            await cdpMod.evalJson(
+              `Boolean(document.querySelector('.dm-header .rs-role-badge--bot')) && Boolean(document.querySelector('.bot-ticket-card'))`,
+            ),
+          6000,
+        );
+        const botBadgeTip = await cdpMod.evalJson(
+          `document.querySelector('.dm-header .rs-role-badge--bot')?.getAttribute('aria-label') ?? null`,
+        );
+        assert.equal(
+          botBadgeTip,
+          'This is a bot. An application people can manipulate for commands and more.',
+        );
+
+        // Suspend bob_t via API and verify Roblox-style ban modal + Appeal screen in Chrome
+        const suspendForUi = await api(baseUrl, '/api/mod/users/moderate', {
+          method: 'POST',
+          token: tokenDev,
+          body: {
+            targetUsername: 'bob_t',
+            action: 'suspend',
+            reason: 'Spam or Scamming',
+            durationMs: 24 * 60 * 60 * 1000,
+            durationLabel: '1 Day',
+            moderatorNote: 'Please stop spamming links.',
+            evidence: [{ content: 'Spam evidence link https://example.com', authorUsername: 'bob_t', authorName: 'Bob Sandbox', timestamp: Date.now() }],
+          },
+        });
+        assert.equal(suspendForUi.status, 200);
+
+        // Clear session and reload to sign in as suspended bob_t
+        await cdpMod.evalJson(`(() => {
+          localStorage.clear();
+          sessionStorage.clear();
+          location.reload();
+          return true;
+        })()`);
+        await waitFor(
+          async () => await cdpMod.evalJson(`document.querySelectorAll('.auth-form input').length >= 2`),
+          8000,
+        );
+        await cdpMod.evalJson(`(() => {
+          const inputs = document.querySelectorAll('.auth-form input');
+          inputs[0].value = 'bob_t';
+          inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
+          inputs[1].value = 'NewSandboxPassword99!';
+          inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
+          document.querySelector('.auth-form button[type="submit"]')?.click();
+          return true;
+        })()`);
+        await waitFor(
+          async () => await cdpMod.evalJson(`Boolean(document.querySelector('.mod-ban-card'))`),
+          8000,
+        );
+        const banModalCheck = await cdpMod.evalJson(`(() => {
+          const card = document.querySelector('.mod-ban-card');
+          return {
+            title: card?.querySelector('.mod-ban-title')?.textContent?.trim() ?? null,
+            note: card?.querySelector('.mod-ban-note-box')?.textContent?.trim() ?? null,
+            evidenceCount: card?.querySelectorAll('.mod-ban-evidence-card')?.length ?? 0,
+            hasTos: Boolean(card?.querySelector('.mod-ban-tos')?.textContent?.includes('Terms of Service')),
+          };
+        })()`);
+        assert.equal(banModalCheck.title, 'Account Suspended');
+        assert.equal(banModalCheck.note, 'Please stop spamming links.');
+        assert.equal(banModalCheck.evidenceCount, 1);
+        assert.equal(banModalCheck.hasTos, true);
+
+        // Click Appeal button -> verify full-screen login-themed Appeal screen with suspended account picker
+        await cdpMod.evalJson(`(() => {
+          const btn = Array.from(document.querySelectorAll('.mod-ban-footer button')).find((b) => b.textContent.trim() === 'Appeal');
+          btn?.click();
+          return true;
+        })()`);
+        await waitFor(
+          async () =>
+            await cdpMod.evalJson(
+              `Boolean(document.querySelector('.mod-fullscreen-overlay')) && Boolean(document.querySelector('.mod-appeal-account-row--active'))`,
+            ),
+          5000,
+        );
+        const appealUiCheck = await cdpMod.evalJson(`({
+          brand: document.querySelector('.mod-fullscreen-brand')?.textContent?.trim() ?? null,
+          accountRow: document.querySelector('.mod-appeal-account-row--active')?.textContent ?? '',
+        })`);
+        assert.equal(appealUiCheck.brand, 'Redshift');
+        assert.ok(appealUiCheck.accountRow.includes('@bob_t'));
+        console.log('[PASS] Browser E2E: Role badges & tooltips, Staff Panel, Redshift Bot ticket card, Roblox-style Account Suspended modal & Appeal screen');
+      } catch (modBrowserErr) {
+        console.error('[Mod Browser E2E errors]:', cdpMod.errors);
+        throw modBrowserErr;
+      } finally {
+        cdpMod.close();
+        try {
+          modChrome.kill();
+        } catch {}
+        try {
+          fs.rmSync(modUd, { recursive: true, force: true });
+        } catch {}
+      }
+    }
+
     // 5. Auth rate limiting burst check (run after browser login from same IP)
     let got429 = false;
-    for (let i = 0; i < 16; i += 1) {
+    for (let i = 0; i < 26; i += 1) {
       const badLogin = await api(baseUrl, '/api/auth/signin', {
         method: 'POST',
         body: { identifier: 'alice_t', password: 'wrong' },

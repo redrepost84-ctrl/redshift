@@ -1,5 +1,6 @@
 import { apiSearchGlobalMessages } from './apiClient';
 import { createCloseIconSvg } from './chatUi';
+import { setDisplayNameWithRoleBadge } from './profileBadges';
 import { setTwemojiText } from './twemojiHelper';
 import type { GlobalSearchResultItem } from './types';
 import { createSearchIconSvg } from './voiceAudio';
@@ -123,7 +124,12 @@ export function openGlobalSearchModal(options: GlobalSearchModalOptions): () => 
 
       const authorSpan = document.createElement('span');
       authorSpan.className = 'dm-search-result-author';
-      authorSpan.textContent = msg.authorName;
+      setDisplayNameWithRoleBadge(
+        authorSpan,
+        msg.authorName,
+        { username: msg.authorUsername, role: msg.authorRole },
+        { badgeSize: 12 },
+      );
       head.appendChild(authorSpan);
 
       const ctxPill = document.createElement('span');

@@ -1,11 +1,11 @@
 {
-  "version": "0.1.27",
-  "releasedAt": "2026-11-21T09:14:04.765Z",
-  "changelog": "Fixed 1-on-1 DM read receipts staying Delivered when friends reply, enabled read receipts by default (opt-out in Privacy & Safety), and balanced mobile chat spacing to match PC comfort.",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.27/Redshift-patch.asar",
-  "sha256": "2ed800d9b33d98e288af7cf9e96f893751f222e5985b1a14a7ba90216c51ade1",
-  "size": 6533932,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.27/RedshiftSetup.exe",
+  "version": "0.1.28",
+  "releasedAt": "2026-11-21T20:55:58.345Z",
+  "changelog": "Staff Role Badges (Red crossed double hammers for Owner, white hammer for Moderators leyvora & lumpofsoil), built-in Official Redshift Bot with atomic Take Request dibs cards, full-screen Reporting (keeps ongoing calls active while hiding mini-call preview), right-click Suspend & Delete Account moderation with doubling durations up to 365d + Custom, multi-select evidence, moderator notes & 5s safety timer, Roblox-style Account Suspended/Terminated lockout modal with scrollable Appeal flow, and Staff Sandbox & Admin Panel.",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.28/Redshift-patch.asar",
+  "sha256": "214dce27d308db53b8849a981e34f8c44756d491e04dc60c2996f10da77a725d",
+  "size": 6698408,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.28/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

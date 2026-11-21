@@ -1,10 +1,12 @@
 import { getDesktopBridge } from './desktopBridge';
 import type {
+  AccountRole,
   ActivityListEventPayload,
   ActivityLobby,
   ActivityLobbyRemovedEventPayload,
   ActivityLobbyUpdateEventPayload,
   AttachmentKind,
+  BotTicketCardData,
   ChatMessage,
   DmAttachment,
   DmDeleteEventPayload,
@@ -19,9 +21,14 @@ import type {
   GroupDmInfo,
   LinkPreviewData,
   MessageReaction,
+  ModAuditEntry,
+  ModeratedAccountPayload,
+  ModerationEvidenceItem,
   PublicProfile,
   SocialNotifyEventPayload,
   SocialSnapshot,
+  StaffThreadSummary,
+  StaffUserSummary,
   StatusReplyRef,
   TypingEventPayload,
   UserStatus,
@@ -655,12 +662,36 @@ export async function apiSignIn(
   identifier: string,
   password: string,
   rememberMe = true,
-): Promise<{ ok: boolean; snapshot?: SocialSnapshot; error?: string }> {
-  const res = await postJson<{ ok?: boolean; token?: string; snapshot?: SocialSnapshot; error?: string }>(
-    '/api/auth/signin',
-    { identifier, password },
-  );
+): Promise<{
+  ok: boolean;
+  snapshot?: SocialSnapshot;
+  error?: string;
+  moderated?: boolean;
+  moderatedPayload?: ModeratedAccountPayload;
+}> {
+  const res = await postJson<{
+    ok?: boolean;
+    token?: string;
+    snapshot?: SocialSnapshot;
+    error?: string;
+    moderated?: boolean;
+    account?: ModeratedAccountPayload['account'];
+    moderation?: ModeratedAccountPayload['moderation'];
+    appealToken?: string;
+  }>('/api/auth/signin', { identifier, password });
   if (!res.ok || !res.data?.token || !res.data?.snapshot) {
+    if (res.data?.moderated && res.data.account && res.data.moderation && res.data.appealToken) {
+      return {
+        ok: false,
+        moderated: true,
+        error: res.error ?? 'Account Moderated',
+        moderatedPayload: {
+          account: res.data.account,
+          moderation: res.data.moderation,
+          appealToken: res.data.appealToken,
+        },
+      };
+    }
     return { ok: false, error: res.error ?? 'Error: Could not sign in' };
   }
   setSessionToken(res.data.token, rememberMe);
@@ -755,12 +786,36 @@ export async function apiCompleteReset(input: {
   resetProofToken: string;
   newPassword?: string;
   confirmPassword?: string;
-}): Promise<{ ok: boolean; snapshot?: SocialSnapshot; error?: string }> {
-  const res = await postJson<{ ok?: boolean; token?: string; snapshot?: SocialSnapshot; error?: string }>(
-    '/api/auth/complete-reset',
-    input,
-  );
+}): Promise<{
+  ok: boolean;
+  snapshot?: SocialSnapshot;
+  error?: string;
+  moderated?: boolean;
+  moderatedPayload?: ModeratedAccountPayload;
+}> {
+  const res = await postJson<{
+    ok?: boolean;
+    token?: string;
+    snapshot?: SocialSnapshot;
+    error?: string;
+    moderated?: boolean;
+    account?: ModeratedAccountPayload['account'];
+    moderation?: ModeratedAccountPayload['moderation'];
+    appealToken?: string;
+  }>('/api/auth/complete-reset', input);
   if (!res.ok || !res.data?.token || !res.data?.snapshot) {
+    if (res.data?.moderated && res.data.account && res.data.moderation && res.data.appealToken) {
+      return {
+        ok: false,
+        moderated: true,
+        error: res.error ?? 'Account Moderated',
+        moderatedPayload: {
+          account: res.data.account,
+          moderation: res.data.moderation,
+          appealToken: res.data.appealToken,
+        },
+      };
+    }
     return { ok: false, error: res.error ?? 'Error: Could not complete reset' };
   }
   setSessionToken(res.data.token, true);
@@ -1885,6 +1940,8 @@ export function connectSocialSocket(handlers: {
   onActivityList?: (payload: ActivityListEventPayload) => void;
   onActivityLobbyUpdate?: (payload: ActivityLobbyUpdateEventPayload) => void;
   onActivityLobbyRemoved?: (payload: ActivityLobbyRemovedEventPayload) => void;
+  onAccountModerated?: (payload: ModeratedAccountPayload) => void;
+  onModTicketUpdated?: (ticket: BotTicketCardData) => void;
 }): SocialSocketHandle {
   let closedByCaller = false;
   let socket: WebSocket | null = null;
@@ -2072,6 +2129,19 @@ export function connectSocialSocket(handlers: {
             lobbyId: msg.lobbyId,
             threadKey: typeof msg.threadKey === 'string' ? msg.threadKey : undefined,
           });
+        } else if (
+          msg.type === 'account:moderated' &&
+          msg.account &&
+          msg.moderation &&
+          typeof msg.appealToken === 'string'
+        ) {
+          handlers.onAccountModerated?.({
+            account: msg.account as ModeratedAccountPayload['account'],
+            moderation: msg.moderation as ModeratedAccountPayload['moderation'],
+            appealToken: msg.appealToken,
+          });
+        } else if (msg.type === 'mod:ticket-updated' && msg.ticket) {
+          handlers.onModTicketUpdated?.(msg.ticket as BotTicketCardData);
         }
       } catch {
         // Ignore malformed websocket frames.
@@ -2182,4 +2252,293 @@ export function connectSocialSocket(handlers: {
       }
     },
   };
+}
+
+// --- Reporting, Appeals & Staff Moderation Sandbox API ---
+
+export async function apiSubmitReport(input: {
+  targetUsername: string;
+  reason: string;
+  details: string;
+  reportedMessage?: ModerationEvidenceItem;
+}): Promise<{ ok: boolean; ticketId?: string; error?: string }> {
+  const res = await postJson<{ ok?: boolean; ticketId?: string; error?: string }>(
+    '/api/reports/create',
+    input,
+    true,
+  );
+  return { ok: res.ok, ticketId: res.data?.ticketId, error: res.error };
+}
+
+export async function apiVerifyModeratedAccount(
+  identifier: string,
+  password: string,
+): Promise<{ ok: boolean; payload?: ModeratedAccountPayload; error?: string }> {
+  const res = await postJson<{
+    ok?: boolean;
+    account?: ModeratedAccountPayload['account'];
+    moderation?: ModeratedAccountPayload['moderation'];
+    appealToken?: string;
+    error?: string;
+  }>('/api/appeals/verify-account', { identifier, password });
+  if (!res.ok || !res.data?.account || !res.data?.moderation || !res.data?.appealToken) {
+    return { ok: false, error: res.error ?? 'Error: Could not verify account' };
+  }
+  return {
+    ok: true,
+    payload: {
+      account: res.data.account,
+      moderation: res.data.moderation,
+      appealToken: res.data.appealToken,
+    },
+  };
+}
+
+export async function apiSubmitAppeal(input: {
+  username: string;
+  appealToken: string;
+  details: string;
+}): Promise<{ ok: boolean; ticketId?: string; error?: string }> {
+  const res = await postJson<{ ok?: boolean; ticketId?: string; error?: string }>(
+    '/api/appeals/submit',
+    input,
+  );
+  return { ok: res.ok, ticketId: res.data?.ticketId, error: res.error };
+}
+
+async function getAuthedJson<T extends { ok?: boolean; error?: string }>(
+  url: string,
+): Promise<{ ok: boolean; data?: T; error?: string }> {
+  if (!sessionToken) return { ok: false, error: 'Error: Not authenticated' };
+  try {
+    const res = await fetchWithTunnelRecovery(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${sessionToken}` },
+    });
+    const parsed = (await res.json().catch(() => null)) as T | null;
+    if (!res.ok || !parsed?.ok) {
+      return { ok: false, error: parsed?.error ?? 'Error: Request failed' };
+    }
+    return { ok: true, data: parsed };
+  } catch {
+    return { ok: false, error: 'Error: Could not reach Redshift server' };
+  }
+}
+
+export interface StaffOverviewResponse {
+  actorRole: AccountRole;
+  stats: {
+    totalAccounts: number;
+    onlineUsers: number;
+    totalMessages: number;
+    openReports: number;
+    pendingAppeals: number;
+    activeSuspensions: number;
+    terminatedAccounts: number;
+  };
+  tickets: BotTicketCardData[];
+  auditLog: ModAuditEntry[];
+}
+
+export async function apiModFetchOverview(): Promise<{
+  ok: boolean;
+  overview?: StaffOverviewResponse;
+  error?: string;
+}> {
+  const res = await getAuthedJson<StaffOverviewResponse & { ok?: boolean; error?: string }>(
+    '/api/mod/overview',
+  );
+  if (!res.ok || !res.data) return { ok: false, error: res.error };
+  return { ok: true, overview: res.data };
+}
+
+export async function apiModFetchUsers(
+  q = '',
+  filter = 'all',
+): Promise<{ ok: boolean; users?: StaffUserSummary[]; error?: string }> {
+  const params = new URLSearchParams();
+  if (q.trim()) params.set('q', q.trim());
+  if (filter && filter !== 'all') params.set('filter', filter);
+  const qs = params.toString();
+  const res = await getAuthedJson<{ ok?: boolean; users?: StaffUserSummary[]; error?: string }>(
+    `/api/mod/users${qs ? `?${qs}` : ''}`,
+  );
+  return { ok: res.ok, users: res.data?.users, error: res.error };
+}
+
+export async function apiModFetchUserThreads(
+  username: string,
+): Promise<{ ok: boolean; threads?: StaffThreadSummary[]; error?: string }> {
+  const res = await getAuthedJson<{ ok?: boolean; threads?: StaffThreadSummary[]; error?: string }>(
+    `/api/mod/users/threads?username=${encodeURIComponent(username)}`,
+  );
+  return { ok: res.ok, threads: res.data?.threads, error: res.error };
+}
+
+export async function apiModFetchUserMessages(params: {
+  username?: string;
+  threadKey?: string;
+  q?: string;
+  limit?: number;
+}): Promise<{
+  ok: boolean;
+  messages?: ChatMessage[];
+  items?: Array<{ threadKey: string; threadLabel: string; message: ChatMessage }>;
+  error?: string;
+}> {
+  const qs = new URLSearchParams();
+  if (params.username) qs.set('username', params.username);
+  if (params.threadKey) qs.set('threadKey', params.threadKey);
+  if (params.q) qs.set('q', params.q);
+  if (params.limit) qs.set('limit', String(params.limit));
+  const res = await getAuthedJson<{
+    ok?: boolean;
+    messages?: ChatMessage[];
+    items?: Array<{ threadKey: string; threadLabel: string; message: ChatMessage }>;
+    error?: string;
+  }>(`/api/mod/users/messages?${qs.toString()}`);
+  return {
+    ok: res.ok,
+    messages: res.data?.messages,
+    items: res.data?.items,
+    error: res.error,
+  };
+}
+
+export async function apiModSearchMessages(params: {
+  q?: string;
+  from?: string;
+  limit?: number;
+}): Promise<{
+  ok: boolean;
+  results?: Array<{ threadKey: string; threadLabel: string; message: ChatMessage }>;
+  error?: string;
+}> {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set('q', params.q);
+  if (params.from) qs.set('from', params.from);
+  if (params.limit) qs.set('limit', String(params.limit));
+  const res = await getAuthedJson<{
+    ok?: boolean;
+    results?: Array<{ threadKey: string; threadLabel: string; message: ChatMessage }>;
+    error?: string;
+  }>(`/api/mod/messages/search?${qs.toString()}`);
+  return { ok: res.ok, results: res.data?.results, error: res.error };
+}
+
+export async function apiModUpdateUser(input: {
+  username: string;
+  displayName?: string;
+  newUsername?: string;
+  email?: string;
+  newPassword?: string;
+  bio?: string;
+  status?: UserStatus;
+  role?: 'moderator' | 'user';
+}): Promise<{ ok: boolean; user?: StaffUserSummary; error?: string }> {
+  const res = await postJson<{ ok?: boolean; user?: StaffUserSummary; error?: string }>(
+    '/api/mod/users/update',
+    input,
+    true,
+  );
+  return { ok: res.ok, user: res.data?.user, error: res.error };
+}
+
+export async function apiModModerateUser(input: {
+  targetUsername: string;
+  action: 'suspend' | 'terminate';
+  reason: string;
+  durationLabel?: string;
+  durationMs?: number | null;
+  moderatorNote: string;
+  evidence: ModerationEvidenceItem[];
+}): Promise<{ ok: boolean; user?: StaffUserSummary; error?: string }> {
+  const res = await postJson<{ ok?: boolean; user?: StaffUserSummary; error?: string }>(
+    '/api/mod/users/moderate',
+    input,
+    true,
+  );
+  return { ok: res.ok, user: res.data?.user, error: res.error };
+}
+
+export async function apiModUnsuspendUser(
+  username: string,
+  note?: string,
+): Promise<{ ok: boolean; user?: StaffUserSummary; error?: string }> {
+  const res = await postJson<{ ok?: boolean; user?: StaffUserSummary; error?: string }>(
+    '/api/mod/users/unsuspend',
+    { username, note },
+    true,
+  );
+  return { ok: res.ok, user: res.data?.user, error: res.error };
+}
+
+export async function apiModKickUser(
+  username: string,
+): Promise<{ ok: boolean; user?: StaffUserSummary; error?: string }> {
+  const res = await postJson<{ ok?: boolean; user?: StaffUserSummary; error?: string }>(
+    '/api/mod/users/kick',
+    { username },
+    true,
+  );
+  return { ok: res.ok, user: res.data?.user, error: res.error };
+}
+
+export async function apiModPurgeUser(
+  username: string,
+): Promise<{ ok: boolean; deletedUsername?: string; error?: string }> {
+  const res = await postJson<{ ok?: boolean; deletedUsername?: string; error?: string }>(
+    '/api/mod/users/purge',
+    { username },
+    true,
+  );
+  return { ok: res.ok, deletedUsername: res.data?.deletedUsername, error: res.error };
+}
+
+export async function apiModClaimTicket(
+  ticketId: string,
+): Promise<{ ok: boolean; ticket?: BotTicketCardData; error?: string }> {
+  const res = await postJson<{ ok?: boolean; ticket?: BotTicketCardData; error?: string }>(
+    '/api/mod/tickets/claim',
+    { ticketId },
+    true,
+  );
+  return { ok: res.ok, ticket: res.data?.ticket, error: res.error };
+}
+
+export async function apiModResolveTicket(
+  ticketId: string,
+  note?: string,
+): Promise<{ ok: boolean; ticket?: BotTicketCardData; error?: string }> {
+  const res = await postJson<{ ok?: boolean; ticket?: BotTicketCardData; error?: string }>(
+    '/api/mod/tickets/resolve',
+    { ticketId, note },
+    true,
+  );
+  return { ok: res.ok, ticket: res.data?.ticket, error: res.error };
+}
+
+export async function apiModDecideAppeal(
+  ticketId: string,
+  decision: 'accepted' | 'denied',
+  note?: string,
+): Promise<{ ok: boolean; ticket?: BotTicketCardData; error?: string }> {
+  const res = await postJson<{ ok?: boolean; ticket?: BotTicketCardData; error?: string }>(
+    '/api/mod/appeals/decide',
+    { ticketId, decision, note },
+    true,
+  );
+  return { ok: res.ok, ticket: res.data?.ticket, error: res.error };
+}
+
+export async function apiModSendBotDm(
+  username: string,
+  content: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await postJson<{ ok?: boolean; error?: string }>(
+    '/api/mod/bot/dm',
+    { username, content },
+    true,
+  );
+  return { ok: res.ok, error: res.error };
 }

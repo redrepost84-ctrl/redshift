@@ -23,6 +23,9 @@ const KV_KEYS = [
   'threadActivity',
   'gifLinks',
   'pushSubscriptions',
+  'staffRoles',
+  'modTickets',
+  'modAuditLog',
 ];
 
 export function resolveDataPaths() {
@@ -265,6 +268,9 @@ export function createSqliteStore(createSeedDb) {
           ? parsed.threadActivity
           : {},
       gifLinks: parsed.gifLinks && typeof parsed.gifLinks === 'object' ? parsed.gifLinks : {},
+      staffRoles: parsed.staffRoles && typeof parsed.staffRoles === 'object' ? parsed.staffRoles : {},
+      modTickets: parsed.modTickets && typeof parsed.modTickets === 'object' ? parsed.modTickets : {},
+      modAuditLog: Array.isArray(parsed.modAuditLog) ? parsed.modAuditLog : [],
       dms: loadedDms,
     };
 

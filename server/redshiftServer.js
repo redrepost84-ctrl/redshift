@@ -47,6 +47,32 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const USERNAME_REGEX = /^[a-zA-Z0-9_.-]+$/;
 const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 const VALID_STATUSES = new Set(['online', 'idle', 'dnd', 'invisible']);
+const DEVELOPER_USERNAMES = new Set(['redrepost95']);
+const DEFAULT_MODERATOR_USERNAMES = ['leyvora', 'lumpofsoil'];
+const SYSTEM_BOT_USERNAME = 'redshift';
+
+function timingSafeStringEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false;
+  const ba = Buffer.from(a, 'utf8');
+  const bb = Buffer.from(b, 'utf8');
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+function sanitizeModerationForClient(mod) {
+  if (!mod || typeof mod !== 'object') return null;
+  return {
+    status: mod.status === 'terminated' ? 'terminated' : 'suspended',
+    reason: String(mod.reason || 'Terms of Service Violation'),
+    moderatorNote: String(mod.moderatorNote || ''),
+    issuedBy: String(mod.issuedBy || 'redshift'),
+    issuedAt: Number(mod.issuedAt) || Date.now(),
+    expiresAt: typeof mod.expiresAt === 'number' ? mod.expiresAt : null,
+    durationLabel: String(mod.durationLabel || (mod.status === 'terminated' ? 'Permanent' : '')),
+    evidence: Array.isArray(mod.evidence) ? mod.evidence : [],
+    activeAppealId: typeof mod.activeAppealId === 'string' ? mod.activeAppealId : undefined,
+  };
+}
 const MAX_JSON_BYTES = 18 * 1024 * 1024; // Up to 10 compressed images per message + banners/avatars.
 const MAX_MESSAGE_IMAGE_CHARS = 3 * 1024 * 1024;
 const MAX_DM_IMAGES_PER_MESSAGE = 10;
@@ -231,6 +257,14 @@ function createSeedDb() {
     threadActivity: {},
     gifLinks: {},
     pushSubscriptions: {},
+    staffRoles: {
+      redrepost95: 'developer',
+      leyvora: 'moderator',
+      lumpofsoil: 'moderator',
+      redshift: 'bot',
+    },
+    modTickets: {},
+    modAuditLog: [],
   };
 }
 
@@ -249,6 +283,338 @@ function saveDb(targetDb) {
 
 /** @type {RedshiftDb} */
 const db = loadDb();
+
+function ensureSystemBotAndStaffRoles() {
+  let changed = false;
+  if (!db.staffRoles || typeof db.staffRoles !== 'object') {
+    db.staffRoles = {};
+    changed = true;
+  }
+  if (!db.modTickets || typeof db.modTickets !== 'object') {
+    db.modTickets = {};
+    changed = true;
+  }
+  if (!Array.isArray(db.modAuditLog)) {
+    db.modAuditLog = [];
+    changed = true;
+  }
+  for (const devUser of DEVELOPER_USERNAMES) {
+    if (db.staffRoles[devUser] !== 'developer') {
+      db.staffRoles[devUser] = 'developer';
+      changed = true;
+    }
+  }
+  if (db.staffRoles[SYSTEM_BOT_USERNAME] !== 'bot') {
+    db.staffRoles[SYSTEM_BOT_USERNAME] = 'bot';
+    changed = true;
+  }
+  for (const modUser of DEFAULT_MODERATOR_USERNAMES) {
+    if (db.staffRoles[modUser] === undefined) {
+      db.staffRoles[modUser] = 'moderator';
+      changed = true;
+    }
+  }
+  let botAcc = db.accounts.find((a) => a.username.toLowerCase() === SYSTEM_BOT_USERNAME);
+  if (!botAcc) {
+    botAcc = {
+      username: SYSTEM_BOT_USERNAME,
+      displayName: 'Redshift',
+      email: 'bot@redshift.gg',
+      passwordHash: hashPassword(crypto.randomBytes(24).toString('hex')),
+      bio: 'The official bot for Redshift!',
+      createdAt: Date.UTC(2025, 0, 1),
+      status: 'online',
+      avatarPreset: 0,
+      bannerColor: '#c92a35',
+      systemBot: true,
+      privacy: {
+        allowFriendRequests: false,
+        allowNonFriendDms: true,
+        privateProfile: false,
+        showReadReceipts: false,
+      },
+    };
+    db.accounts.push(botAcc);
+    changed = true;
+  } else if (
+    !botAcc.systemBot ||
+    botAcc.displayName !== 'Redshift' ||
+    botAcc.bio !== 'The official bot for Redshift!' ||
+    botAcc.bannerColor !== '#c92a35' ||
+    botAcc.avatarPreset !== 0
+  ) {
+    botAcc.systemBot = true;
+    botAcc.displayName = 'Redshift';
+    botAcc.bio = 'The official bot for Redshift!';
+    botAcc.bannerColor = '#c92a35';
+    botAcc.avatarPreset = 0;
+    botAcc.status = 'online';
+    changed = true;
+  }
+  if (changed) {
+    saveDb(db);
+  }
+}
+
+function getAccountRole(accountOrUsername) {
+  const rawUser =
+    typeof accountOrUsername === 'string'
+      ? accountOrUsername
+      : accountOrUsername && typeof accountOrUsername.username === 'string'
+        ? accountOrUsername.username
+        : '';
+  const key = rawUser.trim().toLowerCase();
+  if (!key) return undefined;
+  if (DEVELOPER_USERNAMES.has(key)) return 'developer';
+  if (key === SYSTEM_BOT_USERNAME) return 'bot';
+  const acc =
+    typeof accountOrUsername === 'object' && accountOrUsername
+      ? accountOrUsername
+      : db.accounts.find((a) => a.username.toLowerCase() === key);
+  if (acc?.systemBot) return 'bot';
+  const assigned = db.staffRoles?.[key];
+  if (assigned === 'developer' || assigned === 'moderator' || assigned === 'bot') {
+    return assigned;
+  }
+  return undefined;
+}
+
+function isStaffAccount(accountOrUsername) {
+  const role = getAccountRole(accountOrUsername);
+  return role === 'developer' || role === 'moderator';
+}
+
+function getAllStaffAccountKeys() {
+  const staffSet = new Set();
+  for (const acc of db.accounts) {
+    if (isStaffAccount(acc)) {
+      staffSet.add(acc.username.toLowerCase());
+    }
+  }
+  return Array.from(staffSet);
+}
+
+function checkAndRefreshModeration(account) {
+  if (!account || !account.moderation || typeof account.moderation !== 'object') {
+    return null;
+  }
+  const mod = account.moderation;
+  if (mod.status === 'suspended' && typeof mod.expiresAt === 'number' && Date.now() >= mod.expiresAt) {
+    if (!Array.isArray(account.moderationHistory)) account.moderationHistory = [];
+    account.moderationHistory.unshift({
+      id: crypto.randomUUID(),
+      action: 'unsuspended',
+      reason: 'Suspension expired automatically',
+      actorUsername: SYSTEM_BOT_USERNAME,
+      timestamp: Date.now(),
+    });
+    if (account.moderationHistory.length > 50) account.moderationHistory.length = 50;
+    delete account.moderation;
+    saveDb(db);
+    return null;
+  }
+  if (!mod.appealToken || typeof mod.appealToken !== 'string') {
+    mod.appealToken = crypto.randomBytes(24).toString('hex');
+    saveDb(db);
+  }
+  return mod;
+}
+
+function buildModeratedPayload(account) {
+  const mod = checkAndRefreshModeration(account);
+  if (!mod) return null;
+  return {
+    account: {
+      username: account.username,
+      displayName: account.displayName,
+      avatarPreset: account.avatarPreset,
+      avatarDataUrl: getAccountAvatarUrl(account),
+    },
+    moderation: sanitizeModerationForClient(mod),
+    appealToken: mod.appealToken,
+  };
+}
+
+function appendModAudit(actorAcc, action, targetUsername, summary) {
+  if (!Array.isArray(db.modAuditLog)) db.modAuditLog = [];
+  db.modAuditLog.unshift({
+    id: crypto.randomUUID(),
+    timestamp: Date.now(),
+    actorUsername: actorAcc.username,
+    actorRole: getAccountRole(actorAcc) || 'moderator',
+    action,
+    targetUsername: targetUsername || undefined,
+    summary: String(summary || '').slice(0, 400),
+  });
+  if (db.modAuditLog.length > 500) {
+    db.modAuditLog.length = 500;
+  }
+}
+
+function buildBotCardPayload(ticket) {
+  if (!ticket || typeof ticket !== 'object') return undefined;
+  const targetAcc = findAccountByUsername(ticket.targetUsername);
+  const reporterAcc = ticket.reporterUsername ? findAccountByUsername(ticket.reporterUsername) : undefined;
+  const claimerAcc = ticket.claimedBy ? findAccountByUsername(ticket.claimedBy) : undefined;
+  const deciderAcc = ticket.decidedBy ? findAccountByUsername(ticket.decidedBy) : undefined;
+  return {
+    ticketId: ticket.id,
+    kind: ticket.kind === 'appeal' ? 'appeal' : 'report',
+    status: ticket.status || 'open',
+    targetUsername: targetAcc?.username ?? ticket.targetUsername,
+    targetDisplayName: targetAcc?.displayName ?? ticket.targetDisplayName ?? ticket.targetUsername,
+    reporterUsername: ticket.reporterUsername
+      ? (reporterAcc?.username ?? ticket.reporterUsername)
+      : undefined,
+    reporterDisplayName: ticket.reporterUsername
+      ? (reporterAcc?.displayName ?? ticket.reporterDisplayName ?? ticket.reporterUsername)
+      : undefined,
+    reason: ticket.reason || 'Terms of Service Violation',
+    details: ticket.details || '',
+    reportedMessage: ticket.reportedMessage || undefined,
+    moderationSnapshot: ticket.moderationSnapshot
+      ? sanitizeModerationForClient(ticket.moderationSnapshot)
+      : undefined,
+    claimedBy: ticket.claimedBy ? (claimerAcc?.username ?? ticket.claimedBy) : undefined,
+    claimedByDisplayName: ticket.claimedBy
+      ? (claimerAcc?.displayName ?? ticket.claimedBy)
+      : undefined,
+    claimedAt: typeof ticket.claimedAt === 'number' ? ticket.claimedAt : undefined,
+    decidedBy: ticket.decidedBy ? (deciderAcc?.username ?? ticket.decidedBy) : undefined,
+    decidedByDisplayName: ticket.decidedBy
+      ? (deciderAcc?.displayName ?? ticket.decidedBy)
+      : undefined,
+    decidedAt: typeof ticket.decidedAt === 'number' ? ticket.decidedAt : undefined,
+    decisionNote: typeof ticket.decisionNote === 'string' ? ticket.decisionNote : undefined,
+    createdAt: Number(ticket.createdAt) || Date.now(),
+  };
+}
+
+function sendSystemBotDm(recipientUsername, content, botCardTicketId = null) {
+  ensureSystemBotAndStaffRoles();
+  const recKey = recipientUsername.trim().toLowerCase();
+  const recAcc = findAccountByUsername(recKey);
+  const botAcc = findAccountByUsername(SYSTEM_BOT_USERNAME);
+  if (!recAcc || !botAcc || recKey === SYSTEM_BOT_USERNAME) return null;
+
+  const threadKey = dmThreadKey(SYSTEM_BOT_USERNAME, recKey);
+  if (!Array.isArray(db.dms[threadKey])) db.dms[threadKey] = [];
+  const list = db.dms[threadKey];
+  const now = Date.now();
+  const stored = {
+    id: crypto.randomUUID(),
+    authorUsername: SYSTEM_BOT_USERNAME,
+    content: String(content || '').trim(),
+    botCard: botCardTicketId ? { ticketId: botCardTicketId } : undefined,
+    timestamp: now,
+    reactions: {},
+  };
+  list.push(stored);
+  sqliteStore.insertMessage(threadKey, stored);
+
+  if (!db.unreadDms[recKey] || typeof db.unreadDms[recKey] !== 'object') {
+    db.unreadDms[recKey] = {};
+  }
+  db.unreadDms[recKey][SYSTEM_BOT_USERNAME] = (db.unreadDms[recKey][SYSTEM_BOT_USERNAME] ?? 0) + 1;
+  recordOpenDmPeer(recKey, SYSTEM_BOT_USERNAME);
+  recordOpenDmPeer(SYSTEM_BOT_USERNAME, recKey);
+  touchThreadActivityForUser(recKey, `dm:${SYSTEM_BOT_USERNAME}`, now, { unhide: true });
+
+  const hydrated = hydrateMessage(stored, list);
+  sendWsEventToUser(recKey, {
+    type: 'dm:message',
+    threadUsers: [SYSTEM_BOT_USERNAME, recKey],
+    message: hydrated,
+  });
+  pushSnapshotToUser(recKey);
+  return { recipientKey: recKey, threadKey, messageId: stored.id };
+}
+
+function broadcastTicketBotCards(ticket) {
+  if (!ticket) return;
+  const refs = Array.isArray(ticket.botMessages) ? ticket.botMessages : [];
+  for (const ref of refs) {
+    if (!ref || !ref.threadKey || !ref.messageId || !ref.recipientKey) continue;
+    const list = db.dms[ref.threadKey];
+    if (!Array.isArray(list)) continue;
+    const msg = list.find((m) => m.id === ref.messageId);
+    if (!msg) continue;
+    const hydrated = hydrateMessage(msg, list);
+    sendWsEventToUser(ref.recipientKey, {
+      type: 'dm:edit',
+      threadUsers: [SYSTEM_BOT_USERNAME, ref.recipientKey],
+      message: hydrated,
+    });
+  }
+  const cardPayload = buildBotCardPayload(ticket);
+  for (const staffKey of getAllStaffAccountKeys()) {
+    sendWsEventToUser(staffKey, {
+      type: 'mod:ticket-updated',
+      ticket: cardPayload,
+    });
+  }
+}
+
+function enforceLiveModerationKick(account) {
+  const uKey = account.username.toLowerCase();
+  const payload = buildModeratedPayload(account);
+  if (payload) {
+    sendWsEventToUser(uKey, {
+      type: 'account:moderated',
+      ...payload,
+    });
+  }
+  for (const [tok, ownerKey] of Object.entries(db.sessions)) {
+    if (ownerKey === uKey) delete db.sessions[tok];
+  }
+  const sockets = onlineSockets.get(uKey);
+  if (sockets) {
+    for (const ws of Array.from(sockets)) {
+      try {
+        ws.close(4003, 'Account moderated');
+      } catch {}
+    }
+    onlineSockets.delete(uKey);
+  }
+  lastSeenByUser.delete(uKey);
+  cleanupUserFromVoiceCalls(uKey);
+  removeUserSeatedLobbies(uKey);
+  notifyRelatedPeers(uKey, false);
+}
+
+function countOnlineUsers() {
+  let count = 0;
+  for (const acc of db.accounts) {
+    if (!acc.systemBot && isUserSocketOnline(acc.username)) count += 1;
+  }
+  return count;
+}
+
+function buildStaffUserSummary(acc) {
+  const uKey = acc.username.toLowerCase();
+  const mod = checkAndRefreshModeration(acc);
+  const activeSessions = Object.values(db.sessions).filter((v) => v === uKey).length;
+  return {
+    username: acc.username,
+    displayName: acc.displayName,
+    email: acc.email,
+    bio: acc.bio || '',
+    status: getVisibleFriendStatus(acc),
+    rawStatus: acc.status || 'online',
+    online: Boolean(acc.systemBot) || isUserSocketOnline(acc.username),
+    role: getAccountRole(acc),
+    isSystemBot: Boolean(acc.systemBot),
+    avatarPreset: acc.avatarPreset,
+    avatarDataUrl: getAccountAvatarUrl(acc),
+    createdAt: acc.createdAt,
+    activeSessions,
+    friendCount: (db.friendships[uKey] ?? []).length,
+    moderation: mod ? sanitizeModerationForClient(mod) : null,
+    moderationHistory: Array.isArray(acc.moderationHistory) ? acc.moderationHistory : [],
+  };
+}
+
+ensureSystemBotAndStaffRoles();
 
 /** Lowercase username -> active WebSockets */
 /** @type {Map<string, Set<WebSocket>>} */
@@ -856,6 +1222,7 @@ function hydrateMessage(msg, threadList) {
       authorName: replyAuthor?.displayName ?? replyAuthorUsername,
       authorAvatarPreset: replyAuthor ? replyAuthor.avatarPreset : 0,
       authorAvatarDataUrl: getAccountAvatarUrl(replyAuthor),
+      authorRole: getAccountRole(replyAuthor ?? replyAuthorUsername),
       content: refTarget ? refTarget.content : missing ? '' : (msg.replyTo.content ?? ''),
       hasImage: refTarget
         ? targetImages.length > 0
@@ -935,12 +1302,21 @@ function hydrateMessage(msg, threadList) {
     };
   }
 
+  let hydratedBotCard;
+  if (msg.botCard && typeof msg.botCard === 'object' && typeof msg.botCard.ticketId === 'string') {
+    const ticket = db.modTickets?.[msg.botCard.ticketId];
+    if (ticket) {
+      hydratedBotCard = buildBotCardPayload(ticket);
+    }
+  }
+
   return {
     id: msg.id,
     authorUsername: author?.username ?? msg.authorUsername,
     authorName: author?.displayName ?? msg.authorUsername,
     authorAvatarPreset: author ? author.avatarPreset : 0,
     authorAvatarDataUrl: getAccountAvatarUrl(author),
+    authorRole: getAccountRole(author ?? msg.authorUsername),
     content: msg.content,
     imageDataUrl: imageDataUrls[0],
     imageDataUrls: imageDataUrls.length > 0 ? imageDataUrls : undefined,
@@ -957,6 +1333,7 @@ function hydrateMessage(msg, threadList) {
               findAccountByUsername(msg.statusReply.authorUsername)?.displayName ??
               msg.statusReply.authorName ??
               msg.statusReply.authorUsername,
+            authorRole: getAccountRole(msg.statusReply.authorUsername),
             emoji: msg.statusReply.emoji || undefined,
             text: msg.statusReply.text || undefined,
           }
@@ -965,6 +1342,7 @@ function hydrateMessage(msg, threadList) {
     callLog: hydratedCallLog,
     systemEvent: hydratedSystemEvent,
     voiceNote: msg.voiceNote,
+    botCard: hydratedBotCard,
     timestamp: msg.timestamp,
     editedAt: msg.editedAt,
     pinned: msg.pinned ? true : undefined,
@@ -1853,6 +2231,12 @@ function isUserSocketOnline(username) {
  * @returns {EffectiveStatus}
  */
 function getVisibleFriendStatus(account) {
+  if (account.systemBot) {
+    return 'online';
+  }
+  if (checkAndRefreshModeration(account)) {
+    return 'offline';
+  }
   if (!isUserSocketOnline(account.username)) {
     return 'offline';
   }
@@ -1910,6 +2294,8 @@ function toPublicProfile(account, viewerUsername) {
   const isBlocked = Boolean(
     viewerUsername && hasAnyBlockBetween(viewerUsername, account.username),
   );
+  const role = getAccountRole(account);
+  const isSystemBot = Boolean(account.systemBot);
 
   if (isPrivate || isBlocked) {
     return {
@@ -1926,6 +2312,8 @@ function toPublicProfile(account, viewerUsername) {
       isProfilePrivate: isPrivate,
       isBlockedRelation: isBlocked,
       acceptsNonFriendDms,
+      role,
+      isSystemBot,
     };
   }
 
@@ -1944,6 +2332,8 @@ function toPublicProfile(account, viewerUsername) {
     isProfilePrivate: false,
     isBlockedRelation: false,
     acceptsNonFriendDms,
+    role,
+    isSystemBot,
   };
 }
 
@@ -1961,6 +2351,8 @@ function toSelfProfile(account) {
     bannerColor: account.bannerColor || undefined,
     bannerDataUrl: getAccountBannerUrl(account),
     customStatus: getActiveCustomStatus(account),
+    role: getAccountRole(account),
+    isSystemBot: Boolean(account.systemBot),
     privacy: {
       allowFriendRequests: account.privacy?.allowFriendRequests !== false,
       allowNonFriendDms: account.privacy?.allowNonFriendDms !== false,
@@ -2200,6 +2592,11 @@ function authenticateRequest(req) {
   }
   const acc = findAccountByUsername(username) ?? null;
   if (acc) {
+    if (acc.systemBot || checkAndRefreshModeration(acc)) {
+      delete db.sessions[token];
+      saveDb(db);
+      return null;
+    }
     const uKey = acc.username.toLowerCase();
     const wasOnline = isUserSocketOnline(uKey);
     lastSeenByUser.set(uKey, Date.now());
@@ -2379,6 +2776,11 @@ function migrateUsernameReferences(oldUsername, newUsername) {
     if (meta.uploadedBy.toLowerCase() === oldKey) {
       meta.uploadedBy = newKey;
     }
+  }
+
+  if (db.staffRoles && db.staffRoles[oldKey]) {
+    db.staffRoles[newKey] = db.staffRoles[oldKey];
+    delete db.staffRoles[oldKey];
   }
 
   if (db.favoriteGifs[oldKey]) {
@@ -3971,8 +4373,27 @@ export function createRedshiftServerMiddleware() {
         return;
       }
 
+      if (account.systemBot) {
+        sendJson(res, 403, { ok: false, error: 'Error: Official bot accounts cannot be signed into' });
+        return;
+      }
+
       if (!verifyPassword(password, account.passwordHash)) {
         sendJson(res, 401, { ok: false, error: 'Error: Wrong Password' });
+        return;
+      }
+
+      const modPayload = buildModeratedPayload(account);
+      if (modPayload) {
+        sendJson(res, 403, {
+          ok: false,
+          moderated: true,
+          error:
+            modPayload.moderation.status === 'terminated'
+              ? 'Account Terminated'
+              : 'Account Suspended',
+          ...modPayload,
+        });
         return;
       }
 
@@ -4171,6 +4592,20 @@ export function createRedshiftServerMiddleware() {
         saveDb(db);
       }
 
+      const modAfterReset = buildModeratedPayload(account);
+      if (modAfterReset) {
+        sendJson(res, 403, {
+          ok: false,
+          moderated: true,
+          error:
+            modAfterReset.moderation.status === 'terminated'
+              ? 'Account Terminated'
+              : 'Account Suspended',
+          ...modAfterReset,
+        });
+        return;
+      }
+
       const token = issueSessionToken(account.username);
       sendJson(res, 200, {
         ok: true,
@@ -4180,10 +4615,914 @@ export function createRedshiftServerMiddleware() {
       return;
     }
 
+    // Pre-Auth: Verify moderated account for Appeal picker
+    if (req.method === 'POST' && reqPath === '/api/appeals/verify-account') {
+      const identifier = typeof body.identifier === 'string' ? body.identifier.trim() : '';
+      const password = typeof body.password === 'string' ? body.password : '';
+      if (!identifier || !password) {
+        sendJson(res, 400, { ok: false, error: 'Error: Username/email and password are required' });
+        return;
+      }
+      const account = findAccountByIdentifier(identifier);
+      if (!account || account.systemBot) {
+        sendJson(res, 404, { ok: false, error: 'Error: Account not found' });
+        return;
+      }
+      if (!verifyPassword(password, account.passwordHash)) {
+        sendJson(res, 401, { ok: false, error: 'Error: Wrong Password' });
+        return;
+      }
+      const modPayload = buildModeratedPayload(account);
+      if (!modPayload) {
+        sendJson(res, 400, { ok: false, error: 'Error: This account is not currently suspended or terminated' });
+        return;
+      }
+      sendJson(res, 200, { ok: true, ...modPayload });
+      return;
+    }
+
+    // Pre-Auth: Submit Appeal
+    if (req.method === 'POST' && reqPath === '/api/appeals/submit') {
+      const rawUsername = typeof body.username === 'string' ? body.username.trim().toLowerCase() : '';
+      const appealToken = typeof body.appealToken === 'string' ? body.appealToken.trim() : '';
+      const details = typeof body.details === 'string' ? body.details.trim() : '';
+      if (!rawUsername || !appealToken) {
+        sendJson(res, 400, { ok: false, error: 'Error: Missing account verification for appeal' });
+        return;
+      }
+      if (!details || details.length < 5) {
+        sendJson(res, 400, { ok: false, error: 'Error: Please enter details about your appeal' });
+        return;
+      }
+      if (details.length > 3000) {
+        sendJson(res, 400, { ok: false, error: 'Error: Appeal details are too long (max 3000 chars)' });
+        return;
+      }
+      const account = findAccountByUsername(rawUsername);
+      if (!account) {
+        sendJson(res, 404, { ok: false, error: 'Error: Account not found' });
+        return;
+      }
+      const mod = checkAndRefreshModeration(account);
+      if (!mod) {
+        sendJson(res, 400, { ok: false, error: 'Error: This account is no longer suspended' });
+        return;
+      }
+      if (!timingSafeStringEqual(appealToken, mod.appealToken)) {
+        sendJson(res, 403, { ok: false, error: 'Error: Appeal session expired — sign in again to appeal' });
+        return;
+      }
+      const existingOpen = Object.values(db.modTickets ?? {}).find(
+        (t) =>
+          t &&
+          t.kind === 'appeal' &&
+          t.targetUsername.toLowerCase() === rawUsername &&
+          (t.status === 'open' || t.status === 'claimed'),
+      );
+      if (existingOpen) {
+        sendJson(res, 409, {
+          ok: false,
+          error: 'Error: You already have an active appeal under review for this account',
+        });
+        return;
+      }
+
+      const ticketId = `APL-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+      const ticket = {
+        id: ticketId,
+        kind: 'appeal',
+        status: 'open',
+        createdAt: Date.now(),
+        targetUsername: account.username,
+        targetDisplayName: account.displayName,
+        reason: mod.reason || 'Terms of Service Violation',
+        details,
+        moderationSnapshot: sanitizeModerationForClient(mod),
+        botMessages: [],
+      };
+      db.modTickets[ticketId] = ticket;
+      mod.activeAppealId = ticketId;
+
+      const staffKeys = getAllStaffAccountKeys();
+      const actionLabel = mod.status === 'terminated' ? 'Account Termination' : `Suspension (${mod.durationLabel || 'Timed'})`;
+      const botSummary = `New Ban Appeal (${ticketId}) from @${account.username} for ${actionLabel}.`;
+      for (const staffKey of staffKeys) {
+        const sent = sendSystemBotDm(staffKey, botSummary, ticketId);
+        if (sent) ticket.botMessages.push(sent);
+      }
+      saveDb(db);
+      sendJson(res, 200, { ok: true, ticketId });
+      return;
+    }
+
     // Authenticated routes below
     const activeUser = authenticateRequest(req);
     if (!activeUser) {
       sendJson(res, 401, { ok: false, error: 'Error: Not authenticated' });
+      return;
+    }
+
+    // Reports: Submit a user/message report to staff via Redshift Bot
+    if (req.method === 'POST' && reqPath === '/api/reports/create') {
+      const selfKey = activeUser.username.toLowerCase();
+      const rl = rateLimiter.check(`report:${selfKey}`, 10, 10 * 60_000);
+      if (!rl.ok) {
+        sendJson(res, 429, {
+          ok: false,
+          error: `Error: Please wait ${rl.retryAfterSec}s before sending another report`,
+        });
+        return;
+      }
+      const targetKey =
+        typeof body.targetUsername === 'string' ? body.targetUsername.trim().toLowerCase() : '';
+      const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 120) : '';
+      const details = typeof body.details === 'string' ? body.details.trim().slice(0, 3000) : '';
+      if (!targetKey) {
+        sendJson(res, 400, { ok: false, error: 'Error: Reported user is required' });
+        return;
+      }
+      if (targetKey === selfKey) {
+        sendJson(res, 400, { ok: false, error: 'Error: You cannot report yourself' });
+        return;
+      }
+      if (targetKey === SYSTEM_BOT_USERNAME) {
+        sendJson(res, 400, { ok: false, error: 'Error: You cannot report the official Redshift bot' });
+        return;
+      }
+      const targetAcc = findAccountByUsername(targetKey);
+      if (!targetAcc) {
+        sendJson(res, 404, { ok: false, error: 'Error: Reported user not found' });
+        return;
+      }
+      if (!reason) {
+        sendJson(res, 400, { ok: false, error: 'Error: Please choose a report reason' });
+        return;
+      }
+      if (!details) {
+        sendJson(res, 400, { ok: false, error: 'Error: Please describe what happened' });
+        return;
+      }
+
+      let reportedMessage;
+      if (body.reportedMessage && typeof body.reportedMessage === 'object') {
+        reportedMessage = {
+          messageId: typeof body.reportedMessage.messageId === 'string' ? body.reportedMessage.messageId.slice(0, 80) : undefined,
+          threadLabel: typeof body.reportedMessage.threadLabel === 'string' ? body.reportedMessage.threadLabel.slice(0, 120) : undefined,
+          authorUsername: targetAcc.username,
+          content: typeof body.reportedMessage.content === 'string' ? body.reportedMessage.content.slice(0, 1500) : '',
+          timestamp: typeof body.reportedMessage.timestamp === 'number' ? body.reportedMessage.timestamp : undefined,
+          attachments: Array.isArray(body.reportedMessage.attachments)
+            ? body.reportedMessage.attachments.slice(0, 10).map((a) => ({
+                name: String(a?.name || 'Attachment').slice(0, 120),
+                kind: String(a?.kind || 'file').slice(0, 20),
+                url: typeof a?.url === 'string' ? a.url.slice(0, 300) : undefined,
+              }))
+            : undefined,
+          gifUrl: typeof body.reportedMessage.gifUrl === 'string' ? body.reportedMessage.gifUrl.slice(0, 500) : undefined,
+          gifTitle: typeof body.reportedMessage.gifTitle === 'string' ? body.reportedMessage.gifTitle.slice(0, 120) : undefined,
+        };
+      }
+
+      const ticketId = `RPT-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+      const ticket = {
+        id: ticketId,
+        kind: 'report',
+        status: 'open',
+        createdAt: Date.now(),
+        targetUsername: targetAcc.username,
+        targetDisplayName: targetAcc.displayName,
+        reporterUsername: activeUser.username,
+        reporterDisplayName: activeUser.displayName,
+        reason,
+        details,
+        reportedMessage,
+        botMessages: [],
+      };
+      db.modTickets[ticketId] = ticket;
+
+      const staffKeys = getAllStaffAccountKeys();
+      const botSummary = `New User Report (${ticketId}): @${activeUser.username} reported @${targetAcc.username} for ${reason}.`;
+      for (const staffKey of staffKeys) {
+        const sent = sendSystemBotDm(staffKey, botSummary, ticketId);
+        if (sent) ticket.botMessages.push(sent);
+      }
+      saveDb(db);
+      sendJson(res, 200, { ok: true, ticketId });
+      return;
+    }
+
+    // Staff / Moderator Sandbox & Administration Panel API (/api/mod/*)
+    if (reqPath.startsWith('/api/mod/')) {
+      const selfKey = activeUser.username.toLowerCase();
+      const actorRole = getAccountRole(activeUser);
+      if (actorRole !== 'developer' && actorRole !== 'moderator') {
+        sendJson(res, 403, { ok: false, error: 'Error: Moderator or Developer permissions required' });
+        return;
+      }
+      const isDeveloper = actorRole === 'developer';
+      const parsedModUrl = new URL(req.url ?? '/', 'http://localhost');
+
+      if (req.method === 'GET' && reqPath === '/api/mod/overview') {
+        let totalMessages = 0;
+        for (const list of Object.values(db.dms)) {
+          if (Array.isArray(list)) totalMessages += list.length;
+        }
+        let activeSuspensions = 0;
+        let terminatedAccounts = 0;
+        for (const acc of db.accounts) {
+          const mod = checkAndRefreshModeration(acc);
+          if (mod?.status === 'suspended') activeSuspensions += 1;
+          else if (mod?.status === 'terminated') terminatedAccounts += 1;
+        }
+        const tickets = Object.values(db.modTickets ?? {})
+          .filter(Boolean)
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+          .map((t) => buildBotCardPayload(t));
+        const openReports = tickets.filter((t) => t.kind === 'report' && (t.status === 'open' || t.status === 'claimed')).length;
+        const pendingAppeals = tickets.filter((t) => t.kind === 'appeal' && (t.status === 'open' || t.status === 'claimed')).length;
+        sendJson(res, 200, {
+          ok: true,
+          actorRole,
+          stats: {
+            totalAccounts: db.accounts.length,
+            onlineUsers: countOnlineUsers(),
+            totalMessages,
+            openReports,
+            pendingAppeals,
+            activeSuspensions,
+            terminatedAccounts,
+          },
+          tickets,
+          auditLog: Array.isArray(db.modAuditLog) ? db.modAuditLog.slice(0, 200) : [],
+        });
+        return;
+      }
+
+      if (req.method === 'GET' && reqPath === '/api/mod/users') {
+        const q = (parsedModUrl.searchParams.get('q') ?? '').trim().toLowerCase();
+        const filter = (parsedModUrl.searchParams.get('filter') ?? 'all').trim().toLowerCase();
+        const users = db.accounts
+          .map((acc) => buildStaffUserSummary(acc))
+          .filter((u) => {
+            if (filter === 'suspended' && u.moderation?.status !== 'suspended') return false;
+            if (filter === 'terminated' && u.moderation?.status !== 'terminated') return false;
+            if (filter === 'staff' && u.role !== 'developer' && u.role !== 'moderator') return false;
+            if (filter === 'online' && !u.online) return false;
+            if (!q) return true;
+            return (
+              u.username.toLowerCase().includes(q) ||
+              u.displayName.toLowerCase().includes(q) ||
+              u.email.toLowerCase().includes(q)
+            );
+          })
+          .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        sendJson(res, 200, { ok: true, users });
+        return;
+      }
+
+      if (req.method === 'GET' && reqPath === '/api/mod/users/threads') {
+        const targetKey = (parsedModUrl.searchParams.get('username') ?? '').trim().toLowerCase();
+        if (!targetKey) {
+          sendJson(res, 400, { ok: false, error: 'Error: Username is required' });
+          return;
+        }
+        if (DEVELOPER_USERNAMES.has(targetKey) && !isDeveloper) {
+          sendJson(res, 403, { ok: false, error: 'Error: Cannot inspect Developer private conversations' });
+          return;
+        }
+        const threads = [];
+        for (const [tKey, list] of Object.entries(db.dms)) {
+          if (!Array.isArray(list)) continue;
+          if (tKey.startsWith('group:')) {
+            const gid = tKey.slice('group:'.length);
+            const grp = db.groupDms[gid];
+            if (!grp || !Array.isArray(grp.members)) continue;
+            if (!grp.members.some((m) => m.toLowerCase() === targetKey)) continue;
+            const last = list[list.length - 1];
+            threads.push({
+              threadKey: tKey,
+              kind: 'group',
+              label: `Group: ${grp.name}`,
+              participants: grp.members,
+              messageCount: list.length,
+              lastTimestamp: last?.timestamp ?? grp.createdAt ?? 0,
+              lastPreview: last ? String(last.content || (last.gif ? '[GIF]' : '[Attachment]')).slice(0, 90) : '',
+            });
+          } else if (tKey.includes('::')) {
+            const parts = tKey.split('::');
+            if (!parts.includes(targetKey)) continue;
+            if (!isDeveloper && parts.some((p) => DEVELOPER_USERNAMES.has(p))) continue;
+            const otherKey = parts[0] === targetKey ? parts[1] : parts[0];
+            const otherAcc = findAccountByUsername(otherKey);
+            const last = list[list.length - 1];
+            threads.push({
+              threadKey: tKey,
+              kind: 'dm',
+              label: `DM with ${otherAcc ? `${otherAcc.displayName} (@${otherAcc.username})` : `@${otherKey}`}`,
+              participants: parts,
+              messageCount: list.length,
+              lastTimestamp: last?.timestamp ?? 0,
+              lastPreview: last ? String(last.content || (last.gif ? '[GIF]' : '[Attachment]')).slice(0, 90) : '',
+            });
+          }
+        }
+        threads.sort((a, b) => b.lastTimestamp - a.lastTimestamp);
+        appendModAudit(activeUser, 'logs:threads', targetKey, `Listed ${threads.length} conversation threads for @${targetKey}`);
+        saveDb(db);
+        sendJson(res, 200, { ok: true, threads });
+        return;
+      }
+
+      if (req.method === 'GET' && reqPath === '/api/mod/users/messages') {
+        const targetKey = (parsedModUrl.searchParams.get('username') ?? '').trim().toLowerCase();
+        const specificThreadKey = (parsedModUrl.searchParams.get('threadKey') ?? '').trim();
+        const q = (parsedModUrl.searchParams.get('q') ?? '').trim().toLowerCase();
+        const rawLimit = Number(parsedModUrl.searchParams.get('limit'));
+        const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(250, Math.floor(rawLimit)) : 120;
+
+        if (specificThreadKey) {
+          if (
+            !isDeveloper &&
+            !specificThreadKey.startsWith('group:') &&
+            specificThreadKey.split('::').some((p) => DEVELOPER_USERNAMES.has(p))
+          ) {
+            sendJson(res, 403, { ok: false, error: 'Error: Cannot inspect Developer private DMs' });
+            return;
+          }
+          const list = db.dms[specificThreadKey] ?? [];
+          let filtered = list;
+          if (q) {
+            filtered = list.filter(
+              (m) =>
+                String(m.content || '').toLowerCase().includes(q) ||
+                String(m.authorUsername || '').toLowerCase().includes(q),
+            );
+          }
+          const sliced = filtered.slice(-limit);
+          appendModAudit(activeUser, 'logs:read', targetKey || undefined, `Viewed chat log ${specificThreadKey} (${sliced.length} messages)`);
+          saveDb(db);
+          sendJson(res, 200, {
+            ok: true,
+            threadKey: specificThreadKey,
+            messages: sliced.map((m) => hydrateMessage(m, list)),
+          });
+          return;
+        }
+
+        if (!targetKey) {
+          sendJson(res, 400, { ok: false, error: 'Error: username or threadKey is required' });
+          return;
+        }
+        if (DEVELOPER_USERNAMES.has(targetKey) && !isDeveloper) {
+          sendJson(res, 403, { ok: false, error: 'Error: Cannot inspect Developer messages' });
+          return;
+        }
+        const results = [];
+        for (const [tKey, list] of Object.entries(db.dms)) {
+          if (!Array.isArray(list)) continue;
+          if (!isDeveloper && !tKey.startsWith('group:') && tKey.split('::').some((p) => DEVELOPER_USERNAMES.has(p))) {
+            continue;
+          }
+          let threadLabel = tKey;
+          if (tKey.startsWith('group:')) {
+            const grp = db.groupDms[tKey.slice('group:'.length)];
+            threadLabel = grp ? `Group: ${grp.name}` : tKey;
+          } else if (tKey.includes('::')) {
+            const [u1, u2] = tKey.split('::');
+            threadLabel = `DM: @${u1} ↔ @${u2}`;
+          }
+          for (const msg of list) {
+            if (!msg || String(msg.authorUsername || '').toLowerCase() !== targetKey) continue;
+            if (msg.systemEvent || msg.callLog) continue;
+            if (q && !String(msg.content || '').toLowerCase().includes(q)) continue;
+            results.push({
+              threadKey: tKey,
+              threadLabel,
+              message: hydrateMessage(msg, list),
+            });
+          }
+        }
+        results.sort((a, b) => (b.message.timestamp || 0) - (a.message.timestamp || 0));
+        sendJson(res, 200, { ok: true, items: results.slice(0, limit) });
+        return;
+      }
+
+      if (req.method === 'GET' && reqPath === '/api/mod/messages/search') {
+        const q = (parsedModUrl.searchParams.get('q') ?? '').trim().toLowerCase();
+        const fromUser = (parsedModUrl.searchParams.get('from') ?? '').trim().toLowerCase().replace(/^@/, '');
+        const rawLimit = Number(parsedModUrl.searchParams.get('limit'));
+        const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(200, Math.floor(rawLimit)) : 80;
+        if (!q && !fromUser) {
+          sendJson(res, 200, { ok: true, results: [] });
+          return;
+        }
+
+        const results = [];
+        for (const [tKey, list] of Object.entries(db.dms)) {
+          if (!Array.isArray(list)) continue;
+          if (!isDeveloper && !tKey.startsWith('group:') && tKey.split('::').some((p) => DEVELOPER_USERNAMES.has(p))) {
+            continue;
+          }
+          let threadLabel = tKey;
+          if (tKey.startsWith('group:')) {
+            const grp = db.groupDms[tKey.slice('group:'.length)];
+            threadLabel = grp ? `Group: ${grp.name}` : tKey;
+          } else if (tKey.includes('::')) {
+            const [u1, u2] = tKey.split('::');
+            threadLabel = `DM: @${u1} ↔ @${u2}`;
+          }
+          for (const msg of list) {
+            if (!msg || msg.systemEvent || msg.callLog) continue;
+            if (fromUser && String(msg.authorUsername || '').toLowerCase() !== fromUser) continue;
+            if (q && !String(msg.content || '').toLowerCase().includes(q)) continue;
+            results.push({
+              threadKey: tKey,
+              threadLabel,
+              message: hydrateMessage(msg, list),
+            });
+          }
+        }
+        results.sort((a, b) => (b.message.timestamp || 0) - (a.message.timestamp || 0));
+        appendModAudit(activeUser, 'logs:search', fromUser || undefined, `Searched global chat logs q="${q}" from="${fromUser}"`);
+        saveDb(db);
+        sendJson(res, 200, { ok: true, results: results.slice(0, limit) });
+        return;
+      }
+
+      if (req.method === 'POST' && reqPath === '/api/mod/users/update') {
+        const targetKey = typeof body.username === 'string' ? body.username.trim().toLowerCase() : '';
+        const account = targetKey ? findAccountByUsername(targetKey) : undefined;
+        if (!account) {
+          sendJson(res, 404, { ok: false, error: 'Error: Account not found' });
+          return;
+        }
+        if (account.systemBot) {
+          sendJson(res, 403, { ok: false, error: 'Error: Official Redshift bot cannot be modified' });
+          return;
+        }
+        const targetRole = getAccountRole(account);
+        if (targetRole === 'developer' && !isDeveloper) {
+          sendJson(res, 403, { ok: false, error: 'Error: Moderators cannot edit the Developer account' });
+          return;
+        }
+        if (targetRole === 'moderator' && !isDeveloper && targetKey !== selfKey) {
+          sendJson(res, 403, { ok: false, error: 'Error: Moderators cannot edit other moderators' });
+          return;
+        }
+
+        const changes = [];
+        if (typeof body.displayName === 'string' && body.displayName.trim()) {
+          const nextName = body.displayName.trim().slice(0, 40);
+          if (nextName !== account.displayName) {
+            account.displayName = nextName;
+            changes.push(`displayName="${nextName}"`);
+          }
+        }
+        if (typeof body.bio === 'string') {
+          const nextBio = body.bio.trim().slice(0, 280);
+          if (nextBio !== account.bio) {
+            account.bio = nextBio;
+            changes.push('bio');
+          }
+        }
+        if (typeof body.email === 'string' && body.email.trim()) {
+          const nextEmail = body.email.trim();
+          if (!EMAIL_REGEX.test(nextEmail)) {
+            sendJson(res, 400, { ok: false, error: 'Error: Invalid email format' });
+            return;
+          }
+          const dupEmail = findAccountByEmail(nextEmail);
+          if (dupEmail && dupEmail.username.toLowerCase() !== targetKey) {
+            sendJson(res, 409, { ok: false, error: 'Error: Email is already used by another account' });
+            return;
+          }
+          if (nextEmail !== account.email) {
+            account.email = nextEmail;
+            changes.push(`email="${nextEmail}"`);
+          }
+        }
+        if (typeof body.newPassword === 'string' && body.newPassword.length > 0) {
+          if (body.newPassword.length < 6) {
+            sendJson(res, 400, { ok: false, error: 'Error: New password must be at least 6 characters' });
+            return;
+          }
+          account.passwordHash = hashPassword(body.newPassword);
+          changes.push('password reset');
+        }
+        if (typeof body.status === 'string' && VALID_STATUSES.has(body.status)) {
+          account.status = body.status;
+          changes.push(`status="${body.status}"`);
+        }
+        if (typeof body.newUsername === 'string' && body.newUsername.trim()) {
+          const nextUsername = body.newUsername.trim().toLowerCase();
+          if (nextUsername !== targetKey) {
+            if (DEVELOPER_USERNAMES.has(targetKey)) {
+              sendJson(res, 403, { ok: false, error: 'Error: Developer username is locked' });
+              return;
+            }
+            if (nextUsername.length < 2 || nextUsername.length > 32 || !USERNAME_REGEX.test(nextUsername)) {
+              sendJson(res, 400, { ok: false, error: 'Error: Invalid username format' });
+              return;
+            }
+            if (findAccountByUsername(nextUsername)) {
+              sendJson(res, 409, { ok: false, error: 'Error: Username is already taken' });
+              return;
+            }
+            const oldUser = account.username;
+            account.username = nextUsername;
+            migrateUsernameReferences(oldUser, nextUsername);
+            changes.push(`username @${oldUser} -> @${nextUsername}`);
+          }
+        }
+        if (typeof body.role === 'string' && isDeveloper && !DEVELOPER_USERNAMES.has(account.username.toLowerCase())) {
+          const uKey = account.username.toLowerCase();
+          if (body.role === 'moderator') {
+            db.staffRoles[uKey] = 'moderator';
+            changes.push('role="moderator"');
+          } else if (body.role === 'none' || body.role === 'user' || body.role === '') {
+            db.staffRoles[uKey] = 'none';
+            changes.push('role="user"');
+          }
+        }
+
+        if (changes.length > 0) {
+          appendModAudit(activeUser, 'user:update', account.username, `Updated @${account.username}: ${changes.join(', ')}`);
+          saveDb(db);
+          pushSnapshotToUser(account.username.toLowerCase());
+          notifyRelatedPeers(account.username, true);
+        }
+        sendJson(res, 200, { ok: true, user: buildStaffUserSummary(account) });
+        return;
+      }
+
+      if (req.method === 'POST' && reqPath === '/api/mod/users/moderate') {
+        const targetKey = typeof body.targetUsername === 'string' ? body.targetUsername.trim().toLowerCase() : '';
+        const action = body.action === 'terminate' ? 'terminate' : 'suspend';
+        const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 120) : 'Terms of Service Violation';
+        const moderatorNote = typeof body.moderatorNote === 'string' ? body.moderatorNote.trim().slice(0, 1000) : '';
+        const durationLabel =
+          action === 'terminate'
+            ? 'Permanent'
+            : typeof body.durationLabel === 'string' && body.durationLabel.trim()
+              ? body.durationLabel.trim().slice(0, 60)
+              : '1 Day';
+        const durationMs =
+          action === 'terminate'
+            ? null
+            : Number.isFinite(Number(body.durationMs)) && Number(body.durationMs) > 0
+              ? Math.min(3650 * 24 * 60 * 60 * 1000, Math.floor(Number(body.durationMs)))
+              : 24 * 60 * 60 * 1000;
+
+        const account = targetKey ? findAccountByUsername(targetKey) : undefined;
+        if (!account) {
+          sendJson(res, 404, { ok: false, error: 'Error: Target account not found' });
+          return;
+        }
+        if (targetKey === selfKey) {
+          sendJson(res, 400, { ok: false, error: 'Error: You cannot moderate your own account' });
+          return;
+        }
+        if (account.systemBot || DEVELOPER_USERNAMES.has(targetKey)) {
+          sendJson(res, 403, { ok: false, error: 'Error: This account is protected from moderation' });
+          return;
+        }
+        if (getAccountRole(account) === 'moderator' && !isDeveloper) {
+          sendJson(res, 403, { ok: false, error: 'Error: Moderators cannot suspend or terminate other moderators' });
+          return;
+        }
+
+        const rawEvidence = Array.isArray(body.evidence) ? body.evidence : [];
+        const evidence = rawEvidence.slice(0, 25).map((item) => ({
+          messageId: typeof item?.messageId === 'string' ? item.messageId.slice(0, 80) : undefined,
+          threadKey: typeof item?.threadKey === 'string' ? item.threadKey.slice(0, 140) : undefined,
+          threadLabel: typeof item?.threadLabel === 'string' ? item.threadLabel.slice(0, 120) : undefined,
+          authorUsername: account.username,
+          content: typeof item?.content === 'string' ? item.content.slice(0, 1500) : '',
+          timestamp: typeof item?.timestamp === 'number' ? item.timestamp : undefined,
+          attachments: Array.isArray(item?.attachments)
+            ? item.attachments.slice(0, 10).map((a) => ({
+                name: String(a?.name || 'Attachment').slice(0, 120),
+                kind: String(a?.kind || 'file').slice(0, 20),
+                url: typeof a?.url === 'string' ? a.url.slice(0, 300) : undefined,
+              }))
+            : undefined,
+          gifUrl: typeof item?.gifUrl === 'string' ? item.gifUrl.slice(0, 500) : undefined,
+          gifTitle: typeof item?.gifTitle === 'string' ? item.gifTitle.slice(0, 120) : undefined,
+        }));
+
+        const now = Date.now();
+        const expiresAt = action === 'terminate' ? null : now + durationMs;
+        account.moderation = {
+          status: action === 'terminate' ? 'terminated' : 'suspended',
+          reason: reason || 'Terms of Service Violation',
+          moderatorNote,
+          issuedBy: activeUser.username,
+          issuedAt: now,
+          expiresAt,
+          durationLabel,
+          evidence,
+          appealToken: crypto.randomBytes(24).toString('hex'),
+        };
+        if (!Array.isArray(account.moderationHistory)) account.moderationHistory = [];
+        account.moderationHistory.unshift({
+          id: crypto.randomUUID(),
+          action: action === 'terminate' ? 'terminated' : 'suspended',
+          reason: account.moderation.reason,
+          moderatorNote,
+          durationLabel,
+          expiresAt,
+          actorUsername: activeUser.username,
+          timestamp: now,
+          evidenceCount: evidence.length,
+        });
+        if (account.moderationHistory.length > 50) account.moderationHistory.length = 50;
+
+        appendModAudit(
+          activeUser,
+          action === 'terminate' ? 'user:terminate' : 'user:suspend',
+          account.username,
+          `${action === 'terminate' ? 'Terminated' : `Suspended (${durationLabel})`} @${account.username} for ${account.moderation.reason}`,
+        );
+        enforceLiveModerationKick(account);
+        saveDb(db);
+        sendJson(res, 200, { ok: true, user: buildStaffUserSummary(account) });
+        return;
+      }
+
+      if (req.method === 'POST' && reqPath === '/api/mod/users/unsuspend') {
+        const targetKey = typeof body.username === 'string' ? body.username.trim().toLowerCase() : '';
+        const account = targetKey ? findAccountByUsername(targetKey) : undefined;
+        if (!account) {
+          sendJson(res, 404, { ok: false, error: 'Error: Account not found' });
+          return;
+        }
+        if (!account.moderation) {
+          sendJson(res, 200, { ok: true, user: buildStaffUserSummary(account) });
+          return;
+        }
+        const prevStatus = account.moderation.status;
+        delete account.moderation;
+        if (!Array.isArray(account.moderationHistory)) account.moderationHistory = [];
+        account.moderationHistory.unshift({
+          id: crypto.randomUUID(),
+          action: 'unsuspended',
+          reason: typeof body.note === 'string' && body.note.trim() ? body.note.trim().slice(0, 300) : `Restored from ${prevStatus}`,
+          actorUsername: activeUser.username,
+          timestamp: Date.now(),
+        });
+        appendModAudit(activeUser, 'user:unsuspend', account.username, `Unsuspended / restored @${account.username} (was ${prevStatus})`);
+        saveDb(db);
+        notifyRelatedPeers(account.username, false);
+        sendJson(res, 200, { ok: true, user: buildStaffUserSummary(account) });
+        return;
+      }
+
+      if (req.method === 'POST' && reqPath === '/api/mod/users/kick') {
+        const targetKey = typeof body.username === 'string' ? body.username.trim().toLowerCase() : '';
+        const account = targetKey ? findAccountByUsername(targetKey) : undefined;
+        if (!account) {
+          sendJson(res, 404, { ok: false, error: 'Error: Account not found' });
+          return;
+        }
+        if (account.systemBot || (DEVELOPER_USERNAMES.has(targetKey) && !isDeveloper)) {
+          sendJson(res, 403, { ok: false, error: 'Error: Cannot kick this account' });
+          return;
+        }
+        for (const [tok, ownerKey] of Object.entries(db.sessions)) {
+          if (ownerKey === targetKey) delete db.sessions[tok];
+        }
+        const sockets = onlineSockets.get(targetKey);
+        if (sockets) {
+          for (const ws of Array.from(sockets)) {
+            try {
+              ws.close(4001, 'Session kicked by staff');
+            } catch {}
+          }
+          onlineSockets.delete(targetKey);
+        }
+        lastSeenByUser.delete(targetKey);
+        cleanupUserFromVoiceCalls(targetKey);
+        removeUserSeatedLobbies(targetKey);
+        appendModAudit(activeUser, 'user:kick', account.username, `Signed out all active sessions for @${account.username}`);
+        saveDb(db);
+        notifyRelatedPeers(targetKey, false);
+        sendJson(res, 200, { ok: true, user: buildStaffUserSummary(account) });
+        return;
+      }
+
+      if (req.method === 'POST' && reqPath === '/api/mod/users/purge') {
+        if (!isDeveloper) {
+          sendJson(res, 403, { ok: false, error: 'Error: Only the Developer can permanently purge account data' });
+          return;
+        }
+        const targetKey = typeof body.username === 'string' ? body.username.trim().toLowerCase() : '';
+        if (!targetKey || DEVELOPER_USERNAMES.has(targetKey) || targetKey === SYSTEM_BOT_USERNAME) {
+          sendJson(res, 403, { ok: false, error: 'Error: Cannot purge protected accounts' });
+          return;
+        }
+        const idx = db.accounts.findIndex((a) => a.username.toLowerCase() === targetKey);
+        if (idx === -1) {
+          sendJson(res, 404, { ok: false, error: 'Error: Account not found' });
+          return;
+        }
+        const [removedAcc] = db.accounts.splice(idx, 1);
+        for (const [tok, ownerKey] of Object.entries(db.sessions)) {
+          if (ownerKey === targetKey) delete db.sessions[tok];
+        }
+        const sockets = onlineSockets.get(targetKey);
+        if (sockets) {
+          for (const ws of Array.from(sockets)) {
+            try {
+              ws.close(4002, 'Account permanently purged');
+            } catch {}
+          }
+          onlineSockets.delete(targetKey);
+        }
+        lastSeenByUser.delete(targetKey);
+        cleanupUserFromVoiceCalls(targetKey);
+        removeUserSeatedLobbies(targetKey);
+        delete db.friendships[targetKey];
+        for (const [k, list] of Object.entries(db.friendships)) {
+          if (Array.isArray(list)) db.friendships[k] = list.filter((f) => f.toLowerCase() !== targetKey);
+        }
+        delete db.blocks[targetKey];
+        for (const [k, list] of Object.entries(db.blocks)) {
+          if (Array.isArray(list)) db.blocks[k] = list.filter((b) => b.toLowerCase() !== targetKey);
+        }
+        db.friendRequests = db.friendRequests.filter(
+          (r) => r.from.toLowerCase() !== targetKey && r.to.toLowerCase() !== targetKey,
+        );
+        delete db.openDms[targetKey];
+        for (const [k, list] of Object.entries(db.openDms)) {
+          if (Array.isArray(list)) db.openDms[k] = list.filter((u) => u.toLowerCase() !== targetKey);
+        }
+        for (const [gid, grp] of Object.entries(db.groupDms)) {
+          if (grp && Array.isArray(grp.members)) {
+            grp.members = grp.members.filter((m) => m.toLowerCase() !== targetKey);
+            if (grp.members.length === 0) delete db.groupDms[gid];
+            else if (grp.ownerUsername?.toLowerCase() === targetKey) grp.ownerUsername = grp.members[0];
+          }
+        }
+        appendModAudit(activeUser, 'user:purge', removedAcc.username, `Permanently purged account @${removedAcc.username}`);
+        saveDb(db);
+        for (const other of db.accounts) {
+          pushSnapshotToUser(other.username.toLowerCase());
+        }
+        sendJson(res, 200, { ok: true, deletedUsername: removedAcc.username });
+        return;
+      }
+
+      if (req.method === 'POST' && reqPath === '/api/mod/tickets/claim') {
+        const ticketId = typeof body.ticketId === 'string' ? body.ticketId.trim() : '';
+        const ticket = ticketId ? db.modTickets?.[ticketId] : undefined;
+        if (!ticket) {
+          sendJson(res, 404, { ok: false, error: 'Error: Request ticket not found' });
+          return;
+        }
+        if (ticket.claimedBy && ticket.claimedBy.toLowerCase() !== selfKey) {
+          sendJson(res, 409, {
+            ok: false,
+            error: `Already claimed by @${ticket.claimedBy}`,
+            ticket: buildBotCardPayload(ticket),
+          });
+          return;
+        }
+        if (ticket.status === 'resolved' || ticket.status === 'accepted' || ticket.status === 'denied') {
+          sendJson(res, 409, {
+            ok: false,
+            error: 'Error: This request is already closed',
+            ticket: buildBotCardPayload(ticket),
+          });
+          return;
+        }
+        ticket.claimedBy = activeUser.username;
+        ticket.claimedAt = Date.now();
+        ticket.status = 'claimed';
+        appendModAudit(activeUser, 'ticket:claim', ticket.targetUsername, `Claimed ${ticket.kind} ${ticket.id} regarding @${ticket.targetUsername}`);
+        saveDb(db);
+        broadcastTicketBotCards(ticket);
+        sendJson(res, 200, { ok: true, ticket: buildBotCardPayload(ticket) });
+        return;
+      }
+
+      if (req.method === 'POST' && reqPath === '/api/mod/tickets/resolve') {
+        const ticketId = typeof body.ticketId === 'string' ? body.ticketId.trim() : '';
+        const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) : '';
+        const ticket = ticketId ? db.modTickets?.[ticketId] : undefined;
+        if (!ticket) {
+          sendJson(res, 404, { ok: false, error: 'Error: Ticket not found' });
+          return;
+        }
+        if (ticket.claimedBy && ticket.claimedBy.toLowerCase() !== selfKey && !isDeveloper) {
+          sendJson(res, 403, { ok: false, error: `Error: Ticket is claimed by @${ticket.claimedBy}` });
+          return;
+        }
+        if (!ticket.claimedBy) {
+          ticket.claimedBy = activeUser.username;
+          ticket.claimedAt = Date.now();
+        }
+        ticket.status = 'resolved';
+        ticket.decidedBy = activeUser.username;
+        ticket.decidedAt = Date.now();
+        ticket.decisionNote = note || 'Reviewed by staff';
+        appendModAudit(activeUser, 'ticket:resolve', ticket.targetUsername, `Resolved report ${ticket.id} regarding @${ticket.targetUsername}`);
+        saveDb(db);
+        broadcastTicketBotCards(ticket);
+        sendJson(res, 200, { ok: true, ticket: buildBotCardPayload(ticket) });
+        return;
+      }
+
+      if (req.method === 'POST' && reqPath === '/api/mod/appeals/decide') {
+        const ticketId = typeof body.ticketId === 'string' ? body.ticketId.trim() : '';
+        const decision = body.decision === 'accepted' ? 'accepted' : body.decision === 'denied' ? 'denied' : '';
+        const note = typeof body.note === 'string' ? body.note.trim().slice(0, 500) : '';
+        const ticket = ticketId ? db.modTickets?.[ticketId] : undefined;
+        if (!ticket || ticket.kind !== 'appeal') {
+          sendJson(res, 404, { ok: false, error: 'Error: Appeal ticket not found' });
+          return;
+        }
+        if (!decision) {
+          sendJson(res, 400, { ok: false, error: 'Error: Decision must be accepted or denied' });
+          return;
+        }
+        if (ticket.status === 'accepted' || ticket.status === 'denied') {
+          sendJson(res, 409, { ok: false, error: 'Error: Appeal has already been decided' });
+          return;
+        }
+        if (ticket.claimedBy && ticket.claimedBy.toLowerCase() !== selfKey && !isDeveloper) {
+          sendJson(res, 403, { ok: false, error: `Error: Only @${ticket.claimedBy} (who claimed this appeal) or the Developer can decide it` });
+          return;
+        }
+        if (!ticket.claimedBy) {
+          ticket.claimedBy = activeUser.username;
+          ticket.claimedAt = Date.now();
+        }
+        ticket.status = decision;
+        ticket.decidedBy = activeUser.username;
+        ticket.decidedAt = Date.now();
+        ticket.decisionNote = note || (decision === 'accepted' ? 'Appeal accepted — account restored.' : 'Appeal denied.');
+
+        const targetAcc = findAccountByUsername(ticket.targetUsername);
+        if (targetAcc) {
+          if (!Array.isArray(targetAcc.moderationHistory)) targetAcc.moderationHistory = [];
+          if (decision === 'accepted') {
+            delete targetAcc.moderation;
+            targetAcc.moderationHistory.unshift({
+              id: crypto.randomUUID(),
+              action: 'appeal-accepted',
+              reason: ticket.decisionNote,
+              actorUsername: activeUser.username,
+              timestamp: Date.now(),
+            });
+            sendSystemBotDm(
+              targetAcc.username,
+              `Your appeal (${ticket.id}) was accepted by staff. Your account has been restored.${note ? `\n\nNote: ${note}` : ''}`,
+            );
+          } else {
+            if (targetAcc.moderation) {
+              delete targetAcc.moderation.activeAppealId;
+            }
+            targetAcc.moderationHistory.unshift({
+              id: crypto.randomUUID(),
+              action: 'appeal-denied',
+              reason: ticket.decisionNote,
+              actorUsername: activeUser.username,
+              timestamp: Date.now(),
+            });
+          }
+        }
+        appendModAudit(
+          activeUser,
+          decision === 'accepted' ? 'appeal:accept' : 'appeal:deny',
+          ticket.targetUsername,
+          `${decision === 'accepted' ? 'Accepted' : 'Denied'} appeal ${ticket.id} for @${ticket.targetUsername}`,
+        );
+        saveDb(db);
+        broadcastTicketBotCards(ticket);
+        sendJson(res, 200, { ok: true, ticket: buildBotCardPayload(ticket) });
+        return;
+      }
+
+      if (req.method === 'POST' && reqPath === '/api/mod/bot/dm') {
+        const targetKey = typeof body.username === 'string' ? body.username.trim().toLowerCase() : '';
+        const content = typeof body.content === 'string' ? body.content.trim().slice(0, 2000) : '';
+        if (!targetKey || !content) {
+          sendJson(res, 400, { ok: false, error: 'Error: Target user and message content are required' });
+          return;
+        }
+        const targetAcc = findAccountByUsername(targetKey);
+        if (!targetAcc || targetAcc.systemBot) {
+          sendJson(res, 404, { ok: false, error: 'Error: Target account not found' });
+          return;
+        }
+        sendSystemBotDm(targetAcc.username, content);
+        appendModAudit(activeUser, 'bot:dm', targetAcc.username, `Sent official Redshift Bot DM to @${targetAcc.username}`);
+        saveDb(db);
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      sendJson(res, 404, { ok: false, error: 'Error: Staff endpoint not found' });
       return;
     }
 
@@ -4915,6 +6254,11 @@ export function createRedshiftServerMiddleware() {
 
       if (targetKey === selfKey) {
         sendJson(res, 400, { ok: false, error: 'Error: You cannot block yourself' });
+        return;
+      }
+
+      if (targetKey === SYSTEM_BOT_USERNAME) {
+        sendJson(res, 400, { ok: false, error: 'Error: You cannot block the official Redshift bot' });
         return;
       }
 
@@ -7822,9 +9166,10 @@ export function attachRedshiftWebSocket(httpServer) {
     extractPublicOriginFromReq(req);
     socket.setNoDelay?.(true);
 
-    const token = parsedUrl.searchParams.get('token') ?? '';
+      const token = parsedUrl.searchParams.get('token') ?? '';
     const username = db.sessions[token];
-    if (!username || !findAccountByUsername(username)) {
+    const wsAcc = username ? findAccountByUsername(username) : undefined;
+    if (!username || !wsAcc || wsAcc.systemBot || checkAndRefreshModeration(wsAcc)) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
       return;

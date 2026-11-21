@@ -2,6 +2,7 @@ import { apiForwardMessage, type ForwardTargetRef, type ThreadTarget } from './a
 import { createCloseIconSvg } from './chatUi';
 import { resolveGroupAvatar } from './groupDmModals';
 import { isModalConfirmShortcut, isTopmostModal } from './modalShortcuts';
+import { setDisplayNameWithRoleBadge } from './profileBadges';
 import { createStatusGlyph } from './profileDrawer';
 import type { ChatMessage, PublicProfile, SocialSnapshot } from './types';
 
@@ -14,6 +15,7 @@ interface ForwardEntry {
   subLabel: string;
   avatarUrl: string;
   status?: PublicProfile['status'];
+  profile?: PublicProfile;
   isGroup: boolean;
   sortTs: number;
 }
@@ -92,6 +94,7 @@ export function openForwardMessageModal(options: {
       subLabel: `@${peer.username}`,
       avatarUrl: resolveAvatar(peer),
       status: peer.status,
+      profile: peer,
       isGroup: false,
       sortTs: activityMap[key] ?? 0,
     });
@@ -282,7 +285,11 @@ export function openForwardMessageModal(options: {
       meta.className = 'group-friend-meta';
       const nameLine = document.createElement('span');
       nameLine.className = 'group-friend-display';
-      nameLine.textContent = entry.label;
+      if (!entry.isGroup && entry.profile) {
+        setDisplayNameWithRoleBadge(nameLine, entry.label, entry.profile, { badgeSize: 13 });
+      } else {
+        nameLine.textContent = entry.label;
+      }
       const subLine = document.createElement('span');
       subLine.className = 'group-friend-username';
       subLine.textContent = entry.isGroup ? `Group • ${entry.subLabel}` : entry.subLabel;

@@ -1,5 +1,6 @@
 import { createCloseIconSvg, createPinIconSvg } from './chatUi';
 import { renderFormattedMessageContent } from './markdownRenderer';
+import { setDisplayNameWithRoleBadge } from './profileBadges';
 import type { ChatMessage } from './types';
 
 export interface PinnedPopoverOptions {
@@ -113,7 +114,12 @@ export function openPinnedMessagesPopover(options: PinnedPopoverOptions): () => 
 
       const authorEl = document.createElement('span');
       authorEl.className = 'pinned-item-author';
-      authorEl.textContent = msg.authorName;
+      setDisplayNameWithRoleBadge(
+        authorEl,
+        msg.authorName,
+        { username: msg.authorUsername, role: msg.authorRole },
+        { badgeSize: 12 },
+      );
       meta.appendChild(authorEl);
 
       const timeEl = document.createElement('span');

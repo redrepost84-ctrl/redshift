@@ -72,6 +72,8 @@ export interface CustomStatusData {
   expiresAt: number | null;
 }
 
+export type AccountRole = 'developer' | 'moderator' | 'bot';
+
 export interface PublicProfile {
   username: string;
   displayName: string;
@@ -87,6 +89,8 @@ export interface PublicProfile {
   isProfilePrivate?: boolean;
   isBlockedRelation?: boolean;
   acceptsNonFriendDms?: boolean;
+  role?: AccountRole;
+  isSystemBot?: boolean;
 }
 
 export interface UserPrivacySettings {
@@ -111,6 +115,8 @@ export interface SelfProfile {
   privacy?: UserPrivacySettings;
   clientPreferences?: Partial<UserPreferences>;
   voiceUserVolumes?: Record<string, VoiceUserVolumeSetting>;
+  role?: AccountRole;
+  isSystemBot?: boolean;
 }
 
 export interface PendingRequestItem {
@@ -230,6 +236,7 @@ export interface MessageReplyRef {
   authorName: string;
   authorAvatarPreset: number | null;
   authorAvatarDataUrl?: string;
+  authorRole?: AccountRole;
   content: string;
   hasImage?: boolean;
   hasAttachment?: boolean;
@@ -239,6 +246,7 @@ export interface MessageReplyRef {
 export interface StatusReplyRef {
   authorUsername: string;
   authorName: string;
+  authorRole?: AccountRole;
   emoji?: string;
   text?: string;
 }
@@ -303,12 +311,146 @@ export interface SocialNotifyEventPayload {
   timestamp: number;
 }
 
+export interface ModerationEvidenceItem {
+  messageId?: string;
+  threadKey?: string;
+  threadLabel?: string;
+  authorUsername?: string;
+  content: string;
+  timestamp?: number;
+  attachments?: Array<{ name: string; kind: string; url?: string }>;
+  gifUrl?: string;
+  gifTitle?: string;
+}
+
+export interface AccountModerationRecord {
+  status: 'suspended' | 'terminated';
+  reason: string;
+  moderatorNote: string;
+  issuedBy: string;
+  issuedAt: number;
+  expiresAt: number | null;
+  durationLabel: string;
+  evidence: ModerationEvidenceItem[];
+  activeAppealId?: string;
+}
+
+export interface AccountModerationHistoryEntry {
+  id: string;
+  action: 'suspended' | 'terminated' | 'unsuspended' | 'appeal-accepted' | 'appeal-denied';
+  reason?: string;
+  moderatorNote?: string;
+  durationLabel?: string;
+  expiresAt?: number | null;
+  actorUsername: string;
+  timestamp: number;
+  evidenceCount?: number;
+}
+
+export interface ModeratedAccountPayload {
+  account: {
+    username: string;
+    displayName: string;
+    avatarPreset: number | null;
+    avatarDataUrl?: string;
+  };
+  moderation: AccountModerationRecord;
+  appealToken: string;
+}
+
+export type ModTicketKind = 'report' | 'appeal';
+export type ModTicketStatus = 'open' | 'claimed' | 'resolved' | 'accepted' | 'denied';
+
+export interface ModTicket {
+  id: string;
+  kind: ModTicketKind;
+  status: ModTicketStatus;
+  createdAt: number;
+  targetUsername: string;
+  targetDisplayName: string;
+  reporterUsername?: string;
+  reporterDisplayName?: string;
+  reason: string;
+  details: string;
+  reportedMessage?: ModerationEvidenceItem;
+  moderationSnapshot?: AccountModerationRecord;
+  claimedBy?: string;
+  claimedByDisplayName?: string;
+  claimedAt?: number;
+  decidedBy?: string;
+  decidedByDisplayName?: string;
+  decidedAt?: number;
+  decisionNote?: string;
+}
+
+export interface BotTicketCardData {
+  ticketId: string;
+  kind: ModTicketKind;
+  status: ModTicketStatus;
+  targetUsername: string;
+  targetDisplayName: string;
+  reporterUsername?: string;
+  reporterDisplayName?: string;
+  reason: string;
+  details: string;
+  reportedMessage?: ModerationEvidenceItem;
+  moderationSnapshot?: AccountModerationRecord;
+  claimedBy?: string;
+  claimedByDisplayName?: string;
+  claimedAt?: number;
+  decidedBy?: string;
+  decidedByDisplayName?: string;
+  decidedAt?: number;
+  decisionNote?: string;
+  createdAt: number;
+}
+
+export interface ModAuditEntry {
+  id: string;
+  timestamp: number;
+  actorUsername: string;
+  actorRole: AccountRole;
+  action: string;
+  targetUsername?: string;
+  summary: string;
+}
+
+export interface StaffUserSummary {
+  username: string;
+  displayName: string;
+  email: string;
+  bio: string;
+  status: EffectiveStatus;
+  rawStatus: UserStatus;
+  online: boolean;
+  role?: AccountRole;
+  isSystemBot?: boolean;
+  avatarPreset: number | null;
+  avatarDataUrl?: string;
+  createdAt: number;
+  activeSessions: number;
+  friendCount: number;
+  moderation?: AccountModerationRecord | null;
+  moderationHistory: AccountModerationHistoryEntry[];
+}
+
+export interface StaffThreadSummary {
+  threadKey: string;
+  kind: 'dm' | 'group';
+  label: string;
+  participants: string[];
+  messageCount: number;
+  lastTimestamp: number;
+  lastPreview: string;
+}
+
 export interface ChatMessage {
   id: string;
   authorUsername: string;
   authorName: string;
   authorAvatarPreset: number | null;
   authorAvatarDataUrl?: string;
+  authorRole?: AccountRole;
   content: string;
   imageDataUrl?: string;
   imageDataUrls?: string[];
@@ -320,6 +462,7 @@ export interface ChatMessage {
   callLog?: CallLogData;
   systemEvent?: SystemMessageEvent;
   voiceNote?: VoiceNoteMeta;
+  botCard?: BotTicketCardData;
   timestamp: number;
   editedAt?: number;
   pinned?: boolean;
@@ -450,6 +593,7 @@ export interface ActivityPlayerEntry {
   displayName: string;
   avatarPreset: number | null;
   avatarDataUrl?: string;
+  role?: AccountRole;
   seat: number;
   wins: number;
 }
@@ -459,6 +603,7 @@ export interface ActivitySpectatorEntry {
   displayName: string;
   avatarPreset: number | null;
   avatarDataUrl?: string;
+  role?: AccountRole;
 }
 
 export interface ActivityLobby {

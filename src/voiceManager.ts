@@ -11,7 +11,9 @@ import { getDesktopBridge } from './desktopBridge';
 import { resolveGroupAvatar } from './groupDmModals';
 import { isModalConfirmShortcut, isTopmostModal } from './modalShortcuts';
 import { isThreadMuted } from './muteUtils';
+import { buildModerationContextMenuItems } from './moderationActions';
 import { dispatchRedshiftNotification, isAppWindowFocused, showInAppToast } from './notifications';
+import { setDisplayNameWithRoleBadge } from './profileBadges';
 import {
   getUserPreferences,
   getVoiceUserScreenVolume,
@@ -109,6 +111,7 @@ export interface VoiceManagerHandle {
   toggleDeafen: () => void;
   setTestingMic: (testing: boolean) => void;
   setViewedThreadKey: (threadKey: string | null) => void;
+  setMiniPipSuppressed: (suppressed: boolean) => void;
   isMicTesting: () => boolean;
   isMuted: () => boolean;
   isDeafened: () => boolean;
@@ -2645,6 +2648,8 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       }
     }
 
+    items.push(...buildModerationContextMenuItems(user));
+
     openContextMenu({
       clientX,
       clientY,
@@ -3646,7 +3651,7 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
 
     const nameEl = document.createElement('div');
     nameEl.className = 'vc-tile-name';
-    nameEl.textContent = user.displayName;
+    setDisplayNameWithRoleBadge(nameEl, user.displayName, user, { badgeSize: 13 });
     tile.appendChild(nameEl);
 
     if (opts.ringing) {
@@ -4994,13 +4999,14 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     return miniPipDom;
   };
 
+  let miniPipSuppressed = false;
   const syncMiniPipOverlay = () => {
     if (destroyed) {
       return;
     }
     const call = activeCallThreadKey ? callsByThread.get(activeCallThreadKey) : null;
     const shouldShow = Boolean(
-      activeCallThreadKey && call && viewedThreadKey !== activeCallThreadKey,
+      !miniPipSuppressed && activeCallThreadKey && call && viewedThreadKey !== activeCallThreadKey,
     );
     if (!shouldShow || !call) {
       if (miniPipDom && !miniPipDom.root.hidden) {
@@ -5245,6 +5251,13 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
         return;
       }
       viewedThreadKey = nextKey;
+      syncMiniPipOverlay();
+    },
+    setMiniPipSuppressed: (suppressed: boolean) => {
+      if (miniPipSuppressed === suppressed) {
+        return;
+      }
+      miniPipSuppressed = suppressed;
       syncMiniPipOverlay();
     },
     isMicTesting: () => testingMic,

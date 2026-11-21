@@ -6,6 +6,7 @@ import {
   pickCasualStatusPrompt,
 } from './customStatusModal';
 import { isModalConfirmShortcut, isTopmostModal } from './modalShortcuts';
+import { setDisplayNameWithRoleBadge } from './profileBadges';
 import {
   applyBannerBackground,
   openAvatarChangeFlow,
@@ -737,7 +738,7 @@ export function createProfileDrawerController(options: ProfileDrawerOptions) {
 
       const displayEl = document.createElement('div');
       displayEl.className = 'profile-display-name';
-      displayEl.textContent = user.displayName;
+      setDisplayNameWithRoleBadge(displayEl, user.displayName, user, { badgeSize: 17 });
       identity.appendChild(displayEl);
 
       const usernameEl = document.createElement('div');
@@ -1416,7 +1417,7 @@ export function openSelfProfileModal(options: SelfProfileModalOptions): SelfProf
 
       const displayEl = document.createElement('h3');
       displayEl.className = 'dm-full-display';
-      displayEl.textContent = user.displayName;
+      setDisplayNameWithRoleBadge(displayEl, user.displayName, user, { badgeSize: 18 });
       identityHeader.appendChild(displayEl);
 
       const youPill = document.createElement('span');

@@ -49,7 +49,10 @@ export type MenuIconName =
   | 'message'
   | 'gif'
   | 'crown'
-  | 'reset';
+  | 'reset'
+  | 'flag'
+  | 'shield'
+  | 'gavel';
 
 const MENU_ICON_PATHS: Record<MenuIconName, { d: string[]; fillCurrent?: boolean }> = {
   reply: { d: ['M9 14L4 9l5-5', 'M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11'] },
@@ -202,6 +205,17 @@ const MENU_ICON_PATHS: Record<MenuIconName, { d: string[]; fillCurrent?: boolean
     d: ['M3 18h18l-2-10-4.5 4L12 5l-2.5 7L5 8l-2 10z'],
   },
   reset: { d: ['M3 12a9 9 0 1 0 3-6.7L3 8', 'M3 3v5h5'] },
+  flag: { d: ['M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z', 'M4 22v-7'] },
+  shield: { d: ['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'] },
+  gavel: {
+    d: [
+      'M14 13l-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10',
+      'M16 16l6-6',
+      'M8 8l6-6',
+      'M9 7l8 8',
+      'M21 11l-8-8',
+    ],
+  },
 };
 
 /** Builds a clean 15px SVG icon for context menu items. */

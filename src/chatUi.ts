@@ -23,6 +23,15 @@ import {
   renderFormattedMessageContent,
 } from './markdownRenderer';
 import { isModalConfirmShortcut, isTopmostModal } from './modalShortcuts';
+import {
+  buildModerationContextMenuItems,
+  getSelfRole,
+  triggerClaimTicket,
+  triggerDecideAppeal,
+  triggerOpenStaffPanel,
+  triggerResolveTicket,
+} from './moderationActions';
+import { setDisplayNameWithRoleBadge } from './profileBadges';
 import { getUserPreferences } from './settingsStore';
 import { isEmojiOnlyMessage, setTwemojiText } from './twemojiHelper';
 import type {
@@ -2033,7 +2042,12 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
     if (replyRef.authorUsername.toLowerCase() === selfUsernameLower) {
       replyAuthor.classList.add('msg-reply-author--self');
     }
-    replyAuthor.textContent = `@${replyRef.authorName}`;
+    setDisplayNameWithRoleBadge(
+      replyAuthor,
+      replyRef.authorName,
+      { username: replyRef.authorUsername, role: replyRef.authorRole },
+      { badgeSize: 12, prefixText: '@' },
+    );
     bindProfileTrigger(
       replyAuthor,
       replyRef.authorUsername,
@@ -2157,7 +2171,12 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
     author.className = onOpenProfile
       ? 'chat-message-author chat-message-author--clickable'
       : 'chat-message-author';
-    author.textContent = msg.authorName;
+    setDisplayNameWithRoleBadge(
+      author,
+      msg.authorName,
+      { username: msg.authorUsername, role: msg.authorRole },
+      { badgeSize: 15 },
+    );
     bindProfileTrigger(
       author,
       msg.authorUsername,
@@ -2962,6 +2981,192 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
     }
   }
 
+  if (msg.botCard) {
+    const bc = msg.botCard;
+    const isAppeal = bc.kind === 'appeal';
+    const card = document.createElement('div');
+    card.className = isAppeal
+      ? 'bot-ticket-card bot-ticket-card--appeal'
+      : 'bot-ticket-card bot-ticket-card--report';
+    card.dataset.ticketId = bc.ticketId;
+
+    const head = document.createElement('div');
+    head.className = 'bot-ticket-head';
+    const kindTag = document.createElement('span');
+    kindTag.className = isAppeal ? 'bot-ticket-tag bot-ticket-tag--appeal' : 'bot-ticket-tag bot-ticket-tag--report';
+    kindTag.textContent = isAppeal ? `BAN APPEAL · ${bc.ticketId}` : `USER REPORT · ${bc.ticketId}`;
+    const statusTag = document.createElement('span');
+    statusTag.className = `bot-ticket-status bot-ticket-status--${bc.status}`;
+    statusTag.textContent =
+      bc.status === 'claimed' && bc.claimedBy
+        ? `CLAIMED BY @${bc.claimedBy}`
+        : bc.status.toUpperCase();
+    head.appendChild(kindTag);
+    head.appendChild(statusTag);
+    card.appendChild(head);
+
+    const rows = document.createElement('div');
+    rows.className = 'bot-ticket-fields';
+    const addRow = (k: string, v: string) => {
+      const r = document.createElement('div');
+      r.className = 'bot-ticket-field';
+      const kl = document.createElement('span');
+      kl.className = 'bot-ticket-field-key';
+      kl.textContent = k;
+      const vl = document.createElement('span');
+      vl.className = 'bot-ticket-field-val';
+      vl.textContent = v;
+      r.appendChild(kl);
+      r.appendChild(vl);
+      rows.appendChild(r);
+    };
+    addRow(
+      isAppeal ? 'Appealing Account' : 'Reported User',
+      `${bc.targetDisplayName} (@${bc.targetUsername})`,
+    );
+    if (!isAppeal && bc.reporterUsername) {
+      addRow('Reported By', `${bc.reporterDisplayName ?? bc.reporterUsername} (@${bc.reporterUsername})`);
+    }
+    addRow('Category', bc.reason);
+    if (isAppeal && bc.moderationSnapshot) {
+      addRow(
+        'Active Penalty',
+        bc.moderationSnapshot.status === 'terminated'
+          ? 'Account Terminated'
+          : `Suspended (${bc.moderationSnapshot.durationLabel})`,
+      );
+      if (bc.moderationSnapshot.moderatorNote) {
+        addRow('Moderator Note', bc.moderationSnapshot.moderatorNote);
+      }
+    }
+    card.appendChild(rows);
+
+    if (bc.details) {
+      const detailsBox = document.createElement('div');
+      detailsBox.className = 'bot-ticket-details';
+      const dLabel = document.createElement('div');
+      dLabel.className = 'bot-ticket-details-label';
+      dLabel.textContent = isAppeal ? 'Appeal Details' : 'Situation Details';
+      const dBody = document.createElement('div');
+      dBody.className = 'bot-ticket-details-text';
+      dBody.textContent = bc.details;
+      detailsBox.appendChild(dLabel);
+      detailsBox.appendChild(dBody);
+      card.appendChild(detailsBox);
+    }
+
+    if (bc.reportedMessage) {
+      const evBox = document.createElement('div');
+      evBox.className = 'bot-ticket-evidence';
+      evBox.textContent = `Quoted Message: "${bc.reportedMessage.content || '[Media / Attachment]'}"`;
+      card.appendChild(evBox);
+    }
+
+    if (bc.decisionNote) {
+      const outBox = document.createElement('div');
+      outBox.className = 'bot-ticket-outcome';
+      outBox.textContent = `Resolution (${bc.decidedBy ? `@${bc.decidedBy}` : 'Staff'}): ${bc.decisionNote}`;
+      card.appendChild(outBox);
+    }
+
+    const actionsRow = document.createElement('div');
+    actionsRow.className = 'bot-ticket-actions';
+    const isClaimedBySelf = Boolean(bc.claimedBy && bc.claimedBy.toLowerCase() === selfUsernameLower);
+    const isDev = getSelfRole() === 'developer';
+
+    if (bc.status === 'open') {
+      const claimBtn = document.createElement('button');
+      claimBtn.type = 'button';
+      claimBtn.className = 'btn-primary bot-ticket-btn';
+      claimBtn.dataset.action = 'bot-claim-ticket';
+      claimBtn.textContent = 'Take Request';
+      claimBtn.addEventListener('click', async () => {
+        claimBtn.disabled = true;
+        claimBtn.textContent = 'Claiming...';
+        await triggerClaimTicket(bc.ticketId);
+      });
+      actionsRow.appendChild(claimBtn);
+    } else if (bc.status === 'claimed') {
+      const claimedPill = document.createElement('button');
+      claimedPill.type = 'button';
+      claimedPill.className = 'btn-secondary bot-ticket-btn bot-ticket-btn--locked';
+      claimedPill.disabled = true;
+      claimedPill.textContent = isClaimedBySelf
+        ? 'Request Claimed by You'
+        : `Taken by @${bc.claimedBy} (Unavailable)`;
+      actionsRow.appendChild(claimedPill);
+
+      if (isClaimedBySelf || isDev) {
+        const inspectBtn = document.createElement('button');
+        inspectBtn.type = 'button';
+        inspectBtn.className = 'btn-secondary bot-ticket-btn';
+        inspectBtn.textContent = 'Inspect in Staff Panel';
+        inspectBtn.addEventListener('click', () => {
+          triggerOpenStaffPanel('users', bc.targetUsername);
+        });
+        actionsRow.appendChild(inspectBtn);
+
+        if (!isAppeal) {
+          const resolveBtn = document.createElement('button');
+          resolveBtn.type = 'button';
+          resolveBtn.className = 'btn-primary bot-ticket-btn';
+          resolveBtn.textContent = 'Mark Resolved';
+          resolveBtn.addEventListener('click', async () => {
+            const ok = await openConfirmPopup({
+              title: `Resolve ${bc.ticketId}?`,
+              message: `Mark report regarding @${bc.targetUsername} as resolved?`,
+              confirmLabel: 'Resolve',
+            });
+            if (!ok) return;
+            resolveBtn.disabled = true;
+            await triggerResolveTicket(bc.ticketId);
+          });
+          actionsRow.appendChild(resolveBtn);
+        } else {
+          const acceptBtn = document.createElement('button');
+          acceptBtn.type = 'button';
+          acceptBtn.className = 'btn-primary bot-ticket-btn';
+          acceptBtn.dataset.action = 'bot-accept-appeal';
+          acceptBtn.textContent = 'Accept Appeal';
+          acceptBtn.addEventListener('click', async () => {
+            const ok = await openConfirmPopup({
+              title: `Accept Appeal ${bc.ticketId}?`,
+              message: `Accept @${bc.targetUsername}'s appeal and restore their account immediately?`,
+              confirmLabel: 'Accept Appeal',
+            });
+            if (!ok) return;
+            acceptBtn.disabled = true;
+            await triggerDecideAppeal(bc.ticketId, 'accepted');
+          });
+
+          const denyBtn = document.createElement('button');
+          denyBtn.type = 'button';
+          denyBtn.className = 'btn-danger bot-ticket-btn';
+          denyBtn.dataset.action = 'bot-deny-appeal';
+          denyBtn.textContent = 'Deny Appeal';
+          denyBtn.addEventListener('click', async () => {
+            const ok = await openConfirmPopup({
+              title: `Deny Appeal ${bc.ticketId}?`,
+              message: `Deny @${bc.targetUsername}'s appeal? Their ban will remain active.`,
+              confirmLabel: 'Deny Appeal',
+              danger: true,
+            });
+            if (!ok) return;
+            denyBtn.disabled = true;
+            await triggerDecideAppeal(bc.ticketId, 'denied');
+          });
+          actionsRow.appendChild(acceptBtn);
+          actionsRow.appendChild(denyBtn);
+        }
+      }
+    }
+
+    if (actionsRow.childElementCount > 0) {
+      card.appendChild(actionsRow);
+    }
+    body.appendChild(card);
+  }
+
   if (receiptStatus) {
     const receiptRow = document.createElement('div');
     receiptRow.className = `msg-receipt-row msg-receipt-row--${receiptStatus.kind}`;
@@ -3384,6 +3589,32 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
         quickReactHeader = strip;
       }
 
+      if (!isPending && !isOwn) {
+        const reportedEvidence = {
+          messageId: msg.id,
+          authorUsername: msg.authorUsername,
+          content: msg.content || '',
+          timestamp: msg.timestamp,
+          attachments: (msg.attachments ?? []).map((a) => ({
+            name: a.name,
+            kind: a.kind,
+            url: a.url,
+          })),
+          gifUrl: msg.gif?.url,
+          gifTitle: msg.gif?.title,
+        };
+        items.push(
+          ...buildModerationContextMenuItems(
+            {
+              username: msg.authorUsername,
+              displayName: msg.authorName,
+              role: msg.authorRole,
+            },
+            { reportedMessage: reportedEvidence },
+          ),
+        );
+      }
+
       row.classList.add('chat-message--context-open');
       openContextMenu({
         clientX: e.clientX,
@@ -3545,9 +3776,12 @@ export function openConfirmPopup(options: {
   message: string;
   confirmLabel: string;
   danger?: boolean;
+  confirmDelaySeconds?: number;
 }): Promise<boolean> {
   return new Promise((resolve) => {
     let settled = false;
+    let remainingSec = Math.max(0, Math.floor(options.confirmDelaySeconds ?? 0));
+    let countdownTimer: number | null = null;
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop modal-backdrop--deep modal-backdrop--top';
     backdrop.setAttribute('role', 'dialog');
@@ -3573,7 +3807,14 @@ export function openConfirmPopup(options: {
       if (settled) {
         return;
       }
+      if (confirmed && remainingSec > 0) {
+        return;
+      }
       settled = true;
+      if (countdownTimer !== null) {
+        window.clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
       window.removeEventListener('keydown', onKeyDown, true);
       backdrop.classList.remove('modal-backdrop--visible');
       window.setTimeout(() => backdrop.remove(), 180);
@@ -3591,6 +3832,11 @@ export function openConfirmPopup(options: {
         return;
       }
       if (isModalConfirmShortcut(e, backdrop)) {
+        if (remainingSec > 0) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          return;
+        }
         e.preventDefault();
         e.stopImmediatePropagation();
         finish(true);
@@ -3606,7 +3852,26 @@ export function openConfirmPopup(options: {
     const confirmBtn = document.createElement('button');
     confirmBtn.type = 'button';
     confirmBtn.className = options.danger ? 'btn-danger' : 'btn-primary';
-    confirmBtn.textContent = options.confirmLabel;
+    const syncConfirmBtn = () => {
+      if (remainingSec > 0) {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = `${options.confirmLabel} (${remainingSec}s)`;
+      } else {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = options.confirmLabel;
+      }
+    };
+    syncConfirmBtn();
+    if (remainingSec > 0) {
+      countdownTimer = window.setInterval(() => {
+        remainingSec = Math.max(0, remainingSec - 1);
+        syncConfirmBtn();
+        if (remainingSec <= 0 && countdownTimer !== null) {
+          window.clearInterval(countdownTimer);
+          countdownTimer = null;
+        }
+      }, 1000);
+    }
     confirmBtn.addEventListener('click', () => finish(true));
 
     footer.appendChild(cancelBtn);

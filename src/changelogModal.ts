@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.27';
+export const CURRENT_REDSHIFT_VERSION = '0.1.28';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,32 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.28',
+    date: 'November 21, 2026',
+    kicker: 'STAFF ROLE BADGES, OFFICIAL REDSHIFT BOT, REPORTING, MODERATION & STAFF SANDBOX PANEL',
+    headline: 'Official Role Badges, Built-In Redshift Bot, Full-Screen Reporting & Moderation, Roblox-Style Lockout + Appeals & Staff Sandbox Admin Panel',
+    lead:
+      'Introduced uneditable Developer, Moderator, and Official Bot profile badges everywhere names appear, launched the built-in Redshift bot with interactive "Take Request" staff dibs cards, added full-screen user reporting & moderation tools with 5-second safety timers, Roblox-style suspension/termination modals with appeals, and a full Staff Sandbox & Admin Panel.',
+    sections: [
+      {
+        heading: 'Staff Badges & Built-In Redshift Bot',
+        items: [
+          'Immutable Developer & Moderator Badges — Red crossed double hammers for the owner (Redrepost95) and a white hammer for official Redshift moderators (leyvora & lumpofsoil) appear to the left of display names everywhere across desktop & mobile, staying intact across display name changes with hover tooltips.',
+          'Official Built-In Redshift Bot — Launches with the classic Picture1 avatar, crimson banner, "The official bot for Redshift!" bio, and blue BOT badge with tooltip. Delivers live report & appeal DM cards with atomic "Take Request" dibs buttons synced across all staff.',
+        ],
+      },
+      {
+        heading: 'Reporting, Moderation, Appeals & Staff Sandbox Panel',
+        items: [
+          'Full-Screen Reporting Flow — Report users from context menus or profiles via an auth-themed screen that keeps ongoing voice calls connected while hiding the mini-call preview square, complete with ToS reason dropdowns and Are-You-Sure Back/Submit confirmations.',
+          'Suspend & Delete Account Tools — Moderators and the owner can right-click users anywhere to suspend (12h, 1d, 3d, 5d, 7d, 14d, 31d, 62d, doubling monthly up to 365d, or Custom days) or terminate accounts with multi-select offending messages/media evidence, a custom Moderator Note, and a mandatory 5-second confirmation timer.',
+          'Account Suspended / Terminated Lockout Modal & Appeals — Moderated accounts are signed out immediately and shown exact duration, reactivation date/time, moderator note, selected offending evidence, ToS reminder, and an Appeal flow with a scrollable suspended-account picker.',
+          'Staff Sandbox & Admin Panel — Built-in staff hub for reviewing Reports & Appeals, editing any account in a live User Sandbox (display name, username, email, password, bio, status, unsuspend/restore, force sign out, bot DM), inspecting Chat Logs across threads, and tracking the Audit Log.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.27',
     date: 'November 21, 2026',

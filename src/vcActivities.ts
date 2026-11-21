@@ -1,3 +1,4 @@
+import { setDisplayNameWithRoleBadge } from './profileBadges';
 import type {
   ActivityGameId,
   ActivityLobby,
@@ -4452,7 +4453,7 @@ export function createVcActivitiesController(
       av.src = options.resolveAvatar(p);
       av.alt = p.displayName;
       const nameSpan = document.createElement('span');
-      nameSpan.textContent = `${p.displayName} (${p.wins}W)`;
+      setDisplayNameWithRoleBadge(nameSpan, `${p.displayName} (${p.wins}W)`, p, { badgeSize: 12 });
       pill.appendChild(av);
       pill.appendChild(nameSpan);
       playersList.appendChild(pill);

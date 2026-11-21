@@ -18,6 +18,13 @@ import {
 import { createThoughtBubbleElement } from './customStatusModal';
 import { resolveGroupAvatar } from './groupDmModals';
 import {
+  canModerateTarget,
+  canReportTarget,
+  triggerModerateUser,
+  triggerReportUser,
+} from './moderationActions';
+import { setDisplayNameWithRoleBadge } from './profileBadges';
+import {
   createStatusGlyph,
   formatAccountAgeYears,
   formatCreationDate,
@@ -664,7 +671,7 @@ function renderProfileDetailsTabbedCard(opts: {
       info.className = 'dm-mutual-info';
       const name = document.createElement('span');
       name.className = 'dm-mutual-name';
-      name.textContent = friend.displayName;
+      setDisplayNameWithRoleBadge(name, friend.displayName, friend, { badgeSize: 13 });
       const sub = document.createElement('span');
       sub.className = 'dm-mutual-sub';
       sub.textContent = `@${friend.username}`;
@@ -963,13 +970,51 @@ function buildRelationshipMenuItems(options: {
         },
       });
     }
+    if (!user.isSystemBot && user.username.toLowerCase() !== 'redshift') {
+      items.push({
+        label: 'Block',
+        danger: true,
+        onSelect: () => {
+          void confirmFriendRelationAction('block', user, options.onSnapshotUpdated);
+        },
+      });
+    }
+  }
+
+  if (canReportTarget(user.username)) {
     items.push({
-      label: 'Block',
+      label: 'Report User',
       danger: true,
+      dividerBefore: true,
       onSelect: () => {
-        void confirmFriendRelationAction('block', user, options.onSnapshotUpdated);
+        triggerReportUser({ username: user.username, displayName: user.displayName, role: user.role });
       },
     });
+  }
+  if (canModerateTarget(user)) {
+    items.push(
+      {
+        label: 'Suspend Account',
+        danger: true,
+        dividerBefore: !canReportTarget(user.username),
+        onSelect: () => {
+          triggerModerateUser(
+            { username: user.username, displayName: user.displayName, role: user.role },
+            'suspend',
+          );
+        },
+      },
+      {
+        label: 'Delete Account',
+        danger: true,
+        onSelect: () => {
+          triggerModerateUser(
+            { username: user.username, displayName: user.displayName, role: user.role },
+            'terminate',
+          );
+        },
+      },
+    );
   }
   return items;
 }
@@ -1232,7 +1277,7 @@ export function openPublicProfileModal(options: {
     }
     modalStatusReplyCtrl.syncAvailability(hasModalReplyBubble);
 
-    modalDisplay.textContent = friend.displayName;
+    setDisplayNameWithRoleBadge(modalDisplay, friend.displayName, friend, { badgeSize: 18 });
     modalUsername.textContent = friend.username;
 
     modalRelationHost.replaceChildren();
@@ -1530,7 +1575,7 @@ export function createDmProfilePanel(options: DmProfilePanelOptions): DmProfileP
     }
     sideStatusReplyCtrl.syncAvailability(hasSideReplyBubble);
 
-    displayNameEl.textContent = currentFriend.displayName;
+    setDisplayNameWithRoleBadge(displayNameEl, currentFriend.displayName, currentFriend, { badgeSize: 17 });
     usernameEl.textContent = currentFriend.username;
 
     relationHost.replaceChildren();

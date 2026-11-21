@@ -1,3 +1,4 @@
+import { setDisplayNameWithRoleBadge } from './profileBadges';
 import type { PublicProfile } from './types';
 
 export interface MentionAutocompleteOptions {
@@ -120,7 +121,7 @@ export function attachMentionAutocomplete(
 
       const displayEl = document.createElement('span');
       displayEl.className = 'mention-autocomplete-display';
-      displayEl.textContent = profile.displayName;
+      setDisplayNameWithRoleBadge(displayEl, profile.displayName, profile, { badgeSize: 12 });
       row.appendChild(displayEl);
 
       const handleEl = document.createElement('span');

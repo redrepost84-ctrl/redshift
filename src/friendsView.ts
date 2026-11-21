@@ -16,6 +16,13 @@ import {
   createProfilePanelToggleIconSvg,
   openPublicProfileModal,
 } from './dmProfilePanel';
+import {
+  canModerateTarget,
+  canReportTarget,
+  triggerModerateUser,
+  triggerReportUser,
+} from './moderationActions';
+import { setDisplayNameWithRoleBadge } from './profileBadges';
 import { createStatusGlyph } from './profileDrawer';
 import { setTwemojiText } from './twemojiHelper';
 import type {
@@ -246,7 +253,7 @@ export function renderFriendsPanel(
 
     const displayEl = document.createElement('span');
     displayEl.className = 'friend-display-name';
-    displayEl.textContent = friend.displayName;
+    setDisplayNameWithRoleBadge(displayEl, friend.displayName, friend, { badgeSize: 14 });
     nameRow.appendChild(displayEl);
 
     const usernameEl = document.createElement('span');
@@ -333,6 +340,44 @@ export function renderFriendsPanel(
           },
         } as (typeof items)[number] & { danger?: boolean },
       );
+      if (canReportTarget(friend.username)) {
+        items.push({
+          label: 'Report User',
+          danger: true,
+          dividerBefore: true,
+          onSelect: () => {
+            triggerReportUser({
+              username: friend.username,
+              displayName: friend.displayName,
+              role: friend.role,
+            });
+          },
+        } as (typeof items)[number] & { danger?: boolean; dividerBefore?: boolean });
+      }
+      if (canModerateTarget(friend)) {
+        items.push(
+          {
+            label: 'Suspend Account',
+            danger: true,
+            onSelect: () => {
+              triggerModerateUser(
+                { username: friend.username, displayName: friend.displayName, role: friend.role },
+                'suspend',
+              );
+            },
+          } as (typeof items)[number] & { danger?: boolean },
+          {
+            label: 'Delete Account',
+            danger: true,
+            onSelect: () => {
+              triggerModerateUser(
+                { username: friend.username, displayName: friend.displayName, role: friend.role },
+                'terminate',
+              );
+            },
+          } as (typeof items)[number] & { danger?: boolean },
+        );
+      }
       openFloatingActionMenu({
         anchorEl,
         clientX,
@@ -408,7 +453,7 @@ export function renderFriendsPanel(
 
     const nameEl = document.createElement('div');
     nameEl.className = 'friend-display-name';
-    nameEl.textContent = item.user.displayName;
+    setDisplayNameWithRoleBadge(nameEl, item.user.displayName, item.user, { badgeSize: 14 });
     meta.appendChild(nameEl);
 
     const subEl = document.createElement('div');
@@ -522,19 +567,55 @@ export function renderFriendsPanel(
     row.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      const pendingItems: Array<{ label: string; danger?: boolean; dividerBefore?: boolean; onSelect: () => void }> = [
+        {
+          label: 'Open DM',
+          onSelect: () => options.onOpenDm(item.user.username),
+        },
+        {
+          label: 'View Profile',
+          onSelect: openPendingProfileModal,
+        },
+      ];
+      if (canReportTarget(item.user.username)) {
+        pendingItems.push({
+          label: 'Report User',
+          danger: true,
+          dividerBefore: true,
+          onSelect: () =>
+            triggerReportUser({
+              username: item.user.username,
+              displayName: item.user.displayName,
+              role: item.user.role,
+            }),
+        });
+      }
+      if (canModerateTarget(item.user)) {
+        pendingItems.push(
+          {
+            label: 'Suspend Account',
+            danger: true,
+            onSelect: () =>
+              triggerModerateUser(
+                { username: item.user.username, displayName: item.user.displayName, role: item.user.role },
+                'suspend',
+              ),
+          },
+          {
+            label: 'Delete Account',
+            danger: true,
+            onSelect: () =>
+              triggerModerateUser(
+                { username: item.user.username, displayName: item.user.displayName, role: item.user.role },
+                'terminate',
+              ),
+          },
+        );
+      }
       openFloatingActionMenu({
         clientX: e.clientX,
         clientY: e.clientY,
-        items: [
-          {
-            label: 'Open DM',
-            onSelect: () => options.onOpenDm(item.user.username),
-          },
-          {
-            label: 'View Profile',
-            onSelect: openPendingProfileModal,
-          },
-        ],
+        items: pendingItems,
       });
     });
 
@@ -575,7 +656,7 @@ export function renderFriendsPanel(
 
     const displayEl = document.createElement('span');
     displayEl.className = 'friend-display-name';
-    displayEl.textContent = blockedUser.displayName;
+    setDisplayNameWithRoleBadge(displayEl, blockedUser.displayName, blockedUser, { badgeSize: 14 });
     nameRow.appendChild(displayEl);
 
     const usernameEl = document.createElement('span');

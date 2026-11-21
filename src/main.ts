@@ -24,6 +24,9 @@ import {
   apiFetchDmHistory,
   apiForgotPassword,
   apiMarkDmRead,
+  apiModClaimTicket,
+  apiModDecideAppeal,
+  apiModResolveTicket,
   apiOpenDm,
   apiResumeSession,
   apiSendDmMessage,
@@ -115,6 +118,7 @@ import {
   dispatchRedshiftNotification,
   ensureNotificationPermissionOnGesture,
   isAppWindowFocused,
+  showInAppToast,
   truncateNotificationText,
 } from './notifications';
 import {
@@ -178,6 +182,22 @@ import {
   openEmojiPicker,
 } from './emojiPicker';
 import {
+  buildModerationContextMenuItems,
+  registerWorkspaceModerationHandlers,
+} from './moderationActions';
+import {
+  openAccountModeratedModal,
+  openAppealScreen,
+  openModerationActionScreen,
+  openReportUserScreen,
+} from './moderationScreens';
+import { resolveAccountRole, setDisplayNameWithRoleBadge } from './profileBadges';
+import {
+  openStaffPanelModal,
+  type StaffPanelHandle,
+  type StaffPanelTab,
+} from './staffPanelModal';
+import {
   startVoiceNoteRecorder,
   type VoiceNoteRecorderSession,
 } from './voiceNoteRecorder';
@@ -212,6 +232,7 @@ import type {
   MainWorkspaceView,
   MessageReaction,
   MessageReplyRef,
+  ModeratedAccountPayload,
   PublicProfile,
   ResetSession,
   SignUpDraft,
@@ -522,6 +543,24 @@ function syncInlineFeedback(container: HTMLElement): void {
   erroredInputs.forEach((el) => el.classList.remove('auth-input--error'));
 }
 
+let closeActiveModeratedModal: (() => void) | null = null;
+
+function showModeratedAccountFlow(payload: ModeratedAccountPayload): void {
+  closeActiveModeratedModal?.();
+  closeActiveModeratedModal = openAccountModeratedModal({
+    payload,
+    onClose: () => {
+      closeActiveModeratedModal = null;
+    },
+    onAppeal: (appealPayload) => {
+      closeActiveModeratedModal = null;
+      openAppealScreen({
+        initialPayload: appealPayload,
+      });
+    },
+  });
+}
+
 function navigate(nextScreen: AuthScreen): void {
   if (nextScreen !== 'forgot-code') {
     stopResendTimer();
@@ -661,6 +700,14 @@ function renderLoginScreen(shell: HTMLElement): void {
     state.isBusy = false;
 
     if (!res.ok || !res.snapshot) {
+      if (res.moderated && res.moderatedPayload) {
+        state.loginError = null;
+        state.loginSuccess = null;
+        state.loginPassword = '';
+        render();
+        showModeratedAccountFlow(res.moderatedPayload);
+        return;
+      }
       state.loginError = res.error ?? 'Error: Could not sign in';
       state.loginSuccess = null;
       render();
@@ -1432,6 +1479,12 @@ function renderForgotResetScreen(root: HTMLElement, shell: HTMLElement): void {
 
     state.isBusy = false;
     if (!res.ok || !res.snapshot) {
+      if (res.moderated && res.moderatedPayload) {
+        state.forgotError = null;
+        navigate('login');
+        showModeratedAccountFlow(res.moderatedPayload);
+        return;
+      }
       state.forgotError = res.error ?? 'Error: Could not sign in';
       render();
       return;
@@ -1564,6 +1617,21 @@ function renderWorkspaceScreen(root: HTMLElement): void {
   friendsNavBtn.appendChild(friendsNavBadge);
 
   sidebarNavTop.appendChild(friendsNavBtn);
+
+  const staffPanelNavBtn = document.createElement('button');
+  staffPanelNavBtn.type = 'button';
+  staffPanelNavBtn.className = 'sidebar-friends-btn sidebar-staff-btn';
+  staffPanelNavBtn.dataset.action = 'open-staff-panel';
+  staffPanelNavBtn.hidden = true;
+  staffPanelNavBtn.appendChild(
+    createSvgIcon(['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'], '0 0 24 24', 18),
+  );
+  const staffPanelLabel = document.createElement('span');
+  staffPanelLabel.className = 'sidebar-friends-label';
+  staffPanelLabel.textContent = 'Staff Panel';
+  staffPanelNavBtn.appendChild(staffPanelLabel);
+  sidebarNavTop.appendChild(staffPanelNavBtn);
+
   leftColumn.appendChild(sidebarNavTop);
 
   const dmSectionHeader = document.createElement('div');
@@ -1807,9 +1875,11 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     }
     avatarImg.src = resolveProfileAvatar(active);
     avatarImg.alt = `${active.displayName} profile picture`;
-    displayNameEl.textContent = active.displayName;
+    setDisplayNameWithRoleBadge(displayNameEl, active.displayName, active, { badgeSize: 14 });
     usernameEl.textContent = active.username;
     dockStatusBadge.replaceChildren(createStatusGlyph(active.status, 10));
+    const selfRole = resolveAccountRole(active);
+    staffPanelNavBtn.hidden = !(selfRole === 'developer' || selfRole === 'moderator');
   };
 
   let activeDmSyncer: (() => void) | null = null;
@@ -2837,6 +2907,128 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     },
   });
 
+  let activeStaffPanel: StaffPanelHandle | null = null;
+
+  const openStaffPanelView = (tab?: StaffPanelTab, targetUsername?: string) => {
+    const active = state.snapshot?.user;
+    if (!active) return;
+    const role = resolveAccountRole(active);
+    if (role !== 'developer' && role !== 'moderator') return;
+    activeStaffPanel?.close();
+    activeStaffPanel = openStaffPanelModal({
+      selfUsername: active.username,
+      selfRole: role,
+      initialTab: tab,
+      initialTargetUsername: targetUsername,
+      resolveAvatar: resolveProfileAvatar,
+      onOpenModerateScreen: (target, mode, preselectedEvidence) => {
+        openModerationActionScreen({
+          target,
+          mode,
+          preselectedEvidence,
+          setMiniPipSuppressed: (s) => voiceManager.setMiniPipSuppressed(s),
+          onCompleted: () => {
+            activeStaffPanel?.refresh();
+          },
+        });
+      },
+      onClosed: () => {
+        activeStaffPanel = null;
+      },
+    });
+  };
+
+  staffPanelNavBtn.addEventListener('click', () => {
+    openStaffPanelView('tickets');
+  });
+
+  registerWorkspaceModerationHandlers({
+    getSelfProfile: () => state.snapshot?.user ?? null,
+    onReportUser: (target, reportedMessage) => {
+      openReportUserScreen({
+        target,
+        reportedMessage,
+        setMiniPipSuppressed: (s) => voiceManager.setMiniPipSuppressed(s),
+        onSubmitted: (ticketId) => {
+          showInAppToast({
+            title: 'Report Submitted',
+            body: `Thank you. Ticket ${ticketId || ''} has been delivered to Redshift staff.`,
+            badge: 'Safety',
+          });
+        },
+      });
+    },
+    onModerateUser: (target, mode, preselectedEvidence) => {
+      openModerationActionScreen({
+        target,
+        mode,
+        preselectedEvidence,
+        setMiniPipSuppressed: (s) => voiceManager.setMiniPipSuppressed(s),
+        onCompleted: () => {
+          activeStaffPanel?.refresh();
+          showInAppToast({
+            title: mode === 'terminate' ? 'Account Terminated' : 'Account Suspended',
+            body: `@${target.username} has been logged out and moderated.`,
+            badge: 'Moderation',
+          });
+        },
+      });
+    },
+    onOpenStaffPanel: (tab, targetUsername) => {
+      openStaffPanelView(tab, targetUsername);
+    },
+    onClaimTicket: async (ticketId) => {
+      const res = await apiModClaimTicket(ticketId);
+      if (!res.ok) {
+        showInAppToast({
+          title: 'Request Unavailable',
+          body: res.error ?? 'Another moderator already claimed this request.',
+          badge: 'Staff',
+          danger: true,
+        });
+        return null;
+      }
+      activeStaffPanel?.refresh();
+      return res.ticket ?? null;
+    },
+    onResolveTicket: async (ticketId) => {
+      const res = await apiModResolveTicket(ticketId);
+      if (!res.ok) {
+        showInAppToast({
+          title: 'Could Not Resolve',
+          body: res.error ?? 'Unable to resolve ticket.',
+          badge: 'Staff',
+          danger: true,
+        });
+        return null;
+      }
+      activeStaffPanel?.refresh();
+      return res.ticket ?? null;
+    },
+    onDecideAppeal: async (ticketId, decision) => {
+      const res = await apiModDecideAppeal(ticketId, decision);
+      if (!res.ok) {
+        showInAppToast({
+          title: 'Appeal Decision Failed',
+          body: res.error ?? 'Could not decide appeal.',
+          badge: 'Staff',
+          danger: true,
+        });
+        return null;
+      }
+      activeStaffPanel?.refresh();
+      showInAppToast({
+        title: decision === 'accepted' ? 'Appeal Accepted' : 'Appeal Denied',
+        body:
+          decision === 'accepted'
+            ? 'The account has been restored immediately.'
+            : 'The appeal has been denied.',
+        badge: 'Staff',
+      });
+      return res.ticket ?? null;
+    },
+  });
+
   dockMuteBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     voiceManager.toggleMute();
@@ -3282,7 +3474,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
           });
         },
       });
-    } else {
+    } else if (!latestPeer.isSystemBot && peerKey !== 'redshift') {
       pushRelationItem({
         label: 'Block',
         icon: 'block',
@@ -3294,6 +3486,8 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         },
       });
     }
+
+    items.push(...buildModerationContextMenuItems(latestPeer));
 
     openContextMenu({
       anchorEl,
@@ -3570,7 +3764,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
 
       const dmName = document.createElement('span');
       dmName.className = 'sidebar-dm-name';
-      dmName.textContent = peer.displayName;
+      setDisplayNameWithRoleBadge(dmName, peer.displayName, peer, { badgeSize: 13 });
       dmText.appendChild(dmName);
 
       if (peer.isProfilePrivate) {
@@ -4454,7 +4648,12 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       labelWrap.appendChild(prefix);
 
       const authorStrong = document.createElement('strong');
-      authorStrong.textContent = replyingTo.authorName;
+      setDisplayNameWithRoleBadge(
+        authorStrong,
+        replyingTo.authorName,
+        { username: replyingTo.authorUsername, role: replyingTo.authorRole },
+        { badgeSize: 12 },
+      );
       labelWrap.appendChild(authorStrong);
 
       const compactPreview = replyingTo.content.replace(/\s+/g, ' ').trim();
@@ -4549,6 +4748,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         const headerSig = [
           latestPeer.displayName,
           latestPeer.username,
+          latestPeer.role ?? '',
           latestPeer.status,
           headerAvatarUrl,
           latestPeer.bio,
@@ -4565,7 +4765,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
           lastHeaderSig = headerSig;
           headerAvatar.src = headerAvatarUrl;
           headerAvatar.alt = `${latestPeer.displayName} profile picture`;
-          headerName.textContent = latestPeer.displayName;
+          setDisplayNameWithRoleBadge(headerName, latestPeer.displayName, latestPeer, { badgeSize: 16 });
           headerUsername.textContent = latestPeer.isProfilePrivate
             ? `${latestPeer.username} • Private Profile`
             : latestPeer.username;
@@ -4727,10 +4927,21 @@ function renderWorkspaceScreen(root: HTMLElement): void {
             ].join(':')
           : '';
 
+        const botCardSig = msg.botCard
+          ? [
+              msg.botCard.ticketId,
+              msg.botCard.status,
+              msg.botCard.claimedBy ?? '',
+              msg.botCard.decidedBy ?? '',
+              msg.botCard.decisionNote ?? '',
+            ].join(':')
+          : '';
+
         const sig = [
           prefsSig,
           callSig,
           systemSig,
+          botCardSig,
           voiceNoteSig,
           receiptSig,
           msg.content,
@@ -4742,6 +4953,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
           isGroupStart ? '1' : '0',
           isEditing ? 'E' : 'V',
           msg.authorName,
+          msg.authorRole ?? '',
           msg.authorAvatarPreset ?? 'c',
           fastDataUrlHash(msg.authorAvatarDataUrl),
           msg.gif?.url ?? '',
@@ -7318,6 +7530,14 @@ function renderWorkspaceScreen(root: HTMLElement): void {
         activeDmSyncer?.();
       }
     },
+    onAccountModerated: (payload) => {
+      clearSessionToken();
+      navigate('login');
+      showModeratedAccountFlow(payload);
+    },
+    onModTicketUpdated: () => {
+      activeStaffPanel?.refresh();
+    },
     onTyping: ({ fromUsername, displayName, isTyping, groupId }) => {
       const cacheKey = groupId
         ? groupThreadCacheKey(groupId)
@@ -7496,6 +7716,9 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     voiceManager.destroy();
     socketHandle?.disconnect();
     drawerController.destroy();
+    activeStaffPanel?.close();
+    activeStaffPanel = null;
+    registerWorkspaceModerationHandlers(null);
     detachPushNavigation?.();
     chatArea.removeEventListener('touchstart', handleMobileEdgeTouchStart);
     chatArea.removeEventListener('touchend', handleMobileEdgeTouchEnd);

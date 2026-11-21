@@ -1,6 +1,7 @@
 import { createSettingsGearSvg } from './chatUi';
 import { createFriendsIconSvg } from './friendsView';
 import { resolveGroupAvatar } from './groupDmModals';
+import { setDisplayNameWithRoleBadge } from './profileBadges';
 import { createStatusGlyph } from './profileDrawer';
 import type { GroupDmInfo, PublicProfile, SocialSnapshot } from './types';
 import { createSearchIconSvg } from './voiceAudio';
@@ -229,7 +230,11 @@ export function openQuickSwitcherModal(options: QuickSwitcherOptions): () => voi
       meta.className = 'quick-switcher-item-meta';
       const titleEl = document.createElement('span');
       titleEl.className = 'quick-switcher-item-title';
-      titleEl.textContent = entry.title;
+      if (entry.profile) {
+        setDisplayNameWithRoleBadge(titleEl, entry.title, entry.profile, { badgeSize: 13 });
+      } else {
+        titleEl.textContent = entry.title;
+      }
       const subEl = document.createElement('span');
       subEl.className = 'quick-switcher-item-sub';
       subEl.textContent = entry.subtitle;

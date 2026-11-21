@@ -2,6 +2,8 @@ import { apiUpdateStatus } from './apiClient';
 import { createSettingsGearSvg } from './chatUi';
 import { formatCustomStatusLine } from './customStatusModal';
 import { createFriendsIconSvg } from './friendsView';
+import { triggerOpenStaffPanel } from './moderationActions';
+import { isStaffAccountRole, resolveAccountRole, setDisplayNameWithRoleBadge } from './profileBadges';
 import { createStatusGlyph, STATUS_LABELS } from './profileDrawer';
 import { applyBannerBackground } from './profileModals';
 import {
@@ -335,6 +337,19 @@ export function createMobileYouView(options: {
   const menuCard = document.createElement('div');
   menuCard.className = 'mobile-you-card mobile-you-menu';
 
+  const staffPanelBtn = document.createElement('button');
+  staffPanelBtn.type = 'button';
+  staffPanelBtn.className = 'mobile-you-menu-btn mobile-you-menu-btn--staff';
+  staffPanelBtn.hidden = true;
+  const staffIcon = document.createElement('span');
+  staffIcon.className = 'mobile-you-staff-icon';
+  staffIcon.textContent = '🛡️';
+  const staffLbl = document.createElement('span');
+  staffLbl.textContent = 'Staff Sandbox & Admin Panel';
+  staffPanelBtn.appendChild(staffIcon);
+  staffPanelBtn.appendChild(staffLbl);
+  staffPanelBtn.addEventListener('click', () => triggerOpenStaffPanel('tickets'));
+
   const settingsBtn = document.createElement('button');
   settingsBtn.type = 'button';
   settingsBtn.className = 'mobile-you-menu-btn';
@@ -350,6 +365,7 @@ export function createMobileYouView(options: {
   signOutBtn.textContent = 'Sign Out';
   signOutBtn.addEventListener('click', () => options.onSignOut());
 
+  menuCard.appendChild(staffPanelBtn);
   menuCard.appendChild(settingsBtn);
   menuCard.appendChild(signOutBtn);
   scroll.appendChild(menuCard);
@@ -363,8 +379,9 @@ export function createMobileYouView(options: {
       applyBannerBackground(banner, user);
       avatarImg.src = options.resolveAvatar(user);
       statusDot.replaceChildren(createStatusGlyph(user.status, 16));
-      displayName.textContent = user.displayName;
+      setDisplayNameWithRoleBadge(displayName, user.displayName, user, { badgeSize: 16 });
       username.textContent = `@${user.username}`;
+      staffPanelBtn.hidden = !isStaffAccountRole(resolveAccountRole(user));
       const csLine = formatCustomStatusLine(user);
       customStatusLine.hidden = !csLine;
       if (csLine) {

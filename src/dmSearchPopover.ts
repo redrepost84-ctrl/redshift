@@ -1,4 +1,5 @@
 import { createCloseIconSvg } from './chatUi';
+import { setDisplayNameWithRoleBadge } from './profileBadges';
 import { setTwemojiText } from './twemojiHelper';
 import type { ChatMessage } from './types';
 import { createSearchIconSvg } from './voiceAudio';
@@ -272,7 +273,12 @@ export function openDmSearchPopover(options: DmSearchPopoverOptions): () => void
       meta.className = 'pinned-item-meta';
       const authorEl = document.createElement('span');
       authorEl.className = 'pinned-item-author';
-      authorEl.textContent = msg.authorName;
+      setDisplayNameWithRoleBadge(
+        authorEl,
+        msg.authorName,
+        { username: msg.authorUsername, role: msg.authorRole },
+        { badgeSize: 12 },
+      );
       const timeEl = document.createElement('span');
       timeEl.className = 'pinned-item-time';
       timeEl.textContent = options.formatTime(msg.timestamp);

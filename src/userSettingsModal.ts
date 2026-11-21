@@ -14,6 +14,7 @@ import {
   sendDesktopNotification,
   showInAppToast,
 } from './notifications';
+import { setDisplayNameWithRoleBadge } from './profileBadges';
 import {
   disablePhonePushNotifications,
   enablePhonePushNotifications,
@@ -315,7 +316,7 @@ export function openUserSettingsOverlay(options: UserSettingsOverlayOptions): ()
     idMeta.className = 'settings-account-meta';
     const dName = document.createElement('div');
     dName.className = 'settings-account-display';
-    dName.textContent = user.displayName;
+    setDisplayNameWithRoleBadge(dName, user.displayName, user, { badgeSize: 15 });
     const uName = document.createElement('div');
     uName.className = 'settings-account-username';
     uName.textContent = `@${user.username}`;
@@ -1934,7 +1935,7 @@ export function openUserSettingsOverlay(options: UserSettingsOverlayOptions): ()
       const meta = document.createElement('div');
       const d = document.createElement('div');
       d.className = 'settings-toggle-label';
-      d.textContent = user.displayName;
+      setDisplayNameWithRoleBadge(d, user.displayName, user, { badgeSize: 13 });
       const u = document.createElement('div');
       u.className = 'settings-toggle-desc';
       u.textContent = `@${user.username}`;
