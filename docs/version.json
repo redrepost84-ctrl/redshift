@@ -1,11 +1,11 @@
 {
-  "version": "0.1.19",
-  "releasedAt": "2026-11-21T04:54:18.465Z",
-  "changelog": "Seamless PC <-> Mobile call transfer (joining a call on another device automatically disconnects the previous device cleanly and reconnects WebRTC) + removed duplicate stop streaming button from the VC control bar.",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.19/Redshift-patch.asar",
-  "sha256": "8a84e585ca2e5dbac38ce50df954e4ca185798de275c870a44515ac2f5faf4bb",
-  "size": 6355683,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.19/RedshiftSetup.exe",
+  "version": "0.1.20",
+  "releasedAt": "2026-11-21T05:26:31.465Z",
+  "changelog": "Fixed DM threads with custom status replies failing to appear on desktop and mobile, and repositioned the iPhone Sign-Up/Auth Back button safely below the iOS top pull-down drag zone with an inline thumb-reachable Back button.",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.20/Redshift-patch.asar",
+  "sha256": "89e006b63a1297d1ac387a560cf637be5f0baec83601bc7334adbf0c16536758",
+  "size": 6358346,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.20/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

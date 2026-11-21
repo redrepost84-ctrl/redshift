@@ -1957,7 +1957,10 @@ export function createChatMessageElement(opts: CreateMessageOptions): HTMLDivEle
   }
   if (
     !isPending &&
-    ((hasReply && msg.replyTo!.authorUsername.toLowerCase() === selfUsernameLower) ||
+    ((Boolean(msg.replyTo) &&
+      (msg.replyTo?.authorUsername ?? '').toLowerCase() === selfUsernameLower) ||
+      (Boolean(msg.statusReply) &&
+        (msg.statusReply?.authorUsername ?? '').toLowerCase() === selfUsernameLower) ||
       containsSelfMention(msg.content, selfUsernameLower))
   ) {
     row.classList.add('chat-message--mention-reply');

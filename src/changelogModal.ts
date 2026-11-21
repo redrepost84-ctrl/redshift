@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.19';
+export const CURRENT_REDSHIFT_VERSION = '0.1.20';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,23 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.20',
+    date: 'November 20, 2026',
+    kicker: 'STATUS REPLY DM FIX & IPHONE SAFE-AREA BACK BUTTON',
+    headline: 'Fixed DM Threads With Status Replies + Easy-Reach iPhone Sign-Up Back Button',
+    lead:
+      'Fixed a rendering crash when opening DM threads containing custom status replies, and repositioned the Sign-Up & Auth back buttons well below the iOS status bar and top-down pull zone with an inline thumb-reachable Back option.',
+    sections: [
+      {
+        heading: 'Bug Fixes & Mobile Polish',
+        items: [
+          'Fixed DM threads failing to render when a message replied to a friend’s custom status without a standard message reply reference.',
+          'Repositioned the mobile Sign-Up and Reset Password Back button below the iPhone status bar / top pull-down drag zone and added an inline Back button directly below the form.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.19',
     date: 'November 20, 2026',

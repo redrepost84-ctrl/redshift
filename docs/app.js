@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.20',
+      published_at: '2026-11-21T05:18:00Z',
+      body: 'Fixed DM threads with custom status replies failing to appear on desktop and mobile, and repositioned the iPhone Sign-Up/Auth Back button safely below the iOS top pull-down drag zone with an inline thumb-reachable Back button.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.20`,
+    },
+    {
       tag_name: 'v0.1.19',
       published_at: '2026-11-21T04:40:00Z',
       body: 'Seamless PC ↔ Mobile voice call transfer (joining a call on another device automatically disconnects the previous device cleanly and reconnects WebRTC), plus removed the duplicate stop streaming button from the VC controls bar.',

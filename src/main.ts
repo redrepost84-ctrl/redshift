@@ -372,8 +372,24 @@ function createBackButton(onClick: () => void): HTMLButtonElement {
   btn.className = 'back-btn';
   btn.setAttribute('aria-label', 'Go back');
   btn.appendChild(createSvgIcon(['M19 12H5', 'M12 19l-7-7 7-7']));
+  const label = document.createElement('span');
+  label.className = 'back-btn-label';
+  label.textContent = 'Back';
+  btn.appendChild(label);
   btn.addEventListener('click', onClick);
   return btn;
+}
+
+function appendAuthBackFooter(shell: HTMLElement, text: string, onClick: () => void): void {
+  const row = document.createElement('div');
+  row.className = 'link-row auth-back-row';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'text-link-btn auth-back-inline-btn';
+  btn.textContent = `← ${text}`;
+  btn.addEventListener('click', onClick);
+  row.appendChild(btn);
+  shell.appendChild(row);
 }
 
 function createHeader(subtitle: string): DocumentFragment {
@@ -796,6 +812,10 @@ function renderSignUpAccountScreen(root: HTMLElement, shell: HTMLElement): void 
   });
 
   shell.appendChild(form);
+  appendAuthBackFooter(shell, 'Back to sign in', () => {
+    state.signupError = null;
+    navigate('login');
+  });
 }
 
 function renderSignUpPasswordScreen(root: HTMLElement, shell: HTMLElement): void {
@@ -864,6 +884,10 @@ function renderSignUpPasswordScreen(root: HTMLElement, shell: HTMLElement): void
   });
 
   shell.appendChild(form);
+  appendAuthBackFooter(shell, 'Back', () => {
+    state.signupError = null;
+    navigate('signup-account');
+  });
 }
 
 function resizeAvatarImage(img: HTMLImageElement, size = 256): string | null {
@@ -1084,6 +1108,10 @@ function renderSignUpAvatarScreen(root: HTMLElement, shell: HTMLElement): void {
   finishWrap.appendChild(finishBtn);
 
   shell.appendChild(finishWrap);
+  appendAuthBackFooter(shell, 'Back', () => {
+    state.signupError = null;
+    navigate('signup-password');
+  });
 }
 
 function renderForgotEmailScreen(root: HTMLElement, shell: HTMLElement): void {
@@ -1150,6 +1178,12 @@ function renderForgotEmailScreen(root: HTMLElement, shell: HTMLElement): void {
   });
 
   shell.appendChild(form);
+  appendAuthBackFooter(shell, 'Back to sign in', () => {
+    resetRequestSeq += 1;
+    state.forgotError = null;
+    state.forgotSuccess = null;
+    navigate('login');
+  });
 }
 
 function renderForgotCodeScreen(root: HTMLElement, shell: HTMLElement): void {
@@ -1297,6 +1331,13 @@ function renderForgotCodeScreen(root: HTMLElement, shell: HTMLElement): void {
   });
 
   shell.appendChild(form);
+  appendAuthBackFooter(shell, 'Back to sign in', () => {
+    resetRequestSeq += 1;
+    state.forgotError = null;
+    state.forgotSuccess = null;
+    state.resetSession = null;
+    navigate('login');
+  });
 }
 
 function renderForgotResetScreen(root: HTMLElement, shell: HTMLElement): void {
@@ -1433,6 +1474,12 @@ function renderForgotResetScreen(root: HTMLElement, shell: HTMLElement): void {
   });
 
   shell.appendChild(form);
+  appendAuthBackFooter(shell, 'Back to sign in', () => {
+    resetRequestSeq += 1;
+    state.forgotError = null;
+    state.resetSession = null;
+    navigate('login');
+  });
 }
 
 function formatMessageTime(timestamp: number): string {
@@ -4438,6 +4485,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
             !prev.systemEvent &&
             !isUnreadStart &&
             !msg.replyTo &&
+            !msg.statusReply &&
             prev.authorUsername.toLowerCase() === msg.authorUsername.toLowerCase() &&
             msg.timestamp - prev.timestamp <= GROUP_WINDOW_MS &&
             msg.timestamp >= prev.timestamp,
