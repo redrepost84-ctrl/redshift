@@ -430,7 +430,7 @@ function buildCorsHeaders(request) {
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, HEAD',
     'Access-Control-Allow-Headers':
       'Authorization, Content-Type, X-File-Name, X-File-Mime, X-Admin-Secret, Range',
-    'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length',
+    'Access-Control-Expose-Headers': 'Content-Range, Accept-Ranges, Content-Length, Date',
   };
   if (reqOrigin) {
     headers['Vary'] = 'Origin';
@@ -2934,10 +2934,24 @@ export class RedshiftHub extends DurableObject {
           this.clearAllRingingInCall(call);
         }
         if (removed || clearedRing) {
+          // Broadcast updated VC state FIRST so leaving user & peers see removal in <10ms.
+          this.broadcastVcState(call);
           this.finalizeCallIfDone(call);
           this.persistActiveVoiceCalls();
-          this.broadcastVcState(call);
+        } else {
+          this.sendWsEventToUser(ownerKey, this.buildVcStatePayload(call, ownerKey));
         }
+      } else if (threadKey) {
+        const isGroup = threadKey.startsWith('group:');
+        this.sendWsEventToUser(ownerKey, {
+          type: 'vc:state',
+          threadKey,
+          kind: isGroup ? 'group' : 'dm',
+          groupId: isGroup ? threadKey.slice('group:'.length) : undefined,
+          active: false,
+          participants: [],
+          ringing: [],
+        });
       }
       return;
     }
@@ -3155,11 +3169,12 @@ export class RedshiftHub extends DurableObject {
       return jsonResponse(request, 200, {
         ok: true,
         service: 'redshift',
-        version: String(this.env.REDSHIFT_VERSION || '0.1.10'),
+        version: String(this.env.REDSHIFT_VERSION || '0.1.14'),
         onlineUsers: this.countOnlineUsers(),
         uptimeSec: Math.floor((Date.now() - this.bootedAt) / 1000),
         wsReady: true,
         cloud: 'cloudflare-workers',
+        serverTime: Date.now(),
       });
     }
 

@@ -40,6 +40,7 @@ import {
   clearSessionToken,
   connectSocialSocket,
   formatFileSize,
+  getEstimatedServerNow,
   hasStoredSessionToken,
   isEmailFormat,
   MAX_UPLOAD_BYTES,
@@ -1834,16 +1835,26 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     return false;
   };
 
+  const compareThreadMessages = (a: ChatMessage, b: ChatMessage): number => {
+    const aLocalPending = Boolean(a.clientTempId && a.id === a.clientTempId);
+    const bLocalPending = Boolean(b.clientTempId && b.id === b.clientTempId);
+    if (aLocalPending !== bLocalPending) {
+      return aLocalPending ? 1 : -1;
+    }
+    return a.timestamp - b.timestamp;
+  };
+
   const upsertDmMessage = (cacheKey: string, msg: ChatMessage) => {
     const list = dmMessagesByThread.get(cacheKey) ?? [];
     const existingIdx = list.findIndex((existing) => existing.id === msg.id);
     if (existingIdx !== -1) {
       list[existingIdx] = msg;
+      list.sort(compareThreadMessages);
       dmMessagesByThread.set(cacheKey, list);
       return;
     }
     list.push(msg);
-    list.sort((a, b) => a.timestamp - b.timestamp);
+    list.sort(compareThreadMessages);
     dmMessagesByThread.set(cacheKey, list);
   };
 
@@ -1853,15 +1864,9 @@ function renderWorkspaceScreen(root: HTMLElement): void {
     confirmed: ChatMessage,
   ) => {
     const list = dmMessagesByThread.get(cacheKey) ?? [];
-    const tempIdx = list.findIndex((m) => m.id === clientTempId);
     const cleaned = list.filter((m) => m.id !== clientTempId && m.id !== confirmed.id);
-    if (tempIdx !== -1) {
-      const insertAt = Math.min(tempIdx, cleaned.length);
-      cleaned.splice(insertAt, 0, confirmed);
-    } else {
-      cleaned.push(confirmed);
-      cleaned.sort((a, b) => a.timestamp - b.timestamp);
-    }
+    cleaned.push(confirmed);
+    cleaned.sort(compareThreadMessages);
     dmMessagesByThread.set(cacheKey, cleaned);
   };
 
@@ -2075,6 +2080,15 @@ function renderWorkspaceScreen(root: HTMLElement): void {
           }))
         : undefined;
 
+    const existingThread = dmMessagesByThread.get(opts.cacheKey) ?? [];
+    let maxExistingTs = 0;
+    for (const m of existingThread) {
+      if (m.timestamp > maxExistingTs) {
+        maxExistingTs = m.timestamp;
+      }
+    }
+    const optimisticTimestamp = Math.max(getEstimatedServerNow(), maxExistingTs + 1);
+
     const localMessage: ChatMessage = {
       id: clientTempId,
       clientTempId,
@@ -2087,7 +2101,7 @@ function renderWorkspaceScreen(root: HTMLElement): void {
       gif: opts.gif,
       voiceNote: opts.voiceNote,
       replyTo: opts.replyTo,
-      timestamp: Date.now(),
+      timestamp: optimisticTimestamp,
       reactions: [],
       isPending: isOfflineOrQueued,
     };

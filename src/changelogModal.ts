@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.13';
+export const CURRENT_REDSHIFT_VERSION = '0.1.14';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,24 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.14',
+    date: 'November 20, 2026',
+    kicker: 'MESSAGE ORDERING, VC LEAVE & CLOUD EMAIL FIX',
+    headline: 'Fixed Out-of-Order Sent Messages, Ghost VC Topbar After Leaving & Cloud Password Reset Emails',
+    lead:
+      'Fixed newly sent messages momentarily jumping above a friend’s message when a PC clock differs from the cloud server, fixed leaving a group call still showing you in the topbar, and enabled direct Gmail password reset delivery on the 24/7 Cloudflare server.',
+    sections: [
+      {
+        heading: 'Bug Fixes',
+        items: [
+          'Fixed Out-of-Order Sent Messages — Synced client timestamps with server time, pinned local optimistic messages strictly after the latest visible message in the thread, and ensured confirmed messages always sort by authoritative server timestamp.',
+          'Fixed Ghost Participant in VC Topbar After Leaving — Leaving a DM or group call immediately removes you from the VC topbar in 0ms, blocks stale in-flight vc:state frames from re-adding you, and broadcasts authoritative server state on every vc:leave.',
+          '24/7 Cloud Password Reset Emails — Enabled direct Gmail SMTPS (port 465) delivery on the Cloudflare Workers backend so Forgot Password codes send in ~1 second from the cloud.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.13',
     date: 'November 20, 2026',

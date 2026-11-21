@@ -164,6 +164,8 @@ export function formatKeyCodeLabel(code: string): string {
 export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHandle {
   const callsByThread = new Map<string, VcStateEventPayload>();
   const incomingCalls = new Map<string, VcIncomingCallPayload>();
+  const recentlyLeftCalls = new Map<string, number>();
+  const lastAutoLeaveResendAt = new Map<string, number>();
   const peers = new Map<string, PeerAudioPipeline>();
   const peerSignalQueue = new Map<string, Promise<void>>();
   const speakingHoldUntil = new Map<string, number>();
@@ -1245,6 +1247,8 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     if (!leavingThread) {
       return;
     }
+    recentlyLeftCalls.set(leavingThread, Date.now());
+    lastAutoLeaveResendAt.delete(leavingThread);
     closeActivePopover();
     expandedStageKey = null;
     activeCallThreadKey = null;
@@ -1256,6 +1260,30 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     stopLocalScreenCapture(false);
     stopLocalMicCapture();
     closeAllPeers();
+
+    // Optimistically remove self from the call state immediately (0ms) so the VC topbar
+    // no longer shows you inside the call while looking at the chat from outside.
+    const selfKey = options.getSnapshot()?.user.username.toLowerCase();
+    const existingCall = callsByThread.get(leavingThread);
+    if (existingCall && selfKey) {
+      const remainingParticipants = existingCall.participants.filter(
+        (p) => p.user.username.toLowerCase() !== selfKey,
+      );
+      const remainingRinging = existingCall.ringing.filter(
+        (r) => r.username.toLowerCase() !== selfKey,
+      );
+      if (remainingParticipants.length === 0 && remainingRinging.length === 0) {
+        callsByThread.delete(leavingThread);
+      } else {
+        callsByThread.set(leavingThread, {
+          ...existingCall,
+          active: remainingParticipants.length > 0 || remainingRinging.length > 0,
+          participants: remainingParticipants,
+          ringing: remainingRinging,
+        });
+      }
+    }
+
     options.getSocket()?.sendVcLeave(leavingThread);
     playVcLeaveSound();
     syncRingAudio();
@@ -2671,6 +2699,8 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
     syncIncomingPopup();
 
     activeCallThreadKey = threadKey;
+    recentlyLeftCalls.delete(threadKey);
+    lastAutoLeaveResendAt.delete(threadKey);
     const isJoiningExisting = Boolean(callsByThread.get(threadKey)?.active || pendingIncoming);
     // Immediately populate optimistic VC state so the call topbar & sidebar voice bar render in 0ms
     // even if joining from an inline GC call message before vc:state roundtrips.
@@ -2709,6 +2739,8 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
       leaveCall();
     }
     activeCallThreadKey = threadKey;
+    recentlyLeftCalls.delete(threadKey);
+    lastAutoLeaveResendAt.delete(threadKey);
     seedOptimisticActiveCall(target, threadKey, incoming);
     void attachLocalMicIfNeeded();
     options
@@ -2904,23 +2936,54 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
 
   const handleVcState = (payload: VcStateEventPayload) => {
     const selfKey = options.getSnapshot()?.user.username.toLowerCase();
-    const selfJoined = Boolean(
-      selfKey && payload.participants.some((p) => p.user.username.toLowerCase() === selfKey),
+    let effectivePayload = payload;
+    let selfJoined = Boolean(
+      selfKey && effectivePayload.participants.some((p) => p.user.username.toLowerCase() === selfKey),
     );
     const selfStillRinging = Boolean(
-      selfKey && payload.ringing.some((r) => r.username.toLowerCase() === selfKey),
+      selfKey && effectivePayload.ringing.some((r) => r.username.toLowerCase() === selfKey),
     );
-    if (!payload.active || selfJoined || !selfStillRinging) {
-      if (incomingCalls.has(payload.threadKey)) {
-        incomingCalls.delete(payload.threadKey);
-        desktopNotifiedCalls.delete(payload.threadKey);
+
+    if (activeCallThreadKey !== effectivePayload.threadKey) {
+      const leftAt = recentlyLeftCalls.get(effectivePayload.threadKey);
+      if (!selfJoined || !effectivePayload.active) {
+        if (leftAt !== undefined) {
+          recentlyLeftCalls.delete(effectivePayload.threadKey);
+          lastAutoLeaveResendAt.delete(effectivePayload.threadKey);
+        }
+      } else if (selfKey && leftAt !== undefined && Date.now() - leftAt < 15_000) {
+        // Ignore stale in-flight vc:state frames that still include us right after leaving,
+        // and re-send vc:leave if the server still thinks we're in the call after >1s.
+        const filteredParticipants = effectivePayload.participants.filter(
+          (p) => p.user.username.toLowerCase() !== selfKey,
+        );
+        const stillActive = filteredParticipants.length > 0 || effectivePayload.ringing.length > 0;
+        effectivePayload = {
+          ...effectivePayload,
+          active: stillActive,
+          participants: filteredParticipants,
+        };
+        selfJoined = false;
+        const nowTs = Date.now();
+        const lastResend = lastAutoLeaveResendAt.get(effectivePayload.threadKey) ?? 0;
+        if (nowTs - leftAt > 1000 && nowTs - lastResend > 2500) {
+          lastAutoLeaveResendAt.set(effectivePayload.threadKey, nowTs);
+          options.getSocket()?.sendVcLeave(effectivePayload.threadKey);
+        }
+      }
+    }
+
+    if (!effectivePayload.active || selfJoined || !selfStillRinging) {
+      if (incomingCalls.has(effectivePayload.threadKey)) {
+        incomingCalls.delete(effectivePayload.threadKey);
+        desktopNotifiedCalls.delete(effectivePayload.threadKey);
         syncIncomingPopup();
       }
     }
 
-    if (!payload.active) {
-      callsByThread.delete(payload.threadKey);
-      if (activeCallThreadKey === payload.threadKey) {
+    if (!effectivePayload.active) {
+      callsByThread.delete(effectivePayload.threadKey);
+      if (activeCallThreadKey === effectivePayload.threadKey) {
         closeActivePopover();
         expandedStageKey = null;
         activeCallThreadKey = null;
@@ -2933,9 +2996,9 @@ export function createVoiceManager(options: VoiceManagerOptions): VoiceManagerHa
         closeAllPeers();
       }
     } else {
-      callsByThread.set(payload.threadKey, payload);
-      if (activeCallThreadKey === payload.threadKey) {
-        void reconcilePeerConnections(payload);
+      callsByThread.set(effectivePayload.threadKey, effectivePayload);
+      if (activeCallThreadKey === effectivePayload.threadKey) {
+        void reconcilePeerConnections(effectivePayload);
       }
     }
     syncRingAudio();

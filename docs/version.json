@@ -1,11 +1,11 @@
 {
-  "version": "0.1.13",
-  "releasedAt": "2026-11-20T23:02:21.186Z",
-  "changelog": "Permanent 24/7 Cloud Server: migrated Redshift to Cloudflare Workers + SQLite Durable Objects (https://redshift-server.redrepost84.workers.dev) so chats, voice calls, GIFs, and uploads stay online 24/7 even when the host PC is off or restarted.",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.13/Redshift-patch.asar",
-  "sha256": "2b259d092b97736a49d93be09e9ccc77f02733cde4e7b8e70aa6ed9e9b60f9e7",
-  "size": 6277658,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.13/RedshiftSetup.exe",
+  "version": "0.1.14",
+  "releasedAt": "2026-11-21T02:48:47.161Z",
+  "changelog": "Fixed sent messages jumping above a friend's message due to PC-vs-server clock skew, fixed leaving a group call still showing you in the VC topbar, and enabled 24/7 Gmail password reset emails on Cloudflare.",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.14/Redshift-patch.asar",
+  "sha256": "091cc4c792663d7cce7b6d82a54f076cce1034d97af003d236091cd0887442f0",
+  "size": 6280942,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.14/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

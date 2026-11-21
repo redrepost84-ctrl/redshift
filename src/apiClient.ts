@@ -258,10 +258,13 @@ async function fetchWithTunnelRecovery(
   const baseBefore = apiServerBaseUrl;
   try {
     const res = await fetch(resolveApiUrl(pathOrUrl), init);
+    syncServerClockFromResponse(res);
     if (isDeadTunnelStatus(res.status) && isAutoDiscoverableRemoteUrl(baseBefore)) {
       const switched = await tryRediscoverDeadTunnel(baseBefore);
       if (switched) {
-        return await fetch(resolveApiUrl(pathOrUrl), init);
+        const retried = await fetch(resolveApiUrl(pathOrUrl), init);
+        syncServerClockFromResponse(retried);
+        return retried;
       }
     }
     return res;
@@ -270,11 +273,42 @@ async function fetchWithTunnelRecovery(
     if (!isAbort && isAutoDiscoverableRemoteUrl(baseBefore)) {
       const switched = await tryRediscoverDeadTunnel(baseBefore);
       if (switched) {
-        return await fetch(resolveApiUrl(pathOrUrl), init);
+        const retried = await fetch(resolveApiUrl(pathOrUrl), init);
+        syncServerClockFromResponse(retried);
+        return retried;
       }
     }
     throw err;
   }
+}
+
+let serverClockOffsetMs = 0;
+
+function syncServerClockMs(serverTimeMs: number): void {
+  if (!Number.isFinite(serverTimeMs) || serverTimeMs <= 0) {
+    return;
+  }
+  const nextOffset = serverTimeMs - Date.now();
+  // Smooth only tiny jitter (<2s), snap immediately for meaningful clock skew (>=2s).
+  if (Math.abs(nextOffset - serverClockOffsetMs) >= 2000 || serverClockOffsetMs === 0) {
+    serverClockOffsetMs = nextOffset;
+  } else {
+    serverClockOffsetMs = Math.round(serverClockOffsetMs * 0.7 + nextOffset * 0.3);
+  }
+}
+
+function syncServerClockFromResponse(res: Response): void {
+  const dateHeader = res.headers.get('date');
+  if (dateHeader) {
+    const parsed = Date.parse(dateHeader);
+    if (Number.isFinite(parsed)) {
+      syncServerClockMs(parsed);
+    }
+  }
+}
+
+export function getEstimatedServerNow(): number {
+  return Date.now() + serverClockOffsetMs;
 }
 
 /** Resolves server-hosted relative media paths (/api/uploads/..., /gif/...) against the active Redshift server URL. */
@@ -324,7 +358,13 @@ export async function apiCheckServerHealth(serverBaseUrl?: string): Promise<Serv
       service?: string;
       version?: string;
       onlineUsers?: number;
+      serverTime?: number;
     };
+    if (typeof data?.serverTime === 'number' && Number.isFinite(data.serverTime)) {
+      syncServerClockMs(data.serverTime);
+    } else {
+      syncServerClockFromResponse(res);
+    }
     if (!data?.ok || data.service !== 'redshift') {
       return { ok: false, latencyMs, error: 'URL is not a Redshift server' };
     }

@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.14',
+      published_at: '2026-11-21T02:45:00Z',
+      body: 'Fixed sent messages jumping above a friend’s message due to PC-to-server clock skew, fixed leaving a group call still showing you in the VC topbar, and enabled 24/7 Gmail password reset emails on Cloudflare.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.14`,
+    },
+    {
       tag_name: 'v0.1.13',
       published_at: '2026-11-20T23:00:00Z',
       body: 'Permanent 24/7 Cloud Server: migrated Redshift to Cloudflare Workers + SQLite Durable Objects so chats, voice calls, GIFs, and uploads stay online 24/7 even when the host PC is off or restarted.',

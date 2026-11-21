@@ -3167,6 +3167,7 @@ export function createRedshiftServerMiddleware() {
       'Access-Control-Allow-Headers',
       'Authorization, Content-Type, X-File-Name, X-File-Mime',
     );
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Accept-Ranges, Content-Length, Date');
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
@@ -3239,6 +3240,7 @@ export function createRedshiftServerMiddleware() {
         onlineUsers: onlineSockets.size,
         uptimeSec: Math.floor(process.uptime()),
         wsReady: true,
+        serverTime: Date.now(),
       });
       return;
     }
@@ -6748,9 +6750,22 @@ export function attachRedshiftWebSocket(httpServer) {
               clearAllRingingInCall(call);
             }
             if (removed || clearedRing) {
-              finalizeCallIfDone(call);
               broadcastVcState(call);
+              finalizeCallIfDone(call);
+            } else {
+              sendWsEventToUser(ownerKey, buildVcStatePayload(call, ownerKey));
             }
+          } else if (threadKey) {
+            const isGroup = threadKey.startsWith('group:');
+            sendWsEventToUser(ownerKey, {
+              type: 'vc:state',
+              threadKey,
+              kind: isGroup ? 'group' : 'dm',
+              groupId: isGroup ? threadKey.slice('group:'.length) : undefined,
+              active: false,
+              participants: [],
+              ringing: [],
+            });
           }
         } else if (msg && msg.type === 'vc:voice-state') {
           const threadKey = typeof msg.threadKey === 'string' ? msg.threadKey.trim() : '';
