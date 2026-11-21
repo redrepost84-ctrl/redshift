@@ -3,6 +3,12 @@
   const DEFAULT_INSTALLER_URL = `https://github.com/${REPO}/releases/latest/download/RedshiftSetup.exe`;
   const FALLBACK_RELEASES = [
     {
+      tag_name: 'v0.1.22',
+      published_at: '2026-11-21T06:43:00Z',
+      body: 'Overhauled Voice Call Activities: Fixed 8x8 Chess & Checkers tiles with rank/file coordinates (1–8, a–h), flanking Left & Right Taken Pieces trays, and smooth piece animations; redesigned 8-Ball Pool with pull-back-on-ball strike force physics & raycast deflection guides; added live split-screen Minesweeper spectator boards; ensured VexilloGuessr never repeats previous flags; added mutual rematch voting; and auto-cancelled lobbies when a seated player leaves.',
+      html_url: `https://github.com/${REPO}/releases/tag/v0.1.22`,
+    },
+    {
       tag_name: 'v0.1.21',
       published_at: '2026-11-21T06:09:00Z',
       body: 'Voice Call Activities: Added an Activities button in the VC bar with a horizontally scrollable chat-bubble game launcher, stream-style join/watch/hide tiles so nobody is forced into a game screen or forced to restart, and 6 built-in online multiplayer games with lobbies (Chess, Checkers, Minesweeper Race, VexilloGuessr, 8-Ball Pool, and 2–4 player Quoridor).',

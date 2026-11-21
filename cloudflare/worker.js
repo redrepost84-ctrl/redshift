@@ -2187,6 +2187,7 @@ export class RedshiftHub extends DurableObject {
       spectators: (lobby.spectators || []).map((s) => ({
         ...this.buildActivityUserProfile(s.username),
       })),
+      rematchVotes: Array.isArray(lobby.rematchVotes) ? lobby.rematchVotes : [],
       gameState: lobby.gameState ?? null,
       version: lobby.version ?? 1,
       createdAt: lobby.createdAt,
@@ -3538,7 +3539,7 @@ export class RedshiftHub extends DurableObject {
       const wasPlayer = lobby.players.some((p) => p.username.toLowerCase() === ownerKey);
       lobby.players = lobby.players.filter((p) => p.username.toLowerCase() !== ownerKey);
       lobby.spectators = lobby.spectators.filter((s) => s.username.toLowerCase() !== ownerKey);
-      if (lobby.players.length === 0) {
+      if (wasPlayer || lobby.players.length === 0) {
         this.activeActivityLobbies.delete(lobby.id);
         this.persistActiveActivityLobbies();
         const removePayload = {
@@ -3551,22 +3552,23 @@ export class RedshiftHub extends DurableObject {
         }
         return;
       }
-      if (lobby.hostUsername.toLowerCase() === ownerKey) {
-        lobby.hostUsername = lobby.players[0].username;
-      }
-      if (wasPlayer && lobby.status === 'playing' && lobby.players.length < 2) {
-        lobby.status = 'finished';
-        const survivor = lobby.players[0];
-        if (survivor) {
-          survivor.wins = (survivor.wins || 0) + 1;
-          if (lobby.gameState && typeof lobby.gameState === 'object') {
-            lobby.gameState = {
-              ...lobby.gameState,
-              winnerUsername: survivor.username,
-              winReason: 'Opponent left the lobby',
-            };
-          }
-        }
+      lobby.version = (lobby.version || 1) + 1;
+      lobby.updatedAt = Date.now();
+      this.persistActiveActivityLobbies();
+      this.broadcastActivityLobby(lobby);
+      return;
+    }
+
+    if (msg.type === 'activity:start') {
+      const lobbyId = typeof msg.lobbyId === 'string' ? msg.lobbyId.trim() : '';
+      const lobby = lobbyId ? this.activeActivityLobbies.get(lobbyId) : undefined;
+      if (!lobby) return;
+      const isPlayer = lobby.players.some((p) => p.username.toLowerCase() === ownerKey);
+      if (!isPlayer) return;
+      lobby.status = 'playing';
+      lobby.rematchVotes = [];
+      if (msg.gameState !== undefined) {
+        lobby.gameState = msg.gameState;
       }
       lobby.version = (lobby.version || 1) + 1;
       lobby.updatedAt = Date.now();
@@ -3575,15 +3577,33 @@ export class RedshiftHub extends DurableObject {
       return;
     }
 
-    if (msg.type === 'activity:start' || msg.type === 'activity:rematch') {
+    if (msg.type === 'activity:rematch') {
       const lobbyId = typeof msg.lobbyId === 'string' ? msg.lobbyId.trim() : '';
       const lobby = lobbyId ? this.activeActivityLobbies.get(lobbyId) : undefined;
       if (!lobby) return;
       const isPlayer = lobby.players.some((p) => p.username.toLowerCase() === ownerKey);
       if (!isPlayer) return;
-      lobby.status = 'playing';
-      if (msg.gameState !== undefined) {
-        lobby.gameState = msg.gameState;
+      const votes = new Set(
+        Array.isArray(lobby.rematchVotes)
+          ? lobby.rematchVotes.map((u) => String(u).toLowerCase())
+          : [],
+      );
+      if (votes.has(ownerKey)) {
+        votes.delete(ownerKey);
+      } else {
+        votes.add(ownerKey);
+      }
+      const allPlayersVoted =
+        lobby.players.length >= 2 &&
+        lobby.players.every((p) => votes.has(p.username.toLowerCase()));
+      if (allPlayersVoted) {
+        lobby.rematchVotes = [];
+        lobby.status = 'playing';
+        if (msg.gameState !== undefined) {
+          lobby.gameState = msg.gameState;
+        }
+      } else {
+        lobby.rematchVotes = Array.from(votes);
       }
       lobby.version = (lobby.version || 1) + 1;
       lobby.updatedAt = Date.now();
@@ -3611,6 +3631,7 @@ export class RedshiftHub extends DurableObject {
       }
       if (msg.status === 'finished' && lobby.status !== 'finished') {
         lobby.status = 'finished';
+        lobby.rematchVotes = [];
         if (typeof msg.winnerUsername === 'string' && msg.winnerUsername.trim()) {
           const winKey = msg.winnerUsername.trim().toLowerCase();
           const winner = lobby.players.find((p) => p.username.toLowerCase() === winKey);

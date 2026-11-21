@@ -13839,31 +13839,148 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 10px;
+  width: 100%;
 }
 
 .vc-game-status-banner {
-  font-size: 0.84rem;
+  font-size: 0.85rem;
   font-weight: 700;
   color: #e2e6f0;
   text-align: center;
 }
 
-/* Game 1 & 2: Chess & Checkers 8x8 Grid */
+/* Flank Layout: Left Captured Tray + Fixed 8x8 Grid + Right Captured Tray */
+.vc-board-flank-layout {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.vc-captured-side-tray {
+  flex: 0 0 138px;
+  width: 138px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vc-captured-side-tray--active {
+  border-color: rgba(245, 158, 11, 0.65);
+  background: rgba(245, 158, 11, 0.08);
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.14);
+}
+
+.vc-captured-tray-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.vc-captured-tray-side {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: #9ba2b2;
+}
+
+.vc-captured-tray-player {
+  font-size: 0.84rem;
+  font-weight: 800;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vc-captured-tray-adv {
+  align-self: flex-start;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.vc-captured-tray-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8f96a6;
+}
+
+.vc-captured-pieces-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+  align-content: flex-start;
+  min-height: 44px;
+}
+
+.vc-captured-piece-icon {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vc-captured-empty {
+  font-size: 0.74rem;
+  color: #6e7585;
+  font-style: italic;
+}
+
+.vc-captured-checker-mini {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.45);
+}
+
+.vc-captured-checker-mini--r {
+  background: #dc2626;
+  border: 1.5px solid #fecaca;
+}
+
+.vc-captured-checker-mini--b {
+  background: #1e293b;
+  border: 1.5px solid #94a3b8;
+}
+
+/* Game 1 & 2: Fixed 8x8 Chess & Checkers Grid (Never Shifts or Resizes Squares!) */
 .vc-chess-grid {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
+  grid-template-rows: repeat(8, 1fr);
   width: min(352px, calc(100vw - 48px));
   height: min(352px, calc(100vw - 48px));
+  aspect-ratio: 1;
+  flex-shrink: 0;
   border-radius: 10px;
   overflow: hidden;
-  border: 2px solid rgba(255, 255, 255, 0.18);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
 }
 
 .vc-chess-cell {
   position: relative;
   width: 100%;
   height: 100%;
+  min-width: 0;
+  min-height: 0;
   border: none;
   padding: 0;
   display: flex;
@@ -13871,18 +13988,19 @@ body {
   justify-content: center;
   cursor: pointer;
   user-select: none;
+  overflow: visible;
 }
 
 .vc-chess-cell--light {
-  background: #d8dee9;
+  background: #dee3ed;
 }
 
 .vc-chess-cell--dark {
-  background: #4c566a;
+  background: #536178;
 }
 
 .vc-chess-cell--last {
-  box-shadow: inset 0 0 0 3px rgba(250, 204, 21, 0.65);
+  box-shadow: inset 0 0 0 3px rgba(250, 204, 21, 0.72);
 }
 
 .vc-chess-cell--selected {
@@ -13899,24 +14017,76 @@ body {
   width: 13px;
   height: 13px;
   border-radius: 50%;
-  background: rgba(16, 185, 129, 0.85);
+  background: rgba(16, 185, 129, 0.88);
   box-shadow: 0 0 6px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
 }
 
-.vc-chess-piece {
-  font-size: 1.75rem;
+.vc-chess-cell--legal-capture::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  border: 3px solid rgba(239, 68, 68, 0.9);
+  pointer-events: none;
+}
+
+/* Grid Rank Numbers (1-8) & File Letters (a-h) */
+.vc-board-coord {
+  position: absolute;
+  font-size: 9.5px;
+  font-weight: 800;
   line-height: 1;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+  pointer-events: none;
+  user-select: none;
+  z-index: 2;
 }
 
-.vc-chess-piece--w {
-  color: #ffffff;
-  text-shadow: 0 1px 3px #000000;
+.vc-board-coord--rank {
+  top: 2px;
+  left: 3px;
 }
 
-.vc-chess-piece--b {
-  color: #111319;
-  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.45);
+.vc-board-coord--file {
+  bottom: 2px;
+  right: 3px;
+}
+
+.vc-chess-cell--light .vc-board-coord {
+  color: #434f63;
+}
+
+.vc-chess-cell--dark .vc-board-coord {
+  color: #dee3ed;
+}
+
+.vc-quoridor-cell .vc-board-coord {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.vc-chess-piece-svg-wrap {
+  width: 82%;
+  height: 82%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 3;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.4));
+}
+
+/* Smooth Piece Move Animation */
+.vc-piece-sliding {
+  animation: vcPieceSlideIn 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes vcPieceSlideIn {
+  from {
+    transform: translate(var(--slide-from-x, 0%), var(--slide-from-y, 0%)) scale(1.1);
+  }
+  to {
+    transform: translate(0, 0) scale(1);
+  }
 }
 
 .vc-checker-disc {
@@ -13929,6 +14099,8 @@ body {
   font-size: 0.95rem;
   font-weight: 800;
   color: #fde047;
+  pointer-events: none;
+  z-index: 3;
   box-shadow:
     0 3px 6px rgba(0, 0, 0, 0.5),
     inset 0 2px 4px rgba(255, 255, 255, 0.35);
@@ -13944,7 +14116,7 @@ body {
   border: 2px solid #94a3b8;
 }
 
-/* Game 3: Minesweeper Race */
+/* Game 3: Minesweeper Race (Live Spectator Split-Screen & Player Board Switcher) */
 .vc-mine-race-bar {
   display: flex;
   flex-wrap: wrap;
@@ -13953,13 +14125,21 @@ body {
 }
 
 .vc-mine-player-chip {
-  padding: 5px 10px;
-  border-radius: 8px;
+  padding: 6px 11px;
+  border-radius: 9px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.12);
+  font-family: inherit;
   font-size: 0.78rem;
   font-weight: 700;
   color: #e4e7f0;
+  cursor: pointer;
+}
+
+.vc-mine-player-chip--active {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.22);
+  color: #ffffff;
 }
 
 .vc-mine-player-chip--exploded {
@@ -13974,6 +14154,44 @@ body {
   color: #6ee7b7;
 }
 
+.vc-mine-split-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: center;
+  width: 100%;
+}
+
+.vc-mine-board-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.vc-mine-board-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px;
+}
+
+.vc-mine-board-owner {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.vc-mine-board-counter {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #9ba2b2;
+}
+
 .vc-mine-grid {
   display: grid;
   gap: 3px;
@@ -13981,7 +14199,12 @@ body {
   border-radius: 10px;
   background: #0e1016;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  width: min(396px, calc(100vw - 44px));
+  width: min(384px, calc(100vw - 48px));
+}
+
+.vc-mine-grid--compact {
+  width: min(320px, calc(100vw - 48px));
+  gap: 2px;
 }
 
 .vc-mine-cell {
@@ -13991,13 +14214,18 @@ body {
   background: #252936;
   color: #ffffff;
   font-family: inherit;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 800;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   padding: 0;
+}
+
+.vc-mine-cell:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .vc-mine-cell--revealed {
@@ -14023,26 +14251,52 @@ body {
   color: #c084fc;
 }
 
-/* Game 4: VexilloGuessr */
+/* Game 4: VexilloGuessr Duel Arena */
 .vc-vexillo-lives-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
   justify-content: center;
 }
 
 .vc-vexillo-player {
-  padding: 6px 12px;
-  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  font-size: 0.82rem;
-  font-weight: 700;
 }
 
 .vc-vexillo-player--turn {
   border-color: #10b981;
-  background: rgba(16, 185, 129, 0.14);
+  background: rgba(16, 185, 129, 0.15);
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.2);
+}
+
+.vc-vexillo-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.vc-vexillo-player-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vc-vexillo-player-name {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.vc-vexillo-player-hearts {
+  font-size: 0.85rem;
+  letter-spacing: 2px;
 }
 
 .vc-vexillo-feedback {
@@ -14063,16 +14317,16 @@ body {
 }
 
 .vc-vexillo-flag-box {
-  width: min(240px, 72vw);
-  height: 144px;
+  width: min(260px, 74vw);
+  height: 156px;
   border-radius: 12px;
   overflow: hidden;
-  border: 2px solid rgba(255, 255, 255, 0.18);
+  border: 2px solid rgba(255, 255, 255, 0.2);
   background: #0d0e13;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.5);
 }
 
 .vc-vexillo-flag-img {
@@ -14085,11 +14339,11 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  width: min(440px, 100%);
+  width: min(460px, 100%);
 }
 
 .vc-vexillo-choice-btn {
-  min-height: 42px;
+  min-height: 44px;
   padding: 8px 12px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -14098,13 +14352,18 @@ body {
   font-family: inherit;
   font-size: 0.86rem;
   font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-align: left;
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease;
+  transition: background-color 120ms ease, border-color 120ms ease, transform 100ms ease;
 }
 
 .vc-vexillo-choice-btn:hover:not(:disabled) {
   background: rgba(16, 185, 129, 0.22);
   border-color: #10b981;
+  transform: translateY(-1px);
 }
 
 .vc-vexillo-choice-btn:disabled {
@@ -14112,46 +14371,94 @@ body {
   cursor: default;
 }
 
-/* Game 5: 8-Ball Pool */
-.vc-pool-canvas {
-  width: min(640px, calc(100vw - 44px));
-  height: auto;
-  aspect-ratio: 700 / 360;
-  border-radius: 12px;
-  border: 2px solid rgba(255, 255, 255, 0.16);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
-  touch-action: none;
-  cursor: crosshair;
+.vc-vexillo-choice-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
+  font-size: 0.74rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
-.vc-pool-controls {
+/* Game 5: 8-Ball Pool HUD & Pull-Back Table */
+.vc-pool-hud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  width: 100%;
+}
+
+.vc-pool-player-card {
+  flex: 1 1 210px;
+  max-width: 310px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vc-pool-player-card--turn {
+  border-color: #34d399;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.vc-pool-player-title {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.vc-pool-pocketed-tray {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 20px;
+}
+
+.vc-pool-mini-ball {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 800;
+  color: #ffffff;
+  text-shadow: 0 1px 2px #000000;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  gap: 10px;
-  width: min(520px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.35);
 }
 
-.vc-pool-power-label {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: #cfd5e2;
-  min-width: 92px;
+.vc-pool-mini-ball--sunk {
+  opacity: 0.25;
+  filter: grayscale(0.7);
 }
 
-.vc-pool-power-slider {
-  flex: 1 1 140px;
-  accent-color: var(--red-brand);
+.vc-pool-canvas {
+  width: min(680px, calc(100vw - 40px));
+  height: auto;
+  aspect-ratio: 740 / 380;
+  border-radius: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.6);
+  touch-action: none;
+  cursor: grab;
 }
 
-.vc-pool-shoot-btn {
-  width: auto !important;
-  height: 36px !important;
-  padding: 0 16px !important;
+.vc-pool-canvas:active {
+  cursor: grabbing;
 }
 
-/* Game 6: Quoridor (1v1, 1v1v1, 1v1v1v1) */
+/* Game 6: Quoridor (1v1, 1v1v1, 1v1v1v1) Fixed 9x9 Grid */
 .vc-quoridor-players,
 .vc-quoridor-tools {
   display: flex;
@@ -14177,16 +14484,23 @@ body {
   position: relative;
   display: grid;
   grid-template-columns: repeat(9, 1fr);
+  grid-template-rows: repeat(9, 1fr);
   gap: 5px;
   padding: 6px;
   width: min(360px, calc(100vw - 48px));
   height: min(360px, calc(100vw - 48px));
+  aspect-ratio: 1;
   border-radius: 10px;
   background: #11131a;
   border: 2px solid rgba(255, 255, 255, 0.15);
 }
 
 .vc-quoridor-cell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   border-radius: 5px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: #232734;
@@ -14195,6 +14509,7 @@ body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  overflow: visible;
 }
 
 .vc-quoridor-cell--legal {
@@ -14208,6 +14523,8 @@ body {
   border-radius: 50%;
   border: 2px solid #ffffff;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  z-index: 3;
 }
 
 .vc-quoridor-wall {
@@ -14216,6 +14533,7 @@ body {
   border-radius: 99px;
   box-shadow: 0 0 6px rgba(245, 158, 11, 0.8);
   pointer-events: none;
+  z-index: 4;
 }
 
 .vc-quoridor-wall--h {

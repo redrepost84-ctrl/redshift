@@ -2,7 +2,7 @@ import { createCloseIconSvg, openConfirmPopup } from './chatUi';
 import { getDesktopBridge, type DesktopUpdateInfo } from './desktopBridge';
 import { isTopmostModal } from './modalShortcuts';
 
-export const CURRENT_REDSHIFT_VERSION = '0.1.21';
+export const CURRENT_REDSHIFT_VERSION = '0.1.22';
 const LAST_SEEN_CHANGELOG_KEY = 'redshift.last_seen_changelog_version.v1';
 
 function compareSemverVersion(a: string, b: string): number {
@@ -33,6 +33,25 @@ export interface ChangelogReleaseArticle {
 }
 
 export const REDSHIFT_CHANGELOG_ARTICLES: ChangelogReleaseArticle[] = [
+  {
+    version: '0.1.22',
+    date: 'November 20, 2026',
+    kicker: 'ACTIVITIES DESIGN REWORK, POOL PULL-BACK PHYSICS & LIVE SPECTATOR BOARDS',
+    headline: 'Chess/Checkers Side Trays, Coordinates & Animations + Pull-Back 8-Ball Pool & Live Minesweeper Spectating',
+    lead:
+      'Overhauled all 6 built-in voice call activities with fixed-grid coordinates, flanking captured-piece trays, smooth piece slide animations, unanimous rematch voting, pull-back cue physics in Pool, non-repeating flags in VexilloGuessr, and live split-screen Minesweeper spectating.',
+    sections: [
+      {
+        heading: 'Activities Upgrades & Fixes',
+        items: [
+          'Chess & Checkers Rework — Fixed 8x8 square grid proportions so tiles never shift, added rank/file coordinates (1–8, a–h), added flanking Left & Right Taken Pieces trays with material advantage, and added smooth piece slide animations.',
+          '8-Ball Pool Pull-Back Physics — Redesigned Pool with 3D-lit balls, raycast ghost-ball & deflection vectors, and direct pull-back-on-the-cue-ball slingshot control for strike force and speed.',
+          'Live Minesweeper Spectating & Split-Screen — Spectators now see all players’ live Minesweeper boards updating in real time (plus players can toggle Split-Screen or click revealed numbers to chord).',
+          'Unanimous Rematch Voting & Clean Lobby Cancellation — Rematches now require a mutual vote from all seated players, VexilloGuessr never repeats the previous flag, and a player leaving the lobby cancels the match cleanly.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.21',
     date: 'November 20, 2026',

@@ -461,6 +461,7 @@ export interface ActivityLobby {
   status: 'waiting' | 'playing' | 'finished';
   players: ActivityPlayerEntry[];
   spectators: ActivitySpectatorEntry[];
+  rematchVotes?: string[];
   gameState: any;
   version: number;
   createdAt: number;

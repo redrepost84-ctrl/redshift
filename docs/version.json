@@ -1,11 +1,11 @@
 {
-  "version": "0.1.21",
-  "releasedAt": "2026-11-21T06:16:00.711Z",
-  "changelog": "Voice Call Activities: Added an Activities button in the VC bar with a horizontally scrollable chat-bubble game launcher, stream-style join/watch/hide tiles so nobody is forced into a game screen or forced to restart, and 6 built-in online multiplayer games with lobbies (Chess, Checkers, Minesweeper Race, VexilloGuessr, 8-Ball Pool, and 2–4 player Quoridor).",
-  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.21/Redshift-patch.asar",
-  "sha256": "82ab9ace64f4e797c3c6813c7fed3d45157ff3954c979da4cf1e748258af32b5",
-  "size": 6445289,
-  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.21/RedshiftSetup.exe",
+  "version": "0.1.22",
+  "releasedAt": "2026-11-21T06:46:08.354Z",
+  "changelog": "Overhauled Voice Call Activities: Fixed 8x8 Chess & Checkers tiles with rank/file coordinates (1–8, a–h), flanking Left & Right Taken Pieces trays, and smooth piece animations; redesigned 8-Ball Pool with pull-back-on-ball strike force physics & raycast deflection guides; added live split-screen Minesweeper spectator boards; ensured VexilloGuessr never repeats previous flags; added mutual rematch voting; and auto-cancelled lobbies when a seated player leaves.",
+  "asarUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.22/Redshift-patch.asar",
+  "sha256": "b75036ec57e18dfc847988ce60267d799e1bbfdf5863f7551d1488f2b9f442d6",
+  "size": 6469714,
+  "installerUrl": "https://github.com/redrepost84-ctrl/redshift/releases/download/v0.1.22/RedshiftSetup.exe",
   "installerSha256": "82867027f5b5370e103f781d85782e5c7e01d44b37f29bdb1d605d0fcce4e516",
   "installerSize": 127364515
 }

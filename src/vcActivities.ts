@@ -20,7 +20,7 @@ export const ACTIVITY_GAMES: ActivityGameMeta[] = [
     id: 'chess',
     name: 'Chess',
     badge: '1v1',
-    tagline: 'Competitive 1v1 online chess with lobbies',
+    tagline: 'Competitive 1v1 chess with coordinates, captured trays & animations',
     accent: '#f59e0b',
     defaultMaxPlayers: 2,
     allowedPlayerCounts: [2],
@@ -29,7 +29,7 @@ export const ACTIVITY_GAMES: ActivityGameMeta[] = [
     id: 'checkers',
     name: 'Checkers',
     badge: '1v1',
-    tagline: 'Competitive 1v1 draughts with chained jumps & kings',
+    tagline: 'Competitive 1v1 draughts with fixed tiles, chained jumps & kings',
     accent: '#ef4444',
     defaultMaxPlayers: 2,
     allowedPlayerCounts: [2],
@@ -38,7 +38,7 @@ export const ACTIVITY_GAMES: ActivityGameMeta[] = [
     id: 'minesweeper',
     name: 'Minesweeper',
     badge: 'Race',
-    tagline: 'First to flag all mines wins — first to hit a mine loses!',
+    tagline: 'Live spectator split-screen race — first to flag all wins, hit a mine = loss!',
     accent: '#3b82f6',
     defaultMaxPlayers: 2,
     allowedPlayerCounts: [2, 3, 4],
@@ -47,7 +47,7 @@ export const ACTIVITY_GAMES: ActivityGameMeta[] = [
     id: 'vexilloguessr',
     name: 'VexilloGuessr',
     badge: '1v1 · 3❤️',
-    tagline: 'Turn-based 4-choice world flag duel with 3 lives each',
+    tagline: 'Turn-based 4-choice world flag duel with 3 lives each & zero repeat flags',
     accent: '#10b981',
     defaultMaxPlayers: 2,
     allowedPlayerCounts: [2],
@@ -56,7 +56,7 @@ export const ACTIVITY_GAMES: ActivityGameMeta[] = [
     id: 'pool',
     name: 'Pool',
     badge: '8-Ball',
-    tagline: 'Online 1v1 8-Ball billiards with physics & lobbies',
+    tagline: 'Realistic 8-Ball billiards — pull back on the cue ball for strike force & speed',
     accent: '#8b5cf6',
     defaultMaxPlayers: 2,
     allowedPlayerCounts: [2],
@@ -65,7 +65,7 @@ export const ACTIVITY_GAMES: ActivityGameMeta[] = [
     id: 'quoridor',
     name: 'Quoridor',
     badge: '2–4P',
-    tagline: '1v1, 1v1v1, or 1v1v1v1 tactical wall-placement maze',
+    tagline: '1v1, 1v1v1, or 1v1v1v1 tactical wall-placement maze with live groove previews',
     accent: '#ec4899',
     defaultMaxPlayers: 2,
     allowedPlayerCounts: [2, 3, 4],
@@ -139,10 +139,13 @@ export function createGameLogoSvg(gameId: ActivityGameId, size = 32): SVGSVGElem
   };
 
   if (gameId === 'chess') {
-    // Knight / Crown Chess logo
-    addPath('M11 26h14M12 23h12l-1.5-7 3.5-3.5-3.5-1.5-2-3.5-2.5 3-2.5-3-2 3.5-3.5 1.5 3.5 3.5L12 23z', meta.accent, '#ffffff', '1.7');
+    addPath(
+      'M11 26h14M12 23h12l-1.5-7 3.5-3.5-3.5-1.5-2-3.5-2.5 3-2.5-3-2 3.5-3.5 1.5 3.5 3.5L12 23z',
+      meta.accent,
+      '#ffffff',
+      '1.7',
+    );
   } else if (gameId === 'checkers') {
-    // Stacked king checker discs
     const c1 = document.createElementNS(ns, 'circle');
     c1.setAttribute('cx', '18');
     c1.setAttribute('cy', '18');
@@ -153,7 +156,6 @@ export function createGameLogoSvg(gameId: ActivityGameId, size = 32): SVGSVGElem
     svg.appendChild(c1);
     addPath('M14 20l1-4 3 2 3-2 1 4H14z', '#ffffff', '#ffffff', '1.2');
   } else if (gameId === 'minesweeper') {
-    // Naval mine + flag emblem
     const c = document.createElementNS(ns, 'circle');
     c.setAttribute('cx', '18');
     c.setAttribute('cy', '19');
@@ -162,11 +164,14 @@ export function createGameLogoSvg(gameId: ActivityGameId, size = 32): SVGSVGElem
     svg.appendChild(c);
     addPath('M18 9v19M9 19h18M11.5 12.5l13 13M24.5 12.5l-13 13', 'none', '#ffffff', '2');
   } else if (gameId === 'vexilloguessr') {
-    // Waving flag on pole
     addPath('M11 9v18', 'none', '#ffffff', '2.2');
-    addPath('M11 10c3.5-1.5 6.5 1.5 10 0s4.5 0 4.5 0v9c0 0-1 1.5-4.5 0s-6.5-1.5-10 0V10z', meta.accent, '#ffffff', '1.8');
+    addPath(
+      'M11 10c3.5-1.5 6.5 1.5 10 0s4.5 0 4.5 0v9c0 0-1 1.5-4.5 0s-6.5-1.5-10 0V10z',
+      meta.accent,
+      '#ffffff',
+      '1.8',
+    );
   } else if (gameId === 'pool') {
-    // 8-ball emblem
     const outer = document.createElementNS(ns, 'circle');
     outer.setAttribute('cx', '18');
     outer.setAttribute('cy', '18');
@@ -192,7 +197,6 @@ export function createGameLogoSvg(gameId: ActivityGameId, size = 32): SVGSVGElem
     txt.textContent = '8';
     svg.appendChild(txt);
   } else if (gameId === 'quoridor') {
-    // Grid + glowing walls + pawn
     addPath('M10 14h16M10 22h16M14 10v16M22 10v16', 'none', 'rgba(255,255,255,0.45)', '1.4');
     addPath('M14 14h8M22 14v8', 'none', '#ffffff', '3');
     const pawn = document.createElementNS(ns, 'circle');
@@ -207,7 +211,7 @@ export function createGameLogoSvg(gameId: ActivityGameId, size = 32): SVGSVGElem
 }
 
 /* ============================================================================
-   GAME 1: CHESS ENGINE (Full Legal Moves, Check/Checkmate, Castling, En Passant, Promotion)
+   GAME 1: CHESS ENGINE (Coordinates, Side Captured Trays, Piece Animations)
    ============================================================================ */
 
 export type ChessColor = 'w' | 'b';
@@ -231,20 +235,64 @@ export interface ChessGameState {
   moveCount: number;
 }
 
-const CHESS_GLYPHS: Record<string, string> = {
-  wK: '♔',
-  wQ: '♕',
-  wR: '♖',
-  wB: '♗',
-  wN: '♘',
-  wP: '♙',
-  bK: '♚',
-  bQ: '♛',
-  bR: '♜',
-  bB: '♝',
-  bN: '♞',
-  bP: '♟',
+const CHESS_PIECE_VALUES: Record<ChessPieceType, number> = {
+  P: 1,
+  N: 3,
+  B: 3,
+  R: 5,
+  Q: 9,
+  K: 0,
 };
+
+/** Renders a crisp vector Staunton chess piece SVG with consistent bounding dimensions. */
+function createChessPieceSvg(piece: NonNullable<ChessPiece>, size = 32): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 45 45');
+  svg.setAttribute('width', String(size));
+  svg.setAttribute('height', String(size));
+  svg.setAttribute('aria-hidden', 'true');
+
+  const isWhite = piece[0] === 'w';
+  const kind = piece[1] as ChessPieceType;
+  const fill = isWhite ? '#f8fafc' : '#1e2430';
+  const stroke = isWhite ? '#1e293b' : '#f1f5f9';
+
+  const g = document.createElementNS(ns, 'g');
+  g.setAttribute('fill', fill);
+  g.setAttribute('stroke', stroke);
+  g.setAttribute('stroke-width', '2');
+  g.setAttribute('stroke-linecap', 'round');
+  g.setAttribute('stroke-linejoin', 'round');
+
+  const addP = (d: string, customFill?: string) => {
+    const p = document.createElementNS(ns, 'path');
+    p.setAttribute('d', d);
+    if (customFill) p.setAttribute('fill', customFill);
+    g.appendChild(p);
+  };
+
+  if (kind === 'P') {
+    addP(
+      'M22.5 9c-2.21 0-4 1.79-4 4 0 .89.29 1.71.78 2.38C17.33 16.5 16 18.59 16 21c0 2.03.94 3.84 2.41 5.03-3 1.06-7.41 5.55-7.41 13.47h23c0-7.92-4.41-12.41-7.41-13.47 1.47-1.19 2.41-3 2.41-5.03 0-2.41-1.33-4.5-3.28-5.62.49-.67.78-1.49.78-2.38 0-2.21-1.79-4-4-4z',
+    );
+  } else if (kind === 'R') {
+    addP('M9 39h27v-3H9v3zM12 36v-4h21v4H12zM14 29.5v-13h17v13H14zM11 14V9h4v2h5V9h5v2h5V9h4v5H11z');
+  } else if (kind === 'N') {
+    addP('M22 10c10.5 1 16.5 8 16 29H15c0-9 10-6.5 8-21M24 18c.38 2.91-5.55 7.37-8 9-3 2-2.82 4.34-5 4-1.042-.94 1.41-3.04 0-3-1 0 .19 1.23-1 2-1 0-4.003 1-4-4 0-2 6-12 6-12s1.89-1.9 2-3.5c-.73-.994-.5-2-.5-3 1-1 3 2.5 3 2.5h2s.78-1.992 2.5-3c1 0 1 3 1 3');
+  } else if (kind === 'B') {
+    addP('M9 36c3.39-.97 10.11.43 13.5-2 3.39 2.43 10.11 1.03 13.5 2 0 0 1.65.54 3 2-.68.97-1.65.99-3 .5-3.39-.97-10.11.46-13.5-1-3.39 1.46-10.11.03-13.5 1-1.35.49-2.32.47-3-.5 1.35-1.46 3-2 3-2zM15 32c2.5 2.5 12.5 2.5 15 0 .5-1.5 0-2 0-2 0-2.5-2.5-4-2.5-4 5.5-1.5 6-11.5-5-15.5-11 4-10.5 14-5 15.5 0 0-2.5 1.5-2.5 4 0 0-.5.5 0 2zM25 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 1 1 5 0z');
+  } else if (kind === 'Q') {
+    addP('M9 26c8.5-1.5 21-1.5 27 0l2-12-7 11V11l-5.5 13.5-3-15-3 15-5.5-14V25L7 14l2 12zM9 26c0 2 1.5 2 2.5 4 1 1.5 1 1 .5 3.5-1.5 1-1.5 2.5-1.5 2.5-1.5 1.5.5 2.5.5 2.5 6.5 1 16.5 1 23 0 0 0 1.5-1 0-2.5 0 0 .5-1.5-1-2.5-.5-2.5-.5-2 .5-3.5 1-2 2.5-2 2.5-4-8.5-1.5-18.5-1.5-27 0z');
+  } else if (kind === 'K') {
+    addP('M22.5 11.63V6M20 8h5', 'none');
+    addP('M22.5 25s4.5-7.5 3-10.5c0 0-1-2.5-3-2.5s-3 2.5-3 2.5c-1.5 3 3 10.5 3 10.5');
+    addP('M11.5 37c5.5 3.5 15.5 3.5 21 0v-7s9-4.5 6-10.5c-4-6.5-13.5-3.5-16 4V27v-3.5c-3.5-7.5-13-10.5-16-4-3 6 5 10 5 10V37z');
+  }
+
+  svg.appendChild(g);
+  return svg;
+}
 
 export function createInitialChessState(players: ActivityPlayerEntry[]): ChessGameState {
   const p0 = players[0]?.username ?? 'Player 1';
@@ -298,15 +346,13 @@ function isSquareAttacked(
   targetC: number,
   byColor: ChessColor,
 ): boolean {
-  // Pawn attacks
   const pawnRow = byColor === 'w' ? targetR + 1 : targetR - 1;
   for (const dc of [-1, 1]) {
     if (inBounds8(pawnRow, targetC + dc) && board[pawnRow][targetC + dc] === `${byColor}P`) {
       return true;
     }
   }
-  // Knight attacks
-  const knightOffsets = [
+  for (const [dr, dc] of [
     [-2, -1],
     [-2, 1],
     [-1, -2],
@@ -315,13 +361,11 @@ function isSquareAttacked(
     [1, 2],
     [2, -1],
     [2, 1],
-  ];
-  for (const [dr, dc] of knightOffsets) {
+  ]) {
     const nr = targetR + dr;
     const nc = targetC + dc;
     if (inBounds8(nr, nc) && board[nr][nc] === `${byColor}N`) return true;
   }
-  // King attacks
   for (let dr = -1; dr <= 1; dr++) {
     for (let dc = -1; dc <= 1; dc++) {
       if (dr === 0 && dc === 0) continue;
@@ -330,7 +374,6 @@ function isSquareAttacked(
       if (inBounds8(nr, nc) && board[nr][nc] === `${byColor}K`) return true;
     }
   }
-  // Orthogonal (Rook / Queen)
   for (const [dr, dc] of [
     [-1, 0],
     [1, 0],
@@ -349,7 +392,6 @@ function isSquareAttacked(
       nc += dc;
     }
   }
-  // Diagonal (Bishop / Queen)
   for (const [dr, dc] of [
     [-1, -1],
     [-1, 1],
@@ -410,11 +452,7 @@ function getLegalChessMoves(
       const target = state.board[nr][nc];
       if (target && target[0] === enemy) {
         pseudo.push({ to: [nr, nc] });
-      } else if (
-        state.enPassant &&
-        state.enPassant[0] === nr &&
-        state.enPassant[1] === nc
-      ) {
+      } else if (state.enPassant && state.enPassant[0] === nr && state.enPassant[1] === nc) {
         pseudo.push({ to: [nr, nc], enPassantCapture: [r, nc] });
       }
     }
@@ -465,7 +503,6 @@ function getLegalChessMoves(
         if (!target || target[0] === enemy) pseudo.push({ to: [nr, nc] });
       }
     }
-    // Castling
     const homeRow = color === 'w' ? 7 : 0;
     if (r === homeRow && c === 4 && !isKingInCheck(state.board, color)) {
       const canK = color === 'w' ? state.castling.wK : state.castling.bK;
@@ -494,7 +531,6 @@ function getLegalChessMoves(
     }
   }
 
-  // Filter out moves that leave own king in check
   return pseudo.filter((mv) => {
     const test = cloneChessBoard(state.board);
     const moving = test[r][c];
@@ -594,7 +630,6 @@ function applyChessMove(
     statusText: enemy === 'w' ? 'White to move' : 'Black to move',
   };
 
-  // Check if enemy has any legal move
   let hasAnyLegalMove = false;
   outer: for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
@@ -623,7 +658,7 @@ function applyChessMove(
 }
 
 /* ============================================================================
-   GAME 2: CHECKERS ENGINE (8x8 Draughts, Chained Multi-Jumps, Kings)
+   GAME 2: CHECKERS ENGINE (Fixed Tiles, Side Captured Stacks, Animations)
    ============================================================================ */
 
 export type CheckerCell = 'r' | 'R' | 'b' | 'B' | null;
@@ -640,6 +675,7 @@ export interface CheckersGameState {
   winnerUsername: string | null;
   winReason?: string;
   statusText: string;
+  moveCount?: number;
 }
 
 export function createInitialCheckersState(players: ActivityPlayerEntry[]): CheckersGameState {
@@ -665,6 +701,7 @@ export function createInitialCheckersState(players: ActivityPlayerEntry[]): Chec
     blackCaptured: 0,
     winnerUsername: null,
     statusText: 'Red to move',
+    moveCount: 0,
   };
 }
 
@@ -674,11 +711,7 @@ interface CheckerMove {
   captured?: [number, number];
 }
 
-function getCheckerPieceJumps(
-  board: CheckerCell[][],
-  r: number,
-  c: number,
-): CheckerMove[] {
+function getCheckerPieceJumps(board: CheckerCell[][], r: number, c: number): CheckerMove[] {
   const p = board[r]?.[c];
   if (!p) return [];
   const color = p.toLowerCase() as 'r' | 'b';
@@ -718,7 +751,6 @@ function getCheckerLegalMovesForSquare(
   if (state.mustContinueFrom) {
     return jumps;
   }
-  // Check if any piece of current turn has a jump (mandatory jump rule)
   let anyJumpExists = false;
   for (let rr = 0; rr < 8; rr++) {
     for (let cc = 0; cc < 8; cc++) {
@@ -782,7 +814,6 @@ function applyCheckersMove(
   }
   nextBoard[to[0]][to[1]] = piece;
 
-  // Check chained multi-jump
   if (mv.captured && !crownedJustNow) {
     const followUpJumps = getCheckerPieceJumps(nextBoard, to[0], to[1]);
     if (followUpJumps.length > 0) {
@@ -793,7 +824,8 @@ function applyCheckersMove(
         lastMove: { from, to },
         redCaptured,
         blackCaptured,
-        statusText: `${color === 'r' ? 'Red' : 'Black'} double-jump! Select next jump`,
+        moveCount: (state.moveCount || 0) + 1,
+        statusText: `${color === 'r' ? 'Red' : 'Black'} multi-jump! Select next jump`,
       };
     }
   }
@@ -806,6 +838,7 @@ function applyCheckersMove(
     lastMove: { from, to },
     redCaptured,
     blackCaptured,
+    moveCount: (state.moveCount || 0) + 1,
     statusText: enemy === 'r' ? 'Red to move' : 'Black to move',
   };
 
@@ -832,7 +865,7 @@ function applyCheckersMove(
 }
 
 /* ============================================================================
-   GAME 3: MINESWEEPER RACE (First to Flag All Wins / First to Lose Loses)
+   GAME 3: MINESWEEPER RACE (Live Split-Screen Spectator Boards + Chord Reveal)
    ============================================================================ */
 
 export interface MinesweeperPlayerBoard {
@@ -847,7 +880,7 @@ export interface MinesweeperGameState {
   cols: number;
   mineCount: number;
   seed: number;
-  mines: number[] | null; // Generated on first click so first click is always safe
+  mines: number[] | null;
   playerBoards: Record<string, MinesweeperPlayerBoard>;
   winnerUsername: string | null;
   loserUsername: string | null;
@@ -962,7 +995,7 @@ function floodRevealMinesweeper(
 }
 
 /* ============================================================================
-   GAME 4: VEXILLOGUESSR (1v1 Turn-Based Flag Duel, 4 Choices, 3 Lives Each)
+   GAME 4: VEXILLOGUESSR (Never Repeat Previous Flag + 90+ Flag Deck)
    ============================================================================ */
 
 export interface VexilloFlagEntry {
@@ -1014,7 +1047,7 @@ export const VEXILLO_FLAGS: VexilloFlagEntry[] = [
   { code: 'my', name: 'Malaysia', colors: ['#010066', '#cc0001', '#ffcc00'] },
   { code: 'sg', name: 'Singapore', colors: ['#ef3340', '#ffffff', '#ffffff'] },
   { code: 'pk', name: 'Pakistan', colors: ['#01411c', '#ffffff', '#01411c'] },
-  { code: 'CL', name: 'Chile', colors: ['#0039a6', '#ffffff', '#d52b1e'] },
+  { code: 'cl', name: 'Chile', colors: ['#0039a6', '#ffffff', '#d52b1e'] },
   { code: 'co', name: 'Colombia', colors: ['#fcd116', '#003893', '#ce1126'] },
   { code: 'pe', name: 'Peru', colors: ['#d91023', '#ffffff', '#d91023'] },
   { code: 'ie', name: 'Ireland', colors: ['#169b62', '#ffffff', '#ff883e'] },
@@ -1032,6 +1065,41 @@ export const VEXILLO_FLAGS: VexilloFlagEntry[] = [
   { code: 'jm', name: 'Jamaica', colors: ['#009b3a', '#fed100', '#000000'] },
   { code: 'cu', name: 'Cuba', colors: ['#002a8f', '#ffffff', '#cf142b'] },
   { code: 'gh', name: 'Ghana', colors: ['#cf0921', '#fcd116', '#006b3f'] },
+  { code: 'uy', name: 'Uruguay', colors: ['#0038a8', '#ffffff', '#fcd116'] },
+  { code: 've', name: 'Venezuela', colors: ['#ffcc00', '#00247d', '#cf142b'] },
+  { code: 'ec', name: 'Ecuador', colors: ['#ffdd00', '#034ea2', '#ed1c24'] },
+  { code: 'bo', name: 'Bolivia', colors: ['#d52b1e', '#f9e300', '#007934'] },
+  { code: 'py', name: 'Paraguay', colors: ['#d52b1e', '#ffffff', '#0038a8'] },
+  { code: 'cr', name: 'Costa Rica', colors: ['#002b7f', '#ffffff', '#ce1126'] },
+  { code: 'pa', name: 'Panama', colors: ['#ffffff', '#005293', '#d21034'] },
+  { code: 'do', name: 'Dominican Republic', colors: ['#002d62', '#ce1126', '#ffffff'] },
+  { code: 'gt', name: 'Guatemala', colors: ['#4997d0', '#ffffff', '#4997d0'] },
+  { code: 'hn', name: 'Honduras', colors: ['#00bce4', '#ffffff', '#00bce4'] },
+  { code: 'dz', name: 'Algeria', colors: ['#006233', '#ffffff', '#d21034'] },
+  { code: 'tn', name: 'Tunisia', colors: ['#e70013', '#ffffff', '#e70013'] },
+  { code: 'et', name: 'Ethiopia', colors: ['#078930', '#fcdd09', '#da121a'] },
+  { code: 'tz', name: 'Tanzania', colors: ['#1eb53a', '#00a3dd', '#000000'] },
+  { code: 'sn', name: 'Senegal', colors: ['#00853f', '#fdef42', '#e31b23'] },
+  { code: 'cm', name: 'Cameroon', colors: ['#007a5e', '#ce1126', '#fcd116'] },
+  { code: 'ci', name: 'Ivory Coast', colors: ['#f77f00', '#ffffff', '#009e60'] },
+  { code: 'AO', name: 'Angola', colors: ['#cc092f', '#000000', '#ffcb00'] },
+  { code: 'il', name: 'Israel', colors: ['#ffffff', '#0038b8', '#ffffff'] },
+  { code: 'jo', name: 'Jordan', colors: ['#000000', '#ffffff', '#007a3d'] },
+  { code: 'lb', name: 'Lebanon', colors: ['#ed1c24', '#ffffff', '#00a651'] },
+  { code: 'qa', name: 'Qatar', colors: ['#8d1b3d', '#ffffff', '#8d1b3d'] },
+  { code: 'kw', name: 'Kuwait', colors: ['#007a3d', '#ffffff', '#ce1126'] },
+  { code: 'om', name: 'Oman', colors: ['#db161b', '#ffffff', '#008000'] },
+  { code: 'kz', name: 'Kazakhstan', colors: ['#00afca', '#fec50c', '#00afca'] },
+  { code: 'uz', name: 'Uzbekistan', colors: ['#0099b5', '#ffffff', '#1eb53a'] },
+  { code: 'ge', name: 'Georgia', colors: ['#ffffff', '#ff0000', '#ffffff'] },
+  { code: 'am', name: 'Armenia', colors: ['#d90012', '#0033a0', '#f2a800'] },
+  { code: 'az', name: 'Azerbaijan', colors: ['#0092bc', '#e4002b', '#00af66'] },
+  { code: 'np', name: 'Nepal', colors: ['#dc143c', '#003893', '#ffffff'] },
+  { code: 'lk', name: 'Sri Lanka', colors: ['#ffbe29', '#8d153a', '#00534e'] },
+  { code: 'bd', name: 'Bangladesh', colors: ['#006a4e', '#f42a41', '#006a4e'] },
+  { code: 'mn', name: 'Mongolia', colors: ['#da2032', '#0066b3', '#ffd900'] },
+  { code: 'kh', name: 'Cambodia', colors: ['#032ea1', '#e00025', '#ffffff'] },
+  { code: 'la', name: 'Laos', colors: ['#ce1126', '#002868', '#ffffff'] },
 ];
 
 export interface VexilloGuessrGameState {
@@ -1041,6 +1109,7 @@ export interface VexilloGuessrGameState {
   scores: Record<string, number>;
   currentFlagCode: string;
   currentFlagName: string;
+  lastFlagCode?: string;
   choices: string[];
   usedCodes: string[];
   lastFeedback: {
@@ -1054,21 +1123,35 @@ export interface VexilloGuessrGameState {
   roundNumber: number;
 }
 
-function dealNextVexilloRound(usedCodes: string[]): {
+function dealNextVexilloRound(
+  usedCodes: string[],
+  lastFlagCode?: string,
+): {
   flag: VexilloFlagEntry;
   choices: string[];
   nextUsed: string[];
 } {
-  const usedSet = new Set(usedCodes);
-  let pool = VEXILLO_FLAGS.filter((f) => !usedSet.has(f.code.toLowerCase()));
-  let nextUsed = [...usedCodes];
+  const cleanLast = (lastFlagCode || '').toLowerCase();
+  let nextUsed = usedCodes.map((c) => c.toLowerCase());
+  const usedSet = new Set(nextUsed);
+  if (cleanLast) usedSet.add(cleanLast);
+
+  let pool = VEXILLO_FLAGS.filter(
+    (f) => !usedSet.has(f.code.toLowerCase()) && f.code.toLowerCase() !== cleanLast,
+  );
   if (pool.length < 4) {
-    pool = [...VEXILLO_FLAGS];
-    nextUsed = [];
+    // Keep the most recent 20 flags excluded so a recent flag is NEVER repeated!
+    const recentKeep = nextUsed.slice(-20);
+    if (cleanLast && !recentKeep.includes(cleanLast)) recentKeep.push(cleanLast);
+    const recentSet = new Set(recentKeep);
+    nextUsed = recentKeep;
+    pool = VEXILLO_FLAGS.filter((f) => !recentSet.has(f.code.toLowerCase()));
   }
   const correct = pool[Math.floor(Math.random() * pool.length)];
-  nextUsed.push(correct.code.toLowerCase());
-  const distractors = VEXILLO_FLAGS.filter((f) => f.code !== correct.code)
+  const correctCode = correct.code.toLowerCase();
+  nextUsed.push(correctCode);
+
+  const distractors = VEXILLO_FLAGS.filter((f) => f.code.toLowerCase() !== correctCode)
     .sort(() => Math.random() - 0.5)
     .slice(0, 3)
     .map((f) => f.name);
@@ -1078,10 +1161,14 @@ function dealNextVexilloRound(usedCodes: string[]): {
 
 export function createInitialVexilloState(
   players: ActivityPlayerEntry[],
+  previousLastFlagCode?: string,
 ): VexilloGuessrGameState {
   const p0 = players[0]?.username ?? 'Player 1';
   const p1 = players[1]?.username ?? 'Player 2';
-  const deal = dealNextVexilloRound([]);
+  const deal = dealNextVexilloRound(
+    previousLastFlagCode ? [previousLastFlagCode] : [],
+    previousLastFlagCode,
+  );
   return {
     turnIndex: 0,
     playerUsernames: [p0, p1],
@@ -1089,6 +1176,7 @@ export function createInitialVexilloState(
     scores: { [p0.toLowerCase()]: 0, [p1.toLowerCase()]: 0 },
     currentFlagCode: deal.flag.code.toLowerCase(),
     currentFlagName: deal.flag.name,
+    lastFlagCode: deal.flag.code.toLowerCase(),
     choices: deal.choices,
     usedCodes: deal.nextUsed,
     lastFeedback: null,
@@ -1098,7 +1186,7 @@ export function createInitialVexilloState(
 }
 
 /* ============================================================================
-   GAME 5: 8-BALL POOL (1v1 Online Billiards with Deterministic 120Hz Physics)
+   GAME 5: 8-BALL POOL (Realistic Sub-Stepped Physics + Pull-Back-on-Ball Strike Control)
    ============================================================================ */
 
 export interface PoolBall {
@@ -1127,27 +1215,28 @@ export interface PoolGameState {
   winReason?: string;
 }
 
-const POOL_W = 700;
-const POOL_H = 360;
-const POOL_RAIL = 26;
+const POOL_W = 740;
+const POOL_H = 380;
+const POOL_RAIL = 28;
 const POOL_BALL_R = 10.5;
-const POOL_POCKET_R = 20;
+const POOL_POCKET_R = 20.5;
+const POOL_MAX_SPEED = 22.5;
 
 const POOL_BALL_COLORS: Record<number, string> = {
   0: '#f8fafc',
-  1: '#eab308',
+  1: '#facc15',
   2: '#2563eb',
-  3: '#dc2626',
+  3: '#ef4444',
   4: '#7c3aed',
-  5: '#ea580c',
+  5: '#f97316',
   6: '#16a34a',
   7: '#991b1b',
-  8: '#111827',
-  9: '#eab308',
+  8: '#0f172a',
+  9: '#facc15',
   10: '#2563eb',
-  11: '#dc2626',
+  11: '#ef4444',
   12: '#7c3aed',
-  13: '#ea580c',
+  13: '#f97316',
   14: '#16a34a',
   15: '#991b1b',
 };
@@ -1156,14 +1245,13 @@ export function createInitialPoolState(players: ActivityPlayerEntry[]): PoolGame
   const p0 = players[0]?.username ?? 'Player 1';
   const p1 = players[1]?.username ?? 'Player 2';
   const balls: PoolBall[] = [
-    { id: 0, x: 185, y: POOL_H / 2, vx: 0, vy: 0, pocketed: false },
+    { id: 0, x: 195, y: POOL_H / 2, vx: 0, vy: 0, pocketed: false },
   ];
-  // Rack 1..15 in standard 5-column triangle with 8-ball in center (row 2, col 1)
   const rackOrder = [1, 9, 2, 10, 8, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15];
-  const apexX = 485;
+  const apexX = 515;
   const apexY = POOL_H / 2;
-  const dx = POOL_BALL_R * 1.76;
-  const dy = POOL_BALL_R * 1.03;
+  const dx = POOL_BALL_R * 1.75;
+  const dy = POOL_BALL_R * 1.02;
   let idx = 0;
   for (let col = 0; col < 5; col++) {
     for (let row = 0; row <= col; row++) {
@@ -1179,126 +1267,215 @@ export function createInitialPoolState(players: ActivityPlayerEntry[]): PoolGame
     turnIndex: 0,
     groups: { [p0.toLowerCase()]: null, [p1.toLowerCase()]: null },
     lastShot: null,
-    statusText: `${p0} to break! Aim & shoot`,
+    statusText: `${p0} to break! Drag & pull back from the cue ball to strike`,
     winnerUsername: null,
   };
 }
 
 const POOL_POCKETS: Array<[number, number]> = [
   [POOL_RAIL + 2, POOL_RAIL + 2],
-  [POOL_W / 2, POOL_RAIL - 2],
+  [POOL_W / 2, POOL_RAIL - 3],
   [POOL_W - POOL_RAIL - 2, POOL_RAIL + 2],
   [POOL_RAIL + 2, POOL_H - POOL_RAIL - 2],
-  [POOL_W / 2, POOL_H - POOL_RAIL + 2],
+  [POOL_W / 2, POOL_H - POOL_RAIL + 3],
   [POOL_W - POOL_RAIL - 2, POOL_H - POOL_RAIL - 2],
 ];
 
-function simulatePoolStep(balls: PoolBall[], pocketedThisShot: number[]): boolean {
-  let moving = false;
+/**
+ * Sub-stepped realistic rigid-body billiards physics step (6 sub-steps per frame)
+ * preventing high-speed tunneling and modeling sliding-to-rolling cloth friction.
+ */
+function simulatePoolFrame(balls: PoolBall[], pocketedThisShot: number[]): boolean {
+  const SUB_STEPS = 6;
+  let anyMoving = false;
   const minX = POOL_RAIL + POOL_BALL_R;
   const maxX = POOL_W - POOL_RAIL - POOL_BALL_R;
   const minY = POOL_RAIL + POOL_BALL_R;
   const maxY = POOL_H - POOL_RAIL - POOL_BALL_R;
 
-  for (const b of balls) {
-    if (b.pocketed) continue;
-    b.x += b.vx;
-    b.y += b.vy;
-    b.vx *= 0.985;
-    b.vy *= 0.985;
-    if (Math.hypot(b.vx, b.vy) < 0.045) {
-      b.vx = 0;
-      b.vy = 0;
-    } else {
-      moving = true;
-    }
-
-    // Pocket detection
-    for (const [px, py] of POOL_POCKETS) {
-      if (Math.hypot(b.x - px, b.y - py) < POOL_POCKET_R) {
-        b.pocketed = true;
-        b.vx = 0;
-        b.vy = 0;
-        if (!pocketedThisShot.includes(b.id)) {
-          pocketedThisShot.push(b.id);
-        }
-        break;
-      }
-    }
-    if (b.pocketed) continue;
-
-    // Cushion bounce
-    if (b.x < minX) {
-      b.x = minX;
-      b.vx = -b.vx * 0.82;
-    } else if (b.x > maxX) {
-      b.x = maxX;
-      b.vx = -b.vx * 0.82;
-    }
-    if (b.y < minY) {
-      b.y = minY;
-      b.vy = -b.vy * 0.82;
-    } else if (b.y > maxY) {
-      b.y = maxY;
-      b.vy = -b.vy * 0.82;
-    }
-  }
-
-  // Elastic ball-ball collisions
-  for (let i = 0; i < balls.length; i++) {
-    const a = balls[i];
-    if (a.pocketed) continue;
-    for (let j = i + 1; j < balls.length; j++) {
-      const b = balls[j];
+  for (let s = 0; s < SUB_STEPS; s++) {
+    for (const b of balls) {
       if (b.pocketed) continue;
-      const dx = b.x - a.x;
-      const dy = b.y - a.y;
-      const dist = Math.hypot(dx, dy);
-      const minDist = POOL_BALL_R * 2;
-      if (dist > 0 && dist < minDist) {
-        const nx = dx / dist;
-        const ny = dy / dist;
-        const overlap = (minDist - dist) * 0.5;
-        a.x -= nx * overlap;
-        a.y -= ny * overlap;
-        b.x += nx * overlap;
-        b.y += ny * overlap;
+      b.x += b.vx / SUB_STEPS;
+      b.y += b.vy / SUB_STEPS;
 
-        const dvx = a.vx - b.vx;
-        const dvy = a.vy - b.vy;
-        const impact = dvx * nx + dvy * ny;
-        if (impact > 0) {
-          const impulse = impact * 0.94;
-          a.vx -= impulse * nx;
-          a.vy -= impulse * ny;
-          b.vx += impulse * nx;
-          b.vy += impulse * ny;
-          moving = true;
+      const speed = Math.hypot(b.vx, b.vy);
+      if (speed > 0) {
+        // Realistic two-regime cloth friction: viscous drag + constant rolling resistance
+        const decel = (speed * 0.011 + 0.018) / SUB_STEPS;
+        const nextSpeed = Math.max(0, speed - decel);
+        if (nextSpeed < 0.03) {
+          b.vx = 0;
+          b.vy = 0;
+        } else {
+          const ratio = nextSpeed / speed;
+          b.vx *= ratio;
+          b.vy *= ratio;
+          anyMoving = true;
+        }
+      }
+
+      // Pocket capture with gravity pull near lip
+      for (const [px, py] of POOL_POCKETS) {
+        const distToPocket = Math.hypot(b.x - px, b.y - py);
+        if (distToPocket < POOL_POCKET_R) {
+          b.pocketed = true;
+          b.vx = 0;
+          b.vy = 0;
+          if (!pocketedThisShot.includes(b.id)) {
+            pocketedThisShot.push(b.id);
+          }
+          break;
+        } else if (distToPocket < POOL_POCKET_R + 6) {
+          b.vx += ((px - b.x) / distToPocket) * 0.14;
+          b.vy += ((py - b.y) / distToPocket) * 0.14;
+        }
+      }
+      if (b.pocketed) continue;
+
+      // Cushion rebound (skip rail bounce right inside pocket mouths)
+      const nearCornerOrSidePocket = POOL_POCKETS.some(
+        ([px, py]) => Math.hypot(b.x - px, b.y - py) < POOL_POCKET_R + 7,
+      );
+      if (!nearCornerOrSidePocket) {
+        if (b.x < minX) {
+          b.x = minX;
+          b.vx = -b.vx * 0.84;
+          b.vy *= 0.96;
+        } else if (b.x > maxX) {
+          b.x = maxX;
+          b.vx = -b.vx * 0.84;
+          b.vy *= 0.96;
+        }
+        if (b.y < minY) {
+          b.y = minY;
+          b.vy = -b.vy * 0.84;
+          b.vx *= 0.96;
+        } else if (b.y > maxY) {
+          b.y = maxY;
+          b.vy = -b.vy * 0.84;
+          b.vx *= 0.96;
+        }
+      }
+    }
+
+    // Elastic ball-to-ball collision resolution
+    const minDist = POOL_BALL_R * 2;
+    for (let i = 0; i < balls.length; i++) {
+      const a = balls[i];
+      if (a.pocketed) continue;
+      for (let j = i + 1; j < balls.length; j++) {
+        const b = balls[j];
+        if (b.pocketed) continue;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 0 && dist < minDist) {
+          const nx = dx / dist;
+          const ny = dy / dist;
+          const overlap = (minDist - dist) * 0.505;
+          a.x -= nx * overlap;
+          a.y -= ny * overlap;
+          b.x += nx * overlap;
+          b.y += ny * overlap;
+
+          const dvx = a.vx - b.vx;
+          const dvy = a.vy - b.vy;
+          const normalVel = dvx * nx + dvy * ny;
+          if (normalVel > 0) {
+            const restitution = 0.965;
+            const impulse = normalVel * restitution;
+            a.vx -= impulse * nx;
+            a.vy -= impulse * ny;
+            b.vx += impulse * nx;
+            b.vy += impulse * ny;
+            anyMoving = true;
+          }
         }
       }
     }
   }
 
-  return moving;
+  return anyMoving;
 }
 
-function executePoolShot(
-  state: PoolGameState,
+/** Raycasts the cue ball trajectory to find the exact first ball or rail impact point. */
+function computePoolAimRaycast(
+  balls: PoolBall[],
   angle: number,
-  power: number,
-): PoolGameState {
+): {
+  hitX: number;
+  hitY: number;
+  hitBall: PoolBall | null;
+  targetDirX?: number;
+  targetDirY?: number;
+} {
+  const cue = balls.find((b) => b.id === 0 && !b.pocketed);
+  if (!cue) return { hitX: 0, hitY: 0, hitBall: null };
+
+  const dirX = Math.cos(angle);
+  const dirY = Math.sin(angle);
+  const diam = POOL_BALL_R * 2;
+
+  let bestT = 900;
+  let hitBall: PoolBall | null = null;
+
+  // Check rail distances
+  const minX = POOL_RAIL + POOL_BALL_R;
+  const maxX = POOL_W - POOL_RAIL - POOL_BALL_R;
+  const minY = POOL_RAIL + POOL_BALL_R;
+  const maxY = POOL_H - POOL_RAIL - POOL_BALL_R;
+
+  if (dirX > 0.0001) bestT = Math.min(bestT, (maxX - cue.x) / dirX);
+  else if (dirX < -0.0001) bestT = Math.min(bestT, (minX - cue.x) / dirX);
+  if (dirY > 0.0001) bestT = Math.min(bestT, (maxY - cue.y) / dirY);
+  else if (dirY < -0.0001) bestT = Math.min(bestT, (minY - cue.y) / dirY);
+
+  // Check intersection with each object ball circle of radius 2*R
+  for (const b of balls) {
+    if (b.id === 0 || b.pocketed) continue;
+    const fx = b.x - cue.x;
+    const fy = b.y - cue.y;
+    const proj = fx * dirX + fy * dirY;
+    if (proj <= 0) continue;
+    const perpSq = fx * fx + fy * fy - proj * proj;
+    if (perpSq < diam * diam) {
+      const t = proj - Math.sqrt(diam * diam - perpSq);
+      if (t > 0 && t < bestT) {
+        bestT = t;
+        hitBall = b;
+      }
+    }
+  }
+
+  const hitX = cue.x + dirX * bestT;
+  const hitY = cue.y + dirY * bestT;
+  if (hitBall) {
+    const nd = Math.hypot(hitBall.x - hitX, hitBall.y - hitY) || 1;
+    return {
+      hitX,
+      hitY,
+      hitBall,
+      targetDirX: (hitBall.x - hitX) / nd,
+      targetDirY: (hitBall.y - hitY) / nd,
+    };
+  }
+  return { hitX, hitY, hitBall: null };
+}
+
+function executePoolShot(state: PoolGameState, angle: number, power: number): PoolGameState {
   const startBalls: PoolBall[] = state.balls.map((b) => ({ ...b }));
   const simBalls: PoolBall[] = state.balls.map((b) => ({ ...b }));
   const cue = simBalls.find((b) => b.id === 0);
   if (!cue || cue.pocketed) return state;
 
-  const speed = Math.max(1.5, Math.min(17.5, power));
+  const speed = Math.max(1.2, Math.min(POOL_MAX_SPEED, power));
   cue.vx = Math.cos(angle) * speed;
   cue.vy = Math.sin(angle) * speed;
 
   const pocketedThisShot: number[] = [];
-  for (let step = 0; step < 900; step++) {
-    if (!simulatePoolStep(simBalls, pocketedThisShot)) break;
+  for (let frame = 0; frame < 750; frame++) {
+    if (!simulatePoolFrame(simBalls, pocketedThisShot)) break;
   }
   for (const b of simBalls) {
     b.vx = 0;
@@ -1315,7 +1492,7 @@ function executePoolShot(
   const scratched = pocketedThisShot.includes(0);
   if (scratched) {
     cue.pocketed = false;
-    cue.x = 185;
+    cue.x = 195;
     cue.y = POOL_H / 2;
     cue.vx = 0;
     cue.vy = 0;
@@ -1324,7 +1501,6 @@ function executePoolShot(
   const pocketedEight = pocketedThisShot.includes(8);
   const objectPocketed = pocketedThisShot.filter((id) => id !== 0 && id !== 8);
 
-  // Assign Solids / Stripes if table was open and shooter legally pocketed an object ball
   if (!groups[shooterKey] && !scratched && objectPocketed.length > 0) {
     const firstId = objectPocketed[0];
     const chosenGroup: 'solids' | 'stripes' = firstId <= 7 ? 'solids' : 'stripes';
@@ -1369,7 +1545,7 @@ function executePoolShot(
       statusText = `${shooter} pocketed a ball and shoots again!`;
     } else {
       nextTurnIndex = opponentIdx;
-      statusText = `${opponent}'s turn to shoot`;
+      statusText = `${opponent}'s turn — pull back on the cue ball to shoot`;
     }
   }
 
@@ -1392,7 +1568,7 @@ function executePoolShot(
 }
 
 /* ============================================================================
-   GAME 6: QUORIDOR (1v1, 1v1v1, or 1v1v1v1 Online Strategy Maze + BFS Wall Check)
+   GAME 6: QUORIDOR (1v1, 1v1v1, 1v1v1v1 + Interactive Groove Hover & Pawn Animations)
    ============================================================================ */
 
 export interface QuoridorPawn {
@@ -1401,6 +1577,8 @@ export interface QuoridorPawn {
   seat: number;
   r: number;
   c: number;
+  prevR?: number;
+  prevC?: number;
   goalType: 'row' | 'col';
   goalTarget: number;
   wallsLeft: number;
@@ -1410,11 +1588,12 @@ export interface QuoridorPawn {
 export interface QuoridorGameState {
   pawns: QuoridorPawn[];
   turnIndex: number;
-  hWalls: string[]; // "r,c" top-left of 2-cell horizontal wall below row r (cols c and c+1)
-  vWalls: string[]; // "r,c" top-left of 2-cell vertical wall right of col c (rows r and r+1)
+  hWalls: string[];
+  vWalls: string[];
   statusText: string;
   winnerUsername: string | null;
   winReason?: string;
+  moveCount?: number;
 }
 
 const QUORIDOR_COLORS = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b'];
@@ -1425,10 +1604,10 @@ export function createInitialQuoridorState(
   const count = Math.max(2, Math.min(4, players.length));
   const wallsPerPlayer = count === 2 ? 10 : count === 3 ? 6 : 5;
   const configs: Array<{ r: number; c: number; goalType: 'row' | 'col'; goalTarget: number }> = [
-    { r: 8, c: 4, goalType: 'row', goalTarget: 0 }, // Bottom -> Top
-    { r: 0, c: 4, goalType: 'row', goalTarget: 8 }, // Top -> Bottom
-    { r: 4, c: 0, goalType: 'col', goalTarget: 8 }, // Left -> Right
-    { r: 4, c: 8, goalType: 'col', goalTarget: 0 }, // Right -> Left
+    { r: 8, c: 4, goalType: 'row', goalTarget: 0 },
+    { r: 0, c: 4, goalType: 'row', goalTarget: 8 },
+    { r: 4, c: 0, goalType: 'col', goalTarget: 8 },
+    { r: 4, c: 8, goalType: 'col', goalTarget: 0 },
   ];
   const pawns: QuoridorPawn[] = players.slice(0, 4).map((p, idx) => ({
     username: p.username,
@@ -1449,6 +1628,7 @@ export function createInitialQuoridorState(
     vWalls: [],
     statusText: `${pawns[0]?.displayName ?? 'Player 1'}'s turn`,
     winnerUsername: null,
+    moveCount: 0,
   };
 }
 
@@ -1462,12 +1642,10 @@ function isQuoridorEdgeBlocked(
 ): boolean {
   if (r2 < 0 || r2 >= 9 || c2 < 0 || c2 >= 9) return true;
   if (r1 === r2) {
-    // Horizontal step between col minC and minC+1 at row r1
     const minC = Math.min(c1, c2);
     return vWallSet.has(`${r1},${minC}`) || vWallSet.has(`${r1 - 1},${minC}`);
   }
   if (c1 === c2) {
-    // Vertical step between row minR and minR+1 at col c1
     const minR = Math.min(r1, r2);
     return hWallSet.has(`${minR},${c1}`) || hWallSet.has(`${minR},${c1 - 1}`);
   }
@@ -1499,7 +1677,6 @@ function getLegalQuoridorPawnMoves(
     if (!occupied.has(`${nr},${nc}`)) {
       moves.push([nr, nc]);
     } else {
-      // Jump straight over adjacent pawn if unblocked
       const jr = nr + dr;
       const jc = nc + dc;
       if (
@@ -1508,7 +1685,6 @@ function getLegalQuoridorPawnMoves(
       ) {
         moves.push([jr, jc]);
       } else {
-        // Diagonal sidestep jumps
         const perp: Array<[number, number]> =
           dr !== 0
             ? [
@@ -1576,7 +1752,7 @@ function canPlaceQuoridorWall(
   const vSet = new Set(state.vWalls);
   if (orientation === 'h') {
     if (hSet.has(key) || hSet.has(`${r},${c - 1}`) || hSet.has(`${r},${c + 1}`)) return false;
-    if (vSet.has(key)) return false; // Crossing perpendicular wall at same center
+    if (vSet.has(key)) return false;
     hSet.add(key);
   } else {
     if (vSet.has(key) || vSet.has(`${r - 1},${c}`) || vSet.has(`${r + 1},${c}`)) return false;
@@ -1595,7 +1771,10 @@ export function createInitialGameStateForLobby(lobby: ActivityLobby): any {
     case 'minesweeper':
       return createInitialMinesweeperState(lobby.players);
     case 'vexilloguessr':
-      return createInitialVexilloState(lobby.players);
+      return createInitialVexilloState(
+        lobby.players,
+        lobby.gameState?.currentFlagCode || lobby.gameState?.lastFlagCode,
+      );
     case 'pool':
       return createInitialPoolState(lobby.players);
     case 'quoridor':
@@ -1630,7 +1809,11 @@ export interface VcActivitiesController {
   openGameBrowser: (threadKey: string, gameId: ActivityGameId) => void;
   toggleActivitiesBubble: (anchorBtn: HTMLElement, threadKey: string) => void;
   closeActivitiesBubble: () => void;
-  renderActivityStageTiles: (threadKey: string, inThisCall: boolean, onRequireJoinCall: (lobbyId: string) => void) => HTMLElement[];
+  renderActivityStageTiles: (
+    threadKey: string,
+    inThisCall: boolean,
+    onRequireJoinCall: (lobbyId: string) => void,
+  ) => HTMLElement[];
   renderExpandedActivityStage: (threadKey: string) => HTMLElement | null;
 }
 
@@ -1647,17 +1830,18 @@ export function createVcActivitiesController(
   };
   const lobbiesById = new Map<string, ActivityLobby>();
   const watchedLobbyIds = new Set<string>();
+  const lastAnimatedMoveKeyByLobby = new Map<string, string>();
+
   let expandedTarget:
     | { kind: 'browser'; threadKey: string; gameId: ActivityGameId }
     | { kind: 'lobby'; threadKey: string; lobbyId: string }
     | null = null;
 
-  // Client-side UI selections that persist across re-renders
   let selectedBoardSquare: [number, number] | null = null;
   let minesweeperFlagMode = false;
+  let minesweeperViewTarget: string = 'auto'; // 'auto' | 'split' | usernameLower
   let quoridorTool: 'move' | 'hwall' | 'vwall' = 'move';
   let poolAimAngle = 0;
-  let poolPower = 9.5;
   let poolAnimatingSeq = 0;
   let lobbyScopeFilter: 'call' | 'public' = 'call';
   let createMaxPlayersDraft = 2;
@@ -1691,7 +1875,6 @@ export function createVcActivitiesController(
     closeActivitiesBubble();
     const meta = getActivityGameMeta(gameId);
     createMaxPlayersDraft = meta.defaultMaxPlayers;
-    // If the user is already a player in a lobby for this game in this call, open that lobby directly!
     const selfKey = getSelfKey();
     const existingOwn = getCallLobbies(threadKey).find(
       (l) =>
@@ -1798,7 +1981,6 @@ export function createVcActivitiesController(
       const centerX = rect.left + rect.width / 2;
       let left = centerX - bRect.width / 2;
       left = Math.max(10, Math.min(window.innerWidth - bRect.width - 10, left));
-      // Prefer above the VC controls bar if room, else below
       const aboveTop = rect.top - bRect.height - 12;
       const placeBelow = aboveTop < 12;
       const top = placeBelow ? rect.bottom + 12 : aboveTop;
@@ -1944,7 +2126,7 @@ export function createVcActivitiesController(
     return tiles;
   };
 
-  /** Renders theLobby Browser view for a selected game. */
+  /** Renders the Lobby Browser view for a selected game. */
   const renderGameBrowserView = (
     threadKey: string,
     gameId: ActivityGameId,
@@ -1954,7 +2136,6 @@ export function createVcActivitiesController(
     const wrap = document.createElement('div');
     wrap.className = 'vc-activity-browser';
 
-    // Game Selector Tabs at top of Stage so user can switch games smoothly
     const gameStrip = document.createElement('div');
     gameStrip.className = 'vc-activity-stage-gametabs';
     for (const g of ACTIVITY_GAMES) {
@@ -1977,7 +2158,6 @@ export function createVcActivitiesController(
     }
     wrap.appendChild(gameStrip);
 
-    // Hero Create Bar
     const createBar = document.createElement('div');
     createBar.className = 'vc-activity-create-bar';
 
@@ -2039,7 +2219,6 @@ export function createVcActivitiesController(
     createBar.appendChild(createActions);
     wrap.appendChild(createBar);
 
-    // Filter Tabs (In This Call vs All Public Lobbies)
     const filterRow = document.createElement('div');
     filterRow.className = 'vc-activity-filter-row';
     for (const scope of ['call', 'public'] as const) {
@@ -2060,11 +2239,12 @@ export function createVcActivitiesController(
     }
     wrap.appendChild(filterRow);
 
-    // Lobby List
     const matchingLobbies = Array.from(lobbiesById.values()).filter(
       (l) =>
         l.gameId === gameId &&
-        (lobbyScopeFilter === 'public' ? l.isPublic || l.threadKey === threadKey : l.threadKey === threadKey),
+        (lobbyScopeFilter === 'public'
+          ? l.isPublic || l.threadKey === threadKey
+          : l.threadKey === threadKey),
     );
 
     const listEl = document.createElement('div');
@@ -2180,6 +2360,87 @@ export function createVcActivitiesController(
     statusBanner.textContent = state.statusText;
     wrap.appendChild(statusBanner);
 
+    // Compute material advantage for side captured trays
+    const whiteCaptures = (state.capturedByWhite || []).filter(Boolean) as NonNullable<ChessPiece>[];
+    const blackCaptures = (state.capturedByBlack || []).filter(Boolean) as NonNullable<ChessPiece>[];
+    const whiteScore = whiteCaptures.reduce((acc, p) => acc + (CHESS_PIECE_VALUES[p[1] as ChessPieceType] ?? 0), 0);
+    const blackScore = blackCaptures.reduce((acc, p) => acc + (CHESS_PIECE_VALUES[p[1] as ChessPieceType] ?? 0), 0);
+
+    const flankLayout = document.createElement('div');
+    flankLayout.className = 'vc-board-flank-layout';
+
+    const buildCapturedSideTray = (
+      titleLabel: string,
+      playerUsername: string,
+      isTurnNow: boolean,
+      capturedList: NonNullable<ChessPiece>[],
+      materialDiff: number,
+    ) => {
+      const tray = document.createElement('div');
+      tray.className = isTurnNow
+        ? 'vc-captured-side-tray vc-captured-side-tray--active'
+        : 'vc-captured-side-tray';
+
+      const head = document.createElement('div');
+      head.className = 'vc-captured-tray-head';
+      const sideTag = document.createElement('span');
+      sideTag.className = 'vc-captured-tray-side';
+      sideTag.textContent = titleLabel;
+      const pName = document.createElement('span');
+      pName.className = 'vc-captured-tray-player';
+      const playerEntry = lobby.players.find(
+        (p) => p.username.toLowerCase() === playerUsername.toLowerCase(),
+      );
+      pName.textContent = playerEntry?.displayName ?? playerUsername;
+      head.appendChild(sideTag);
+      head.appendChild(pName);
+      if (materialDiff > 0) {
+        const adv = document.createElement('span');
+        adv.className = 'vc-captured-tray-adv';
+        adv.textContent = `+${materialDiff}`;
+        head.appendChild(adv);
+      }
+      tray.appendChild(head);
+
+      const subLabel = document.createElement('div');
+      subLabel.className = 'vc-captured-tray-label';
+      subLabel.textContent = 'Taken Pieces';
+      tray.appendChild(subLabel);
+
+      const piecesBox = document.createElement('div');
+      piecesBox.className = 'vc-captured-pieces-grid';
+      if (capturedList.length === 0) {
+        const none = document.createElement('span');
+        none.className = 'vc-captured-empty';
+        none.textContent = 'None yet';
+        piecesBox.appendChild(none);
+      } else {
+        const order: Record<ChessPieceType, number> = { Q: 1, R: 2, B: 3, N: 4, P: 5, K: 0 };
+        const sorted = [...capturedList].sort(
+          (a, b) => (order[a[1] as ChessPieceType] ?? 9) - (order[b[1] as ChessPieceType] ?? 9),
+        );
+        for (const cp of sorted) {
+          const slot = document.createElement('span');
+          slot.className = 'vc-captured-piece-icon';
+          slot.appendChild(createChessPieceSvg(cp, 22));
+          piecesBox.appendChild(slot);
+        }
+      }
+      tray.appendChild(piecesBox);
+      return tray;
+    };
+
+    // Left Tray: White's captured pieces; Right Tray: Black's captured pieces
+    flankLayout.appendChild(
+      buildCapturedSideTray(
+        '⚪ WHITE',
+        state.whiteUsername,
+        state.turn === 'w' && !state.winnerUsername,
+        whiteCaptures,
+        whiteScore - blackScore,
+      ),
+    );
+
     const grid = document.createElement('div');
     grid.className = 'vc-chess-grid';
 
@@ -2187,6 +2448,17 @@ export function createVcActivitiesController(
       selectedBoardSquare && isMyTurn
         ? getLegalChessMoves(state, selectedBoardSquare[0], selectedBoardSquare[1])
         : [];
+
+    const moveKey = state.lastMove
+      ? `${state.moveCount}:${state.lastMove.from[0]},${state.lastMove.from[1]}->${state.lastMove.to[0]},${state.lastMove.to[1]}`
+      : '';
+    const shouldAnimateLastMove =
+      Boolean(moveKey) && lastAnimatedMoveKeyByLobby.get(lobby.id) !== moveKey;
+    if (shouldAnimateLastMove) {
+      lastAnimatedMoveKeyByLobby.set(lobby.id, moveKey);
+    }
+
+    const files = 'abcdefgh';
 
     for (let vr = 0; vr < 8; vr++) {
       for (let vc = 0; vc < 8; vc++) {
@@ -2199,25 +2471,49 @@ export function createVcActivitiesController(
         const isLegalDest = legalForSelected.some(
           (m) => m.to[0] === r && m.to[1] === c,
         );
-        const isLastMove =
-          (state.lastMove?.from[0] === r && state.lastMove?.from[1] === c) ||
-          (state.lastMove?.to[0] === r && state.lastMove?.to[1] === c);
-        const isCheckedKing =
-          piece === `${state.inCheck}K`;
+        const isLastFrom =
+          state.lastMove?.from[0] === r && state.lastMove?.from[1] === c;
+        const isLastTo =
+          state.lastMove?.to[0] === r && state.lastMove?.to[1] === c;
+        const isCheckedKing = piece === `${state.inCheck}K`;
 
         const cell = document.createElement('button');
         cell.type = 'button';
         cell.className = `vc-chess-cell ${isLight ? 'vc-chess-cell--light' : 'vc-chess-cell--dark'}`;
         if (isSelected) cell.classList.add('vc-chess-cell--selected');
-        if (isLegalDest) cell.classList.add('vc-chess-cell--legal');
-        if (isLastMove) cell.classList.add('vc-chess-cell--last');
+        if (isLegalDest) {
+          cell.classList.add(piece ? 'vc-chess-cell--legal-capture' : 'vc-chess-cell--legal');
+        }
+        if (isLastFrom || isLastTo) cell.classList.add('vc-chess-cell--last');
         if (isCheckedKing) cell.classList.add('vc-chess-cell--check');
 
+        // Rank numbers (1-8) along the left edge of the board
+        if (vc === 0) {
+          const rankTag = document.createElement('span');
+          rankTag.className = 'vc-board-coord vc-board-coord--rank';
+          rankTag.textContent = String(8 - r);
+          cell.appendChild(rankTag);
+        }
+        // File letters (a-h) along the bottom edge of the board
+        if (vr === 7) {
+          const fileTag = document.createElement('span');
+          fileTag.className = 'vc-board-coord vc-board-coord--file';
+          fileTag.textContent = files[c] ?? '';
+          cell.appendChild(fileTag);
+        }
+
         if (piece) {
-          const pSpan = document.createElement('span');
-          pSpan.className = `vc-chess-piece vc-chess-piece--${piece[0]}`;
-          pSpan.textContent = CHESS_GLYPHS[piece] ?? '';
-          cell.appendChild(pSpan);
+          const pWrap = document.createElement('span');
+          pWrap.className = 'vc-chess-piece-svg-wrap';
+          if (shouldAnimateLastMove && isLastTo && state.lastMove) {
+            const fromVr = flipBoard ? 7 - state.lastMove.from[0] : state.lastMove.from[0];
+            const fromVc = flipBoard ? 7 - state.lastMove.from[1] : state.lastMove.from[1];
+            pWrap.classList.add('vc-piece-sliding');
+            pWrap.style.setProperty('--slide-from-x', `${(fromVc - vc) * 100}%`);
+            pWrap.style.setProperty('--slide-from-y', `${(fromVr - vr) * 100}%`);
+          }
+          pWrap.appendChild(createChessPieceSvg(piece, 34));
+          cell.appendChild(pWrap);
         }
 
         cell.addEventListener('click', () => {
@@ -2249,7 +2545,19 @@ export function createVcActivitiesController(
       }
     }
 
-    wrap.appendChild(grid);
+    flankLayout.appendChild(grid);
+
+    flankLayout.appendChild(
+      buildCapturedSideTray(
+        '⚫ BLACK',
+        state.blackUsername,
+        state.turn === 'b' && !state.winnerUsername,
+        blackCaptures,
+        blackScore - whiteScore,
+      ),
+    );
+
+    wrap.appendChild(flankLayout);
     return wrap;
   };
 
@@ -2272,8 +2580,71 @@ export function createVcActivitiesController(
 
     const statusBanner = document.createElement('div');
     statusBanner.className = 'vc-game-status-banner';
-    statusBanner.textContent = `${state.statusText} · Captured: Red ${state.redCaptured} / Black ${state.blackCaptured}`;
+    statusBanner.textContent = state.statusText;
     wrap.appendChild(statusBanner);
+
+    const flankLayout = document.createElement('div');
+    flankLayout.className = 'vc-board-flank-layout';
+
+    const buildCheckerSideTray = (
+      titleLabel: string,
+      playerUsername: string,
+      isTurnNow: boolean,
+      capturedCount: number,
+      capturedColorClass: 'r' | 'b',
+    ) => {
+      const tray = document.createElement('div');
+      tray.className = isTurnNow
+        ? 'vc-captured-side-tray vc-captured-side-tray--active'
+        : 'vc-captured-side-tray';
+
+      const head = document.createElement('div');
+      head.className = 'vc-captured-tray-head';
+      const sideTag = document.createElement('span');
+      sideTag.className = 'vc-captured-tray-side';
+      sideTag.textContent = titleLabel;
+      const pName = document.createElement('span');
+      pName.className = 'vc-captured-tray-player';
+      const playerEntry = lobby.players.find(
+        (p) => p.username.toLowerCase() === playerUsername.toLowerCase(),
+      );
+      pName.textContent = playerEntry?.displayName ?? playerUsername;
+      head.appendChild(sideTag);
+      head.appendChild(pName);
+      tray.appendChild(head);
+
+      const subLabel = document.createElement('div');
+      subLabel.className = 'vc-captured-tray-label';
+      subLabel.textContent = `Taken (${capturedCount}/12)`;
+      tray.appendChild(subLabel);
+
+      const piecesBox = document.createElement('div');
+      piecesBox.className = 'vc-captured-pieces-grid';
+      if (capturedCount === 0) {
+        const none = document.createElement('span');
+        none.className = 'vc-captured-empty';
+        none.textContent = 'None yet';
+        piecesBox.appendChild(none);
+      } else {
+        for (let i = 0; i < capturedCount; i++) {
+          const mini = document.createElement('span');
+          mini.className = `vc-captured-checker-mini vc-captured-checker-mini--${capturedColorClass}`;
+          piecesBox.appendChild(mini);
+        }
+      }
+      tray.appendChild(piecesBox);
+      return tray;
+    };
+
+    flankLayout.appendChild(
+      buildCheckerSideTray(
+        '🔴 RED',
+        state.redUsername,
+        state.turn === 'r' && !state.winnerUsername,
+        state.redCaptured,
+        'b',
+      ),
+    );
 
     const grid = document.createElement('div');
     grid.className = 'vc-chess-grid';
@@ -2282,6 +2653,17 @@ export function createVcActivitiesController(
       selectedBoardSquare && isMyTurn
         ? getCheckerLegalMovesForSquare(state, selectedBoardSquare[0], selectedBoardSquare[1])
         : [];
+
+    const moveKey = state.lastMove
+      ? `${state.moveCount ?? 0}:${state.lastMove.from[0]},${state.lastMove.from[1]}->${state.lastMove.to[0]},${state.lastMove.to[1]}`
+      : '';
+    const shouldAnimateLastMove =
+      Boolean(moveKey) && lastAnimatedMoveKeyByLobby.get(lobby.id) !== moveKey;
+    if (shouldAnimateLastMove) {
+      lastAnimatedMoveKeyByLobby.set(lobby.id, moveKey);
+    }
+
+    const files = 'abcdefgh';
 
     for (let vr = 0; vr < 8; vr++) {
       for (let vc = 0; vc < 8; vc++) {
@@ -2294,18 +2676,43 @@ export function createVcActivitiesController(
         const isLegalDest = legalForSelected.some(
           (m) => m.to[0] === r && m.to[1] === c,
         );
+        const isLastFrom =
+          state.lastMove?.from[0] === r && state.lastMove?.from[1] === c;
+        const isLastTo =
+          state.lastMove?.to[0] === r && state.lastMove?.to[1] === c;
 
         const cell = document.createElement('button');
         cell.type = 'button';
         cell.className = `vc-chess-cell ${isLight ? 'vc-chess-cell--light' : 'vc-chess-cell--dark'}`;
         if (isSelected) cell.classList.add('vc-chess-cell--selected');
         if (isLegalDest) cell.classList.add('vc-chess-cell--legal');
+        if (isLastFrom || isLastTo) cell.classList.add('vc-chess-cell--last');
+
+        if (vc === 0) {
+          const rankTag = document.createElement('span');
+          rankTag.className = 'vc-board-coord vc-board-coord--rank';
+          rankTag.textContent = String(8 - r);
+          cell.appendChild(rankTag);
+        }
+        if (vr === 7) {
+          const fileTag = document.createElement('span');
+          fileTag.className = 'vc-board-coord vc-board-coord--file';
+          fileTag.textContent = files[c] ?? '';
+          cell.appendChild(fileTag);
+        }
 
         if (piece) {
           const disc = document.createElement('span');
           const pColor = piece.toLowerCase();
           const isKing = piece === 'R' || piece === 'B';
           disc.className = `vc-checker-disc vc-checker-disc--${pColor}${isKing ? ' vc-checker-disc--king' : ''}`;
+          if (shouldAnimateLastMove && isLastTo && state.lastMove) {
+            const fromVr = flipBoard ? 7 - state.lastMove.from[0] : state.lastMove.from[0];
+            const fromVc = flipBoard ? 7 - state.lastMove.from[1] : state.lastMove.from[1];
+            disc.className += ' vc-piece-sliding';
+            disc.style.setProperty('--slide-from-x', `${(fromVc - vc) * 100}%`);
+            disc.style.setProperty('--slide-from-y', `${(fromVr - vr) * 100}%`);
+          }
           if (isKing) disc.textContent = '♛';
           cell.appendChild(disc);
         }
@@ -2340,7 +2747,18 @@ export function createVcActivitiesController(
       }
     }
 
-    wrap.appendChild(grid);
+    flankLayout.appendChild(grid);
+    flankLayout.appendChild(
+      buildCheckerSideTray(
+        '⚫ BLACK',
+        state.blackUsername,
+        state.turn === 'b' && !state.winnerUsername,
+        state.blackCaptured,
+        'r',
+      ),
+    );
+
+    wrap.appendChild(flankLayout);
     return wrap;
   };
 
@@ -2350,57 +2768,80 @@ export function createVcActivitiesController(
     const wrap = document.createElement('div');
     wrap.className = 'vc-game-board-wrap';
 
-    const myBoard: MinesweeperPlayerBoard = state.playerBoards?.[selfKey] ?? {
-      revealed: [],
-      flagged: [],
-      status: 'playing',
-    };
     const isSeated = lobby.players.some((p) => p.username.toLowerCase() === selfKey);
     const totalSafe = state.rows * state.cols - state.mineCount;
+    const mineSet = new Set(state.mines ?? []);
 
-    // Live Progress Strip for all players
-    const raceBar = document.createElement('div');
-    raceBar.className = 'vc-mine-race-bar';
+    // Determine which board(s) to display:
+    // - If spectator (!isSeated), default to 'split' so spectators watch ALL players' live boards side-by-side!
+    // - Any user (player or spectator) can also click a player tab or 'Split-Screen All' to watch live progress!
+    const effectiveView =
+      minesweeperViewTarget === 'auto'
+        ? isSeated
+          ? selfKey
+          : 'split'
+        : minesweeperViewTarget;
+
+    const switcherBar = document.createElement('div');
+    switcherBar.className = 'vc-mine-race-bar';
+
+    const splitTab = document.createElement('button');
+    splitTab.type = 'button';
+    splitTab.className =
+      effectiveView === 'split'
+        ? 'vc-mine-player-chip vc-mine-player-chip--active'
+        : 'vc-mine-player-chip';
+    splitTab.textContent = '👁️ Split-Screen (Watch All Live)';
+    splitTab.addEventListener('click', () => {
+      minesweeperViewTarget = 'split';
+      options.onStateChanged();
+    });
+    switcherBar.appendChild(splitTab);
+
     for (const p of lobby.players) {
       const pKey = p.username.toLowerCase();
       const pb = state.playerBoards?.[pKey] ?? { revealed: [], flagged: [], status: 'playing' };
       const pct = Math.min(100, Math.round(((pb.revealed?.length ?? 0) / totalSafe) * 100));
-      const chip = document.createElement('div');
-      chip.className = `vc-mine-player-chip vc-mine-player-chip--${pb.status}`;
-      chip.textContent = `${p.displayName}: 🚩 ${pb.flagged?.length ?? 0}/${state.mineCount} · ${pct}%${pb.status === 'exploded' ? ' 💥' : pb.status === 'won' ? ' 🏆' : ''}`;
-      raceBar.appendChild(chip);
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = `vc-mine-player-chip vc-mine-player-chip--${pb.status}${effectiveView === pKey ? ' vc-mine-player-chip--active' : ''}`;
+      chip.textContent = `${pKey === selfKey ? '★ You' : p.displayName}: 🚩 ${pb.flagged?.length ?? 0}/${state.mineCount} · ${pct}%${pb.status === 'exploded' ? ' 💥' : pb.status === 'won' ? ' 🏆' : ''}`;
+      chip.addEventListener('click', () => {
+        minesweeperViewTarget = pKey;
+        options.onStateChanged();
+      });
+      switcherBar.appendChild(chip);
     }
-    wrap.appendChild(raceBar);
+    wrap.appendChild(switcherBar);
 
-    // Mode toggle (Reveal vs Flag) for mobile & desktop convenience
-    const toolRow = document.createElement('div');
-    toolRow.className = 'vc-mine-tool-row';
-    const modeBtn = document.createElement('button');
-    modeBtn.type = 'button';
-    modeBtn.className = minesweeperFlagMode
-      ? 'vc-activity-mode-pill vc-activity-mode-pill--active'
-      : 'vc-activity-mode-pill';
-    modeBtn.textContent = minesweeperFlagMode
-      ? '🚩 Flag Mode (Tap to Flag)'
-      : '⛏️ Dig Mode (Right-click or Toggle to Flag)';
-    modeBtn.addEventListener('click', () => {
-      minesweeperFlagMode = !minesweeperFlagMode;
-      options.onStateChanged();
-    });
-    toolRow.appendChild(modeBtn);
-    wrap.appendChild(toolRow);
+    if (isSeated) {
+      const toolRow = document.createElement('div');
+      toolRow.className = 'vc-mine-tool-row';
+      const modeBtn = document.createElement('button');
+      modeBtn.type = 'button';
+      modeBtn.className = minesweeperFlagMode
+        ? 'vc-activity-mode-pill vc-activity-mode-pill--active'
+        : 'vc-activity-mode-pill';
+      modeBtn.textContent = minesweeperFlagMode
+        ? '🚩 Flag Mode Active (Click/Tap to Flag)'
+        : '⛏️ Dig Mode Active (Right-click or Toggle to Flag)';
+      modeBtn.addEventListener('click', () => {
+        minesweeperFlagMode = !minesweeperFlagMode;
+        options.onStateChanged();
+      });
+      toolRow.appendChild(modeBtn);
+      wrap.appendChild(toolRow);
+    }
 
-    const grid = document.createElement('div');
-    grid.className = 'vc-mine-grid';
-    grid.style.gridTemplateColumns = `repeat(${state.cols}, 1fr)`;
+    const handleOwnCellAction = (idx: number, isFlagAction: boolean) => {
+      if (!isSeated) return;
+      const myBoard: MinesweeperPlayerBoard = state.playerBoards?.[selfKey] ?? {
+        revealed: [],
+        flagged: [],
+        status: 'playing',
+      };
+      if (Boolean(state.winnerUsername) || myBoard.status !== 'playing') return;
 
-    const mineSet = new Set(state.mines ?? []);
-    const revSet = new Set(myBoard.revealed ?? []);
-    const flagSet = new Set(myBoard.flagged ?? []);
-    const matchOver = Boolean(state.winnerUsername) || myBoard.status !== 'playing';
-
-    const handleCellAction = (idx: number, isFlagAction: boolean) => {
-      if (!isSeated || matchOver) return;
       let minesList = state.mines;
       if (!minesList) {
         minesList = generateMinesFromSeed(
@@ -2412,8 +2853,8 @@ export function createVcActivitiesController(
         );
       }
       const curMineSet = new Set(minesList);
-      const nextRev = new Set(revSet);
-      const nextFlag = new Set(flagSet);
+      const nextRev = new Set(myBoard.revealed ?? []);
+      const nextFlag = new Set(myBoard.flagged ?? []);
       let nextStatus: 'playing' | 'won' | 'exploded' = 'playing';
       let explodedIndex: number | undefined;
 
@@ -2421,8 +2862,39 @@ export function createVcActivitiesController(
         if (nextRev.has(idx)) return;
         if (nextFlag.has(idx)) nextFlag.delete(idx);
         else nextFlag.add(idx);
+      } else if (nextRev.has(idx)) {
+        // Number chording: if clicking a revealed number whose adjacent flag count matches, reveal unflagged neighbors!
+        const adjMines = countAdjacentMines(idx, state.rows, state.cols, curMineSet);
+        if (adjMines <= 0) return;
+        const r = Math.floor(idx / state.cols);
+        const c = idx % state.cols;
+        const neighbors: number[] = [];
+        let flaggedNeighbors = 0;
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const nr = r + dr;
+            const nc = c + dc;
+            if (nr >= 0 && nr < state.rows && nc >= 0 && nc < state.cols) {
+              const nIdx = nr * state.cols + nc;
+              neighbors.push(nIdx);
+              if (nextFlag.has(nIdx)) flaggedNeighbors += 1;
+            }
+          }
+        }
+        if (flaggedNeighbors !== adjMines) return;
+        for (const nIdx of neighbors) {
+          if (nextFlag.has(nIdx) || nextRev.has(nIdx)) continue;
+          if (curMineSet.has(nIdx)) {
+            nextStatus = 'exploded';
+            explodedIndex = nIdx;
+            for (const m of curMineSet) nextRev.add(m);
+            break;
+          }
+          floodRevealMinesweeper(nIdx, state.rows, state.cols, curMineSet, nextRev, nextFlag);
+        }
       } else {
-        if (nextFlag.has(idx) || nextRev.has(idx)) return;
+        if (nextFlag.has(idx)) return;
         if (curMineSet.has(idx)) {
           nextStatus = 'exploded';
           explodedIndex = idx;
@@ -2439,7 +2911,6 @@ export function createVcActivitiesController(
         }
       }
 
-      // Check win condition: all mines flagged accurately (with no extra flags) OR all safe cells revealed
       const allMinesFlagged =
         nextFlag.size === state.mineCount &&
         Array.from(nextFlag).every((f) => curMineSet.has(f));
@@ -2461,9 +2932,8 @@ export function createVcActivitiesController(
 
       if (nextStatus === 'won') {
         winnerUsername = selfProf?.username ?? selfKey;
-        winReason = `${selfProf?.displayName ?? selfKey} flagged all mines first and won!`;
+        winReason = `${selfProf?.displayName ?? selfKey} flagged/cleared all mines first and won!`;
       } else if (nextStatus === 'exploded') {
-        // First to lose loses! Award win to surviving opponent
         const opponent = lobby.players.find((p) => p.username.toLowerCase() !== selfKey);
         winnerUsername = opponent?.username ?? selfKey;
         winReason = `${selfProf?.displayName ?? selfKey} hit a mine! ${opponent?.displayName ?? 'Opponent'} wins!`;
@@ -2483,42 +2953,100 @@ export function createVcActivitiesController(
       });
     };
 
-    for (let idx = 0; idx < state.rows * state.cols; idx++) {
-      const isRev = revSet.has(idx);
-      const isFlag = flagSet.has(idx);
-      const isMine = mineSet.has(idx);
-      const cell = document.createElement('button');
-      cell.type = 'button';
-      cell.className = 'vc-mine-cell';
+    const buildPlayerGridCard = (player: ActivityPlayerEntry, compact: boolean) => {
+      const pKey = player.username.toLowerCase();
+      const isOwnBoard = pKey === selfKey && isSeated;
+      const pb: MinesweeperPlayerBoard = state.playerBoards?.[pKey] ?? {
+        revealed: [],
+        flagged: [],
+        status: 'playing',
+      };
+      const revSet = new Set(pb.revealed ?? []);
+      const flagSet = new Set(pb.flagged ?? []);
 
-      if (isRev) {
-        cell.classList.add('vc-mine-cell--revealed');
-        if (isMine) {
-          cell.classList.add('vc-mine-cell--mine');
-          cell.textContent = '💣';
-        } else {
-          const adj = countAdjacentMines(idx, state.rows, state.cols, mineSet);
-          if (adj > 0) {
-            cell.textContent = String(adj);
-            cell.dataset.adj = String(adj);
+      const card = document.createElement('div');
+      card.className = compact
+        ? 'vc-mine-board-card vc-mine-board-card--compact'
+        : 'vc-mine-board-card';
+
+      const cardHeader = document.createElement('div');
+      cardHeader.className = 'vc-mine-board-header';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'vc-mine-board-owner';
+      nameEl.textContent = isOwnBoard
+        ? `${player.displayName} (Your Board)`
+        : `${player.displayName}'s Live Board`;
+      const countEl = document.createElement('span');
+      countEl.className = 'vc-mine-board-counter';
+      const minesLeft = Math.max(0, state.mineCount - flagSet.size);
+      countEl.textContent = `💣 ${minesLeft} Left · ${revSet.size}/${totalSafe} Cleared`;
+      cardHeader.appendChild(nameEl);
+      cardHeader.appendChild(countEl);
+      card.appendChild(cardHeader);
+
+      const grid = document.createElement('div');
+      grid.className = compact ? 'vc-mine-grid vc-mine-grid--compact' : 'vc-mine-grid';
+      grid.style.gridTemplateColumns = `repeat(${state.cols}, 1fr)`;
+
+      for (let idx = 0; idx < state.rows * state.cols; idx++) {
+        const isRev = revSet.has(idx);
+        const isFlag = flagSet.has(idx);
+        const isMine = mineSet.has(idx);
+        const cell = document.createElement('button');
+        cell.type = 'button';
+        cell.className = 'vc-mine-cell';
+
+        if (isRev) {
+          cell.classList.add('vc-mine-cell--revealed');
+          if (isMine) {
+            cell.classList.add('vc-mine-cell--mine');
+            cell.textContent = '💣';
+          } else {
+            const adj = countAdjacentMines(idx, state.rows, state.cols, mineSet);
+            if (adj > 0) {
+              cell.textContent = String(adj);
+              cell.dataset.adj = String(adj);
+            }
           }
+        } else if (isFlag) {
+          cell.classList.add('vc-mine-cell--flagged');
+          cell.textContent = '🚩';
         }
-      } else if (isFlag) {
-        cell.classList.add('vc-mine-cell--flagged');
-        cell.textContent = '🚩';
+
+        if (isOwnBoard) {
+          cell.addEventListener('click', () => {
+            handleOwnCellAction(idx, minesweeperFlagMode);
+          });
+          cell.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            handleOwnCellAction(idx, true);
+          });
+        } else {
+          cell.disabled = true;
+        }
+        grid.appendChild(cell);
       }
 
-      cell.addEventListener('click', () => {
-        handleCellAction(idx, minesweeperFlagMode);
-      });
-      cell.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        handleCellAction(idx, true);
-      });
-      grid.appendChild(cell);
+      card.appendChild(grid);
+      return card;
+    };
+
+    if (effectiveView === 'split') {
+      const splitContainer = document.createElement('div');
+      splitContainer.className = 'vc-mine-split-container';
+      for (const p of lobby.players) {
+        splitContainer.appendChild(buildPlayerGridCard(p, lobby.players.length > 1));
+      }
+      wrap.appendChild(splitContainer);
+    } else {
+      const targetPlayer =
+        lobby.players.find((p) => p.username.toLowerCase() === effectiveView) ??
+        lobby.players[0];
+      if (targetPlayer) {
+        wrap.appendChild(buildPlayerGridCard(targetPlayer, false));
+      }
     }
 
-    wrap.appendChild(grid);
     return wrap;
   };
 
@@ -2532,20 +3060,38 @@ export function createVcActivitiesController(
     const isMyTurn =
       !state.winnerUsername && activeUsername.toLowerCase() === selfKey;
 
-    // Hearts / Lives Header
+    // Duel Arena Header with Avatars, 3 Hearts, and Round Badge
     const livesRow = document.createElement('div');
     livesRow.className = 'vc-vexillo-lives-row';
     for (const p of lobby.players) {
       const pKey = p.username.toLowerCase();
       const heartsCount = Math.max(0, state.lives?.[pKey] ?? 3);
       const scoreCount = state.scores?.[pKey] ?? 0;
+      const isCurrentTurn = pKey === activeUsername.toLowerCase() && !state.winnerUsername;
+
       const card = document.createElement('div');
-      card.className =
-        pKey === activeUsername.toLowerCase() && !state.winnerUsername
-          ? 'vc-vexillo-player vc-vexillo-player--turn'
-          : 'vc-vexillo-player';
-      const heartsStr = '❤️'.repeat(heartsCount) + '🖤'.repeat(Math.max(0, 3 - heartsCount));
-      card.textContent = `${p.displayName}: ${heartsStr} (${scoreCount} pts)`;
+      card.className = isCurrentTurn
+        ? 'vc-vexillo-player vc-vexillo-player--turn'
+        : 'vc-vexillo-player';
+
+      const av = document.createElement('img');
+      av.className = 'vc-vexillo-avatar';
+      av.src = options.resolveAvatar(p);
+      av.alt = p.displayName;
+      card.appendChild(av);
+
+      const metaCol = document.createElement('div');
+      metaCol.className = 'vc-vexillo-player-meta';
+      const nameEl = document.createElement('div');
+      nameEl.className = 'vc-vexillo-player-name';
+      nameEl.textContent = `${p.displayName} · ${scoreCount} pts`;
+      const heartsEl = document.createElement('div');
+      heartsEl.className = 'vc-vexillo-player-hearts';
+      heartsEl.textContent = '❤️'.repeat(heartsCount) + '🖤'.repeat(Math.max(0, 3 - heartsCount));
+      metaCol.appendChild(nameEl);
+      metaCol.appendChild(heartsEl);
+      card.appendChild(metaCol);
+
       livesRow.appendChild(card);
     }
     wrap.appendChild(livesRow);
@@ -2556,12 +3102,11 @@ export function createVcActivitiesController(
         ? 'vc-vexillo-feedback vc-vexillo-feedback--ok'
         : 'vc-vexillo-feedback vc-vexillo-feedback--wrong';
       fb.textContent = state.lastFeedback.isCorrect
-        ? `✓ ${state.lastFeedback.username} guessed ${state.lastFeedback.correctName}!`
-        : `✗ ${state.lastFeedback.username} guessed ${state.lastFeedback.chosen} (Correct: ${state.lastFeedback.correctName}) — Lost 1 ❤️`;
+        ? `✓ ${state.lastFeedback.username} correctly identified ${state.lastFeedback.correctName}!`
+        : `✗ ${state.lastFeedback.username} picked ${state.lastFeedback.chosen} (Answer: ${state.lastFeedback.correctName}) — Lost 1 ❤️`;
       wrap.appendChild(fb);
     }
 
-    // Flag display card (FlagCDN crisp SVG with tricolor SVG fallback)
     const flagStage = document.createElement('div');
     flagStage.className = 'vc-vexillo-flag-box';
     const flagEntry =
@@ -2573,7 +3118,6 @@ export function createVcActivitiesController(
     flagImg.src = `https://flagcdn.com/w320/${state.currentFlagCode.toLowerCase()}.png`;
     flagImg.alt = 'Mystery Country Flag';
     flagImg.onerror = () => {
-      // Fallback to inline SVG tricolor if offline
       const [c1, c2, c3] = flagEntry.colors;
       const svgXml = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 180"><rect width="300" height="60" fill="${c1}"/><rect y="60" width="300" height="60" fill="${c2}"/><rect y="120" width="300" height="60" fill="${c3}"/></svg>`;
       flagImg.src = `data:image/svg+xml;utf8,${encodeURIComponent(svgXml)}`;
@@ -2586,19 +3130,26 @@ export function createVcActivitiesController(
     turnPrompt.textContent = state.winnerUsername
       ? state.winReason || `${state.winnerUsername} wins!`
       : isMyTurn
-        ? 'Your Turn! Click the correct country name for this flag:'
-        : `Waiting for ${activeUsername} to guess this flag...`;
+        ? `Round ${state.roundNumber || 1} — Your Turn! Click the matching country:`
+        : `Round ${state.roundNumber || 1} — Waiting for ${activeUsername} to guess...`;
     wrap.appendChild(turnPrompt);
 
-    // 4 Choice Buttons
     const choicesGrid = document.createElement('div');
     choicesGrid.className = 'vc-vexillo-choices';
-    for (const choice of state.choices) {
+    state.choices.forEach((choice, idx) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'vc-vexillo-choice-btn';
       btn.disabled = !isMyTurn || Boolean(state.winnerUsername);
-      btn.textContent = choice;
+
+      const numBadge = document.createElement('span');
+      numBadge.className = 'vc-vexillo-choice-num';
+      numBadge.textContent = String(idx + 1);
+      const labelSpan = document.createElement('span');
+      labelSpan.textContent = choice;
+      btn.appendChild(numBadge);
+      btn.appendChild(labelSpan);
+
       btn.addEventListener('click', () => {
         if (!isMyTurn || state.winnerUsername) return;
         const isCorrect = choice === state.currentFlagName;
@@ -2616,10 +3167,11 @@ export function createVcActivitiesController(
         let winReason: string | undefined;
         if (nextLives[selfKey] <= 0) {
           winnerUsername = opponentName;
-          winReason = `${activeUsername} ran out of lives — ${opponentName} wins VexilloGuessr!`;
+          winReason = `${activeUsername} lost all 3 lives — ${opponentName} wins VexilloGuessr!`;
         }
 
-        const deal = dealNextVexilloRound(state.usedCodes);
+        // Deal next round guaranteeing currentFlagCode is NEVER chosen again
+        const deal = dealNextVexilloRound(state.usedCodes, state.currentFlagCode);
         const nextState: VexilloGuessrGameState = {
           ...state,
           turnIndex: nextTurnIdx,
@@ -2627,6 +3179,7 @@ export function createVcActivitiesController(
           scores: nextScores,
           currentFlagCode: deal.flag.code.toLowerCase(),
           currentFlagName: deal.flag.name,
+          lastFlagCode: state.currentFlagCode.toLowerCase(),
           choices: deal.choices,
           usedCodes: deal.nextUsed,
           lastFeedback: {
@@ -2649,7 +3202,7 @@ export function createVcActivitiesController(
         });
       });
       choicesGrid.appendChild(btn);
-    }
+    });
     wrap.appendChild(choicesGrid);
     return wrap;
   };
@@ -2662,17 +3215,43 @@ export function createVcActivitiesController(
     const activeShooter = state.playerUsernames[state.turnIndex] ?? state.playerUsernames[0];
     const isMyTurn = !state.winnerUsername && activeShooter.toLowerCase() === selfKey;
 
-    // Group assignment banner
-    const groupInfo = lobby.players
-      .map((p) => {
-        const g = state.groups?.[p.username.toLowerCase()];
-        return `${p.displayName}: ${g ? g.toUpperCase() : 'OPEN'}`;
-      })
-      .join(' · ');
+    // Top Pocketed Balls & Solids/Stripes Assignment HUD
+    const hudBar = document.createElement('div');
+    hudBar.className = 'vc-pool-hud';
+    for (const p of lobby.players) {
+      const pKey = p.username.toLowerCase();
+      const group = state.groups?.[pKey];
+      const isTurn = pKey === activeShooter.toLowerCase() && !state.winnerUsername;
+      const card = document.createElement('div');
+      card.className = isTurn ? 'vc-pool-player-card vc-pool-player-card--turn' : 'vc-pool-player-card';
+      const title = document.createElement('div');
+      title.className = 'vc-pool-player-title';
+      title.textContent = `${p.displayName} · ${group ? group.toUpperCase() : 'OPEN TABLE'}`;
+      card.appendChild(title);
+
+      const tray = document.createElement('div');
+      tray.className = 'vc-pool-pocketed-tray';
+      const ids = group === 'solids' ? [1, 2, 3, 4, 5, 6, 7] : group === 'stripes' ? [9, 10, 11, 12, 13, 14, 15] : [];
+      for (const bid of ids) {
+        const bObj = state.balls.find((b) => b.id === bid);
+        const dot = document.createElement('span');
+        dot.className = bObj?.pocketed
+          ? 'vc-pool-mini-ball vc-pool-mini-ball--sunk'
+          : 'vc-pool-mini-ball';
+        dot.style.background = POOL_BALL_COLORS[bid] ?? '#ffffff';
+        dot.textContent = String(bid);
+        tray.appendChild(dot);
+      }
+      card.appendChild(tray);
+      hudBar.appendChild(card);
+    }
+    wrap.appendChild(hudBar);
 
     const statusBanner = document.createElement('div');
     statusBanner.className = 'vc-game-status-banner';
-    statusBanner.textContent = `${state.statusText} (${groupInfo})`;
+    statusBanner.textContent = isMyTurn
+      ? `${state.statusText} — Click & pull back from the cue ball to aim and release to strike!`
+      : state.statusText;
     wrap.appendChild(statusBanner);
 
     const canvas = document.createElement('canvas');
@@ -2681,35 +3260,294 @@ export function createVcActivitiesController(
     canvas.height = POOL_H;
     wrap.appendChild(canvas);
 
-    // Power & Shoot controls bar for desktop & mobile touch
-    const controlsRow = document.createElement('div');
-    controlsRow.className = 'vc-pool-controls';
+    const ctx = canvas.getContext('2d');
+    let displayBalls: PoolBall[] = state.balls.map((b) => ({ ...b }));
+    let isPullingCue = false;
+    let pullPower = 0; // 0 .. POOL_MAX_SPEED
 
-    const powerLabel = document.createElement('span');
-    powerLabel.className = 'vc-pool-power-label';
-    powerLabel.textContent = `Power: ${Math.round((poolPower / 17.5) * 100)}%`;
+    const drawTable = (ballsToDraw: PoolBall[], showCueStick: boolean) => {
+      if (!ctx) return;
+      ctx.clearRect(0, 0, POOL_W, POOL_H);
 
-    const powerSlider = document.createElement('input');
-    powerSlider.type = 'range';
-    powerSlider.className = 'vc-pool-power-slider';
-    powerSlider.min = '2';
-    powerSlider.max = '17.5';
-    powerSlider.step = '0.5';
-    powerSlider.value = String(poolPower);
-    powerSlider.disabled = !isMyTurn;
-    powerSlider.addEventListener('input', () => {
-      poolPower = Number(powerSlider.value) || 9.5;
-      powerLabel.textContent = `Power: ${Math.round((poolPower / 17.5) * 100)}%`;
+      // Mahogany bevelled outer rails
+      const railGrad = ctx.createLinearGradient(0, 0, 0, POOL_H);
+      railGrad.addColorStop(0, '#4a2511');
+      railGrad.addColorStop(0.5, '#2f1608');
+      railGrad.addColorStop(1, '#4a2511');
+      ctx.fillStyle = railGrad;
+      ctx.fillRect(0, 0, POOL_W, POOL_H);
+
+      // Cushion border trim
+      ctx.fillStyle = '#094d33';
+      ctx.fillRect(POOL_RAIL - 5, POOL_RAIL - 5, POOL_W - (POOL_RAIL - 5) * 2, POOL_H - (POOL_RAIL - 5) * 2);
+
+      // Tournament felt surface with subtle radial vignette
+      const feltGrad = ctx.createRadialGradient(
+        POOL_W / 2,
+        POOL_H / 2,
+        30,
+        POOL_W / 2,
+        POOL_H / 2,
+        POOL_W * 0.65,
+      );
+      feltGrad.addColorStop(0, '#138457');
+      feltGrad.addColorStop(1, '#0b5c3b');
+      ctx.fillStyle = feltGrad;
+      ctx.fillRect(POOL_RAIL, POOL_RAIL, POOL_W - POOL_RAIL * 2, POOL_H - POOL_RAIL * 2);
+
+      // Diamond rail sights
+      ctx.fillStyle = '#e5c185';
+      for (let i = 1; i <= 7; i++) {
+        if (i === 4) continue;
+        const sx = POOL_RAIL + ((POOL_W - POOL_RAIL * 2) * i) / 8;
+        ctx.beginPath();
+        ctx.arc(sx, POOL_RAIL / 2 - 1, 2.3, 0, Math.PI * 2);
+        ctx.arc(sx, POOL_H - POOL_RAIL / 2 + 1, 2.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Head string line & spot
+      ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(195, POOL_RAIL);
+      ctx.lineTo(195, POOL_H - POOL_RAIL);
+      ctx.stroke();
+
+      // 6 Pockets with brass rim
+      for (const [px, py] of POOL_POCKETS) {
+        ctx.beginPath();
+        ctx.arc(px, py, POOL_POCKET_R + 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#241409';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(px, py, POOL_POCKET_R, 0, Math.PI * 2);
+        ctx.fillStyle = '#07080b';
+        ctx.fill();
+      }
+
+      // Aim raycast, ghost ball, deflection guide & pull-back cue stick
+      const cue = ballsToDraw.find((b) => b.id === 0 && !b.pocketed);
+      if (cue && showCueStick && isMyTurn) {
+        const ray = computePoolAimRaycast(ballsToDraw, poolAimAngle);
+
+        // Primary trajectory line
+        ctx.save();
+        ctx.setLineDash([6, 5]);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.78)';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.moveTo(cue.x, cue.y);
+        ctx.lineTo(ray.hitX, ray.hitY);
+        ctx.stroke();
+        ctx.restore();
+
+        // Ghost cue ball at collision point
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(ray.hitX, ray.hitY, POOL_BALL_R, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Object ball target travel vector
+        if (ray.hitBall && ray.targetDirX !== undefined && ray.targetDirY !== undefined) {
+          ctx.strokeStyle = '#34d399';
+          ctx.lineWidth = 2.2;
+          ctx.beginPath();
+          ctx.moveTo(ray.hitBall.x, ray.hitBall.y);
+          ctx.lineTo(
+            ray.hitBall.x + ray.targetDirX * 72,
+            ray.hitBall.y + ray.targetDirY * 72,
+          );
+          ctx.stroke();
+        }
+        ctx.restore();
+
+        // Pull-back force ring & percentage label when pulling back
+        const activePull = isPullingCue ? pullPower : 0;
+        const pct = Math.round((activePull / POOL_MAX_SPEED) * 100);
+        if (isPullingCue && activePull > 0.4) {
+          const powerColor =
+            pct < 45 ? '#34d399' : pct < 78 ? '#facc15' : '#ef4444';
+          ctx.save();
+          ctx.strokeStyle = powerColor;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(
+            cue.x,
+            cue.y,
+            POOL_BALL_R + 7 + (activePull / POOL_MAX_SPEED) * 14,
+            0,
+            Math.PI * 2,
+          );
+          ctx.stroke();
+
+          // Pull-back tether line
+          const pullDist = 20 + activePull * 4.2;
+          ctx.strokeStyle = powerColor;
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.moveTo(cue.x, cue.y);
+          ctx.lineTo(
+            cue.x - Math.cos(poolAimAngle) * pullDist,
+            cue.y - Math.sin(poolAimAngle) * pullDist,
+          );
+          ctx.stroke();
+
+          // Floating power pill
+          ctx.fillStyle = 'rgba(13, 15, 21, 0.88)';
+          ctx.fillRect(cue.x - 38, cue.y - 36, 76, 20);
+          ctx.fillStyle = powerColor;
+          ctx.font = 'bold 11px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(
+            activePull < 1.2 ? 'CANCEL' : `FORCE ${pct}%`,
+            cue.x,
+            cue.y - 26,
+          );
+          ctx.restore();
+        }
+
+        // Cue stick drawn back by pullPower
+        const pullOffset = 16 + activePull * 4.2;
+        const tipX = cue.x - Math.cos(poolAimAngle) * pullOffset;
+        const tipY = cue.y - Math.sin(poolAimAngle) * pullOffset;
+        const buttX = cue.x - Math.cos(poolAimAngle) * (pullOffset + 150);
+        const buttY = cue.y - Math.sin(poolAimAngle) * (pullOffset + 150);
+
+        ctx.save();
+        ctx.strokeStyle = '#f5d0a9';
+        ctx.lineWidth = 5.5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(tipX, tipY);
+        ctx.lineTo(buttX, buttY);
+        ctx.stroke();
+
+        // Blue chalk cue tip
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 5.5;
+        ctx.beginPath();
+        ctx.moveTo(tipX, tipY);
+        ctx.lineTo(
+          tipX - Math.cos(poolAimAngle) * 5,
+          tipY - Math.sin(poolAimAngle) * 5,
+        );
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Render 3D-shaded billiard balls
+      for (const b of ballsToDraw) {
+        if (b.pocketed) continue;
+
+        // Soft drop shadow on felt
+        ctx.beginPath();
+        ctx.arc(b.x + 2, b.y + 2.5, POOL_BALL_R, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.36)';
+        ctx.fill();
+
+        // Base sphere
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, POOL_BALL_R, 0, Math.PI * 2);
+        ctx.fillStyle = b.id >= 9 ? '#f8fafc' : POOL_BALL_COLORS[b.id] ?? '#f8fafc';
+        ctx.fill();
+
+        if (b.id >= 9) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, POOL_BALL_R, 0, Math.PI * 2);
+          ctx.clip();
+          ctx.fillStyle = POOL_BALL_COLORS[b.id] ?? '#ef4444';
+          ctx.fillRect(b.x - POOL_BALL_R, b.y - 5.5, POOL_BALL_R * 2, 11);
+          ctx.restore();
+        }
+
+        if (b.id > 0) {
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, 4.9, 0, Math.PI * 2);
+          ctx.fillStyle = '#ffffff';
+          ctx.fill();
+          ctx.fillStyle = '#0f172a';
+          ctx.font = 'bold 6.6px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(String(b.id), b.x, b.y + 0.4);
+        }
+
+        // Glossy 3D specular highlight
+        const shine = ctx.createRadialGradient(
+          b.x - 3.5,
+          b.y - 3.5,
+          1,
+          b.x - 2,
+          b.y - 2,
+          POOL_BALL_R,
+        );
+        shine.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
+        shine.addColorStop(0.35, 'rgba(255, 255, 255, 0.08)');
+        shine.addColorStop(1, 'rgba(0, 0, 0, 0.25)');
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, POOL_BALL_R, 0, Math.PI * 2);
+        ctx.fillStyle = shine;
+        ctx.fill();
+      }
+    };
+
+    const getCanvasCoords = (e: PointerEvent): [number, number] => {
+      const rect = canvas.getBoundingClientRect();
+      return [
+        ((e.clientX - rect.left) * POOL_W) / rect.width,
+        ((e.clientY - rect.top) * POOL_H) / rect.height,
+      ];
+    };
+
+    canvas.addEventListener('pointerdown', (e) => {
+      if (!isMyTurn) return;
+      const cue = displayBalls.find((b) => b.id === 0 && !b.pocketed);
+      if (!cue) return;
+      canvas.setPointerCapture?.(e.pointerId);
+      const [px, py] = getCanvasCoords(e);
+      isPullingCue = true;
+      const dist = Math.hypot(px - cue.x, py - cue.y);
+      if (dist > 6) {
+        // Pulling back from the cue ball aims in the opposite direction (slingshot / cue pullback!)
+        poolAimAngle = Math.atan2(cue.y - py, cue.x - px);
+      }
+      pullPower = Math.min(POOL_MAX_SPEED, Math.max(0, (dist - 8) / 5.2));
+      drawTable(displayBalls, true);
     });
 
-    const shootBtn = document.createElement('button');
-    shootBtn.type = 'button';
-    shootBtn.className = 'btn-primary vc-pool-shoot-btn';
-    shootBtn.disabled = !isMyTurn;
-    shootBtn.textContent = 'Shoot 🎱';
-    shootBtn.addEventListener('click', () => {
+    canvas.addEventListener('pointermove', (e) => {
       if (!isMyTurn) return;
-      const nextState = executePoolShot(state, poolAimAngle, poolPower);
+      const cue = displayBalls.find((b) => b.id === 0 && !b.pocketed);
+      if (!cue) return;
+      const [px, py] = getCanvasCoords(e);
+      if (isPullingCue) {
+        const dist = Math.hypot(px - cue.x, py - cue.y);
+        if (dist > 6) {
+          poolAimAngle = Math.atan2(cue.y - py, cue.x - px);
+        }
+        pullPower = Math.min(POOL_MAX_SPEED, Math.max(0, (dist - 8) / 5.2));
+        drawTable(displayBalls, true);
+      } else if (e.pointerType === 'mouse') {
+        poolAimAngle = Math.atan2(py - cue.y, px - cue.x);
+        drawTable(displayBalls, true);
+      }
+    });
+
+    const finishCuePull = () => {
+      if (!isPullingCue) return;
+      const firedPower = pullPower;
+      isPullingCue = false;
+      pullPower = 0;
+      if (!isMyTurn || firedPower < 1.2) {
+        drawTable(displayBalls, true);
+        return;
+      }
+      const nextState = executePoolShot(state, poolAimAngle, firedPower);
       options.sendActivityFrame({
         type: 'activity:action',
         lobbyId: lobby.id,
@@ -2717,134 +3555,15 @@ export function createVcActivitiesController(
         status: nextState.winnerUsername ? 'finished' : 'playing',
         winnerUsername: nextState.winnerUsername || undefined,
       });
-    });
-
-    controlsRow.appendChild(powerLabel);
-    controlsRow.appendChild(powerSlider);
-    controlsRow.appendChild(shootBtn);
-    wrap.appendChild(controlsRow);
-
-    const ctx = canvas.getContext('2d');
-    let displayBalls: PoolBall[] = state.balls.map((b) => ({ ...b }));
-
-    const drawTable = (ballsToDraw: PoolBall[], showCueStick: boolean) => {
-      if (!ctx) return;
-      ctx.clearRect(0, 0, POOL_W, POOL_H);
-
-      // Wood rails
-      ctx.fillStyle = '#3b2314';
-      ctx.fillRect(0, 0, POOL_W, POOL_H);
-
-      // Felt surface
-      ctx.fillStyle = '#0f6b48';
-      ctx.fillRect(POOL_RAIL, POOL_RAIL, POOL_W - POOL_RAIL * 2, POOL_H - POOL_RAIL * 2);
-
-      // Head string line
-      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(185, POOL_RAIL);
-      ctx.lineTo(185, POOL_H - POOL_RAIL);
-      ctx.stroke();
-
-      // 6 Pockets
-      for (const [px, py] of POOL_POCKETS) {
-        ctx.beginPath();
-        ctx.arc(px, py, POOL_POCKET_R, 0, Math.PI * 2);
-        ctx.fillStyle = '#090a0d';
-        ctx.fill();
-      }
-
-      // Aim line & cue stick when it's player's turn
-      const cue = ballsToDraw.find((b) => b.id === 0 && !b.pocketed);
-      if (cue && showCueStick && isMyTurn) {
-        const rayLen = 190;
-        const tx = cue.x + Math.cos(poolAimAngle) * rayLen;
-        const ty = cue.y + Math.sin(poolAimAngle) * rayLen;
-        ctx.save();
-        ctx.setLineDash([5, 5]);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.72)';
-        ctx.lineWidth = 1.8;
-        ctx.beginPath();
-        ctx.moveTo(cue.x, cue.y);
-        ctx.lineTo(tx, ty);
-        ctx.stroke();
-        ctx.restore();
-
-        // Cue stick behind cue ball
-        const pullOffset = 18 + poolPower * 2.2;
-        const stickStartX = cue.x - Math.cos(poolAimAngle) * pullOffset;
-        const stickStartY = cue.y - Math.sin(poolAimAngle) * pullOffset;
-        const stickEndX = cue.x - Math.cos(poolAimAngle) * (pullOffset + 125);
-        const stickEndY = cue.y - Math.sin(poolAimAngle) * (pullOffset + 125);
-        ctx.strokeStyle = '#f5d0a9';
-        ctx.lineWidth = 5;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(stickStartX, stickStartY);
-        ctx.lineTo(stickEndX, stickEndY);
-        ctx.stroke();
-      }
-
-      // Balls
-      for (const b of ballsToDraw) {
-        if (b.pocketed) continue;
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, POOL_BALL_R, 0, Math.PI * 2);
-        ctx.fillStyle = b.id >= 9 ? '#ffffff' : POOL_BALL_COLORS[b.id] ?? '#ffffff';
-        ctx.fill();
-        ctx.lineWidth = 1.2;
-        ctx.strokeStyle = 'rgba(0,0,0,0.45)';
-        ctx.stroke();
-
-        if (b.id >= 9) {
-          // Stripe band
-          ctx.save();
-          ctx.beginPath();
-          ctx.arc(b.x, b.y, POOL_BALL_R, 0, Math.PI * 2);
-          ctx.clip();
-          ctx.fillStyle = POOL_BALL_COLORS[b.id] ?? '#dc2626';
-          ctx.fillRect(b.x - POOL_BALL_R, b.y - 5.5, POOL_BALL_R * 2, 11);
-          ctx.restore();
-        }
-
-        if (b.id > 0) {
-          ctx.beginPath();
-          ctx.arc(b.x, b.y, 4.8, 0, Math.PI * 2);
-          ctx.fillStyle = '#ffffff';
-          ctx.fill();
-          ctx.fillStyle = '#111318';
-          ctx.font = 'bold 6.5px system-ui, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(String(b.id), b.x, b.y + 0.5);
-        }
-      }
     };
 
-    const updateAimFromPointer = (e: PointerEvent) => {
-      if (!isMyTurn) return;
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = POOL_W / rect.width;
-      const scaleY = POOL_H / rect.height;
-      const px = (e.clientX - rect.left) * scaleX;
-      const py = (e.clientY - rect.top) * scaleY;
-      const cue = displayBalls.find((b) => b.id === 0 && !b.pocketed);
-      if (!cue) return;
-      poolAimAngle = Math.atan2(py - cue.y, px - cue.x);
+    canvas.addEventListener('pointerup', finishCuePull);
+    canvas.addEventListener('pointercancel', () => {
+      isPullingCue = false;
+      pullPower = 0;
       drawTable(displayBalls, true);
-    };
-
-    canvas.addEventListener('pointerdown', (e) => {
-      updateAimFromPointer(e);
-    });
-    canvas.addEventListener('pointermove', (e) => {
-      if (e.buttons === 1 || e.pointerType === 'mouse') {
-        updateAimFromPointer(e);
-      }
     });
 
-    // Animate last shot smoothly if a new shot sequence arrived
     if (state.lastShot && state.lastShot.seq !== poolAnimatingSeq) {
       poolAnimatingSeq = state.lastShot.seq;
       const animBalls: PoolBall[] = state.lastShot.startBalls.map((b) => ({ ...b }));
@@ -2856,10 +3575,7 @@ export function createVcActivitiesController(
       const dummyPocketed: number[] = [];
       const tick = () => {
         if (!canvas.isConnected) return;
-        let stillMoving = false;
-        for (let k = 0; k < 3; k++) {
-          if (simulatePoolStep(animBalls, dummyPocketed)) stillMoving = true;
-        }
+        const stillMoving = simulatePoolFrame(animBalls, dummyPocketed);
         drawTable(animBalls, false);
         if (stillMoving) {
           requestAnimationFrame(tick);
@@ -2886,10 +3602,9 @@ export function createVcActivitiesController(
     const isMyTurn =
       !state.winnerUsername && activePawn?.username.toLowerCase() === selfKey;
 
-    // Player Wall Counts & Goal Direction Bar
     const infoStrip = document.createElement('div');
     infoStrip.className = 'vc-quoridor-players';
-    const goalLabels = ['↑ Top Edge', '↓ Bottom Edge', '→ Right Edge', '← Left Edge'];
+    const goalLabels = ['↑ Goal: Row 8 (Top)', '↓ Goal: Row 1 (Bottom)', '→ Goal: Col I (Right)', '← Goal: Col A (Left)'];
     state.pawns.forEach((p, idx) => {
       const chip = document.createElement('div');
       chip.className =
@@ -2897,12 +3612,11 @@ export function createVcActivitiesController(
           ? 'vc-quoridor-chip vc-quoridor-chip--turn'
           : 'vc-quoridor-chip';
       chip.style.borderColor = p.color;
-      chip.textContent = `${p.displayName} (${goalLabels[idx] ?? ''}) · 🧱 ${p.wallsLeft}`;
+      chip.textContent = `${p.displayName} (${goalLabels[idx] ?? ''}) · 🧱 ${p.wallsLeft} Walls`;
       infoStrip.appendChild(chip);
     });
     wrap.appendChild(infoStrip);
 
-    // Tool Toggle: Move Pawn vs Horizontal Wall vs Vertical Wall
     const toolRow = document.createElement('div');
     toolRow.className = 'vc-quoridor-tools';
     const tools: Array<{ id: 'move' | 'hwall' | 'vwall'; label: string }> = [
@@ -2931,8 +3645,8 @@ export function createVcActivitiesController(
     boardEl.className = 'vc-quoridor-board';
 
     const legalMoves = isMyTurn ? getLegalQuoridorPawnMoves(state, state.turnIndex) : [];
+    const files = 'abcdefghi';
 
-    // 9x9 cells
     for (let r = 0; r < 9; r++) {
       for (let c = 0; c < 9; c++) {
         const cell = document.createElement('button');
@@ -2944,10 +3658,28 @@ export function createVcActivitiesController(
           legalMoves.some(([mr, mc]) => mr === r && mc === c);
         if (isLegalMove) cell.classList.add('vc-quoridor-cell--legal');
 
+        if (c === 0) {
+          const rCoord = document.createElement('span');
+          rCoord.className = 'vc-board-coord vc-board-coord--rank';
+          rCoord.textContent = String(9 - r);
+          cell.appendChild(rCoord);
+        }
+        if (r === 8) {
+          const fCoord = document.createElement('span');
+          fCoord.className = 'vc-board-coord vc-board-coord--file';
+          fCoord.textContent = files[c] ?? '';
+          cell.appendChild(fCoord);
+        }
+
         const pawnHere = state.pawns.find((p) => p.r === r && p.c === c);
         if (pawnHere) {
           const pawnEl = document.createElement('span');
           pawnEl.className = 'vc-quoridor-pawn';
+          if (pawnHere.prevR !== undefined && pawnHere.prevC !== undefined) {
+            pawnEl.classList.add('vc-piece-sliding');
+            pawnEl.style.setProperty('--slide-from-x', `${(pawnHere.prevC - c) * 100}%`);
+            pawnEl.style.setProperty('--slide-from-y', `${(pawnHere.prevR - r) * 100}%`);
+          }
           pawnEl.style.background = pawnHere.color;
           pawnEl.title = pawnHere.displayName;
           cell.appendChild(pawnEl);
@@ -2957,7 +3689,9 @@ export function createVcActivitiesController(
           if (!isMyTurn) return;
           if (quoridorTool === 'move' && isLegalMove) {
             const nextPawns = state.pawns.map((p, idx) =>
-              idx === state.turnIndex ? { ...p, r, c } : { ...p },
+              idx === state.turnIndex
+                ? { ...p, prevR: p.r, prevC: p.c, r, c }
+                : { ...p, prevR: undefined, prevC: undefined },
             );
             const moved = nextPawns[state.turnIndex];
             const reachedGoal =
@@ -2968,9 +3702,10 @@ export function createVcActivitiesController(
               ...state,
               pawns: nextPawns,
               turnIndex: nextTurn,
+              moveCount: (state.moveCount || 0) + 1,
               winnerUsername: reachedGoal ? moved.username : null,
               winReason: reachedGoal
-                ? `${moved.displayName} reached the opposite side and won Quoridor!`
+                ? `${moved.displayName} reached the opposite goal edge and won Quoridor!`
                 : undefined,
               statusText: reachedGoal
                 ? `${moved.displayName} wins!`
@@ -2994,7 +3729,9 @@ export function createVcActivitiesController(
               return;
             }
             const nextPawns = state.pawns.map((p, idx) =>
-              idx === state.turnIndex ? { ...p, wallsLeft: p.wallsLeft - 1 } : { ...p },
+              idx === state.turnIndex
+                ? { ...p, prevR: undefined, prevC: undefined, wallsLeft: p.wallsLeft - 1 }
+                : { ...p, prevR: undefined, prevC: undefined },
             );
             const nextTurn = (state.turnIndex + 1) % nextPawns.length;
             const nextState: QuoridorGameState = {
@@ -3003,6 +3740,7 @@ export function createVcActivitiesController(
               turnIndex: nextTurn,
               hWalls: orient === 'h' ? [...state.hWalls, `${r},${c}`] : state.hWalls,
               vWalls: orient === 'v' ? [...state.vWalls, `${r},${c}`] : state.vWalls,
+              moveCount: (state.moveCount || 0) + 1,
               statusText: `${nextPawns[nextTurn].displayName}'s turn`,
             };
             quoridorTool = 'move';
@@ -3019,7 +3757,6 @@ export function createVcActivitiesController(
       }
     }
 
-    // Render placed Horizontal & Vertical walls overlay
     for (const hw of state.hWalls) {
       const [r, c] = hw.split(',').map(Number);
       const wallEl = document.createElement('div');
@@ -3056,7 +3793,6 @@ export function createVcActivitiesController(
     const container = document.createElement('div');
     container.className = 'vc-activity-lobby-stage';
 
-    // Scoreboard & Seat Strip
     const seatBar = document.createElement('div');
     seatBar.className = 'vc-activity-seat-bar';
 
@@ -3131,11 +3867,20 @@ export function createVcActivitiesController(
       seatActions.appendChild(startBtn);
     }
 
+    // Mutual Rematch Vote button (both players must vote!)
     if (isSeated && lobby.status === 'finished' && lobby.players.length >= 2) {
+      const votes = (lobby.rematchVotes ?? []).map((u) => u.toLowerCase());
+      const hasSelfVoted = votes.includes(selfKey);
       const rematchBtn = document.createElement('button');
       rematchBtn.type = 'button';
-      rematchBtn.className = 'btn-primary vc-activity-sm-btn';
-      rematchBtn.textContent = 'Rematch ↻';
+      rematchBtn.className = hasSelfVoted
+        ? 'btn-secondary vc-activity-sm-btn'
+        : 'btn-primary vc-activity-sm-btn';
+      rematchBtn.textContent = hasSelfVoted
+        ? `✓ Voted Rematch (${votes.length}/${lobby.players.length})`
+        : votes.length > 0
+          ? `Accept Rematch (${votes.length}/${lobby.players.length}) ✓`
+          : `Vote Rematch (0/${lobby.players.length}) ↻`;
       rematchBtn.addEventListener('click', () => {
         selectedBoardSquare = null;
         options.sendActivityFrame({
@@ -3161,7 +3906,7 @@ export function createVcActivitiesController(
       const leaveLobbyBtn = document.createElement('button');
       leaveLobbyBtn.type = 'button';
       leaveLobbyBtn.className = 'btn-danger vc-activity-sm-btn';
-      leaveLobbyBtn.textContent = 'Leave Lobby';
+      leaveLobbyBtn.textContent = 'Leave & Cancel Game';
       leaveLobbyBtn.addEventListener('click', () => {
         watchedLobbyIds.delete(lobby.id);
         expandedTarget = null;
@@ -3188,20 +3933,22 @@ export function createVcActivitiesController(
       return container;
     }
 
-    // Victory Banner if finished
     if (lobby.status === 'finished') {
       const winBanner = document.createElement('div');
       winBanner.className = 'vc-activity-win-banner';
+      const votesCount = (lobby.rematchVotes ?? []).length;
       const reason =
         lobby.gameState?.winReason ||
         (lobby.gameState?.winnerUsername
           ? `🏆 ${lobby.gameState.winnerUsername} won the match!`
           : 'Match finished — Draw!');
-      winBanner.textContent = reason;
+      winBanner.textContent =
+        votesCount > 0
+          ? `${reason} · Rematch Vote: ${votesCount}/${lobby.players.length}`
+          : reason;
       container.appendChild(winBanner);
     }
 
-    // Render specific game board
     if (lobby.gameId === 'chess') {
       container.appendChild(renderChessBoard(lobby, selfKey));
     } else if (lobby.gameId === 'checkers') {
@@ -3219,7 +3966,6 @@ export function createVcActivitiesController(
     return container;
   };
 
-  /** Renders the expanded big-screen Activity stage above `.vc-top-stage`, just like `.vc-expanded-stage` for streams! */
   const renderExpandedActivityStage = (threadKey: string): HTMLElement | null => {
     if (!expandedTarget || expandedTarget.threadKey !== threadKey) {
       return null;
@@ -3309,12 +4055,10 @@ export function createVcActivitiesController(
       const isNew = !lobbiesById.has(lobby.id);
       lobbiesById.set(lobby.id, lobby);
       const selfKey = getSelfKey();
-      // If self just created this lobby, automatically watch & expand it for self ONLY (never force others!)
       if (isNew && lobby.hostUsername.toLowerCase() === selfKey) {
         watchedLobbyIds.add(lobby.id);
         expandedTarget = { kind: 'lobby', threadKey: lobby.threadKey, lobbyId: lobby.id };
       }
-      // Auto-start 2-player waiting lobby as soon as 2nd player joins if gameState isn't initialized yet
       if (
         lobby.status === 'waiting' &&
         lobby.players.length === lobby.maxPlayers &&
@@ -3333,6 +4077,7 @@ export function createVcActivitiesController(
     handleLobbyRemoved: (lobbyId) => {
       lobbiesById.delete(lobbyId);
       watchedLobbyIds.delete(lobbyId);
+      lastAnimatedMoveKeyByLobby.delete(lobbyId);
       if (expandedTarget?.kind === 'lobby' && expandedTarget.lobbyId === lobbyId) {
         expandedTarget = null;
       }
@@ -3340,7 +4085,8 @@ export function createVcActivitiesController(
     },
     getCallLobbies,
     isLobbyWatched: (lobbyId) => watchedLobbyIds.has(lobbyId),
-    isStageExpandedForCall: (threadKey) => Boolean(expandedTarget && expandedTarget.threadKey === threadKey),
+    isStageExpandedForCall: (threadKey) =>
+      Boolean(expandedTarget && expandedTarget.threadKey === threadKey),
     getExpandedStageKey: () =>
       expandedTarget
         ? expandedTarget.kind === 'lobby'
